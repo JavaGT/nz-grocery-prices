@@ -1,0 +1,68 @@
+name: Archive grocery prices
+
+on:
+  # GitHub schedules are UTC. 15:00 UTC is 04:00 NZDT and 16:00 UTC is
+  # 04:00 NZST; the gate below chooses the currently correct one.
+  schedule:
+    - cron: "0 15 * * *"
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: grocery-price-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check New Zealand schedule
+        id: schedule
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$(TZ=Pacific/Auckland date +%H)" = "04" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        if: steps.schedule.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        if: steps.schedule.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Archive current specials
+        if: steps.schedule.outputs.run == 'true'
+        env:
+          PAKNSAVE_STORE: ${{ vars.PAKNSAVE_STORE || 'Royal Oak' }}
+          NEWWORLD_STORE: ${{ vars.NEWWORLD_STORE || 'Green Bay' }}
+          FRESHCHOICE_ORIGIN: ${{ vars.FRESHCHOICE_ORIGIN || 'https://queenstown.store.freshchoice.co.nz' }}
+          FRESHCHOICE_STORE_NAME: ${{ vars.FRESHCHOICE_STORE_NAME || 'FreshChoice Queenstown' }}
+          WOOLWORTHS_COOKIE: ${{ secrets.WOOLWORTHS_COOKIE }}
+        run: |
+          npm run paknsave -- archive "$PAKNSAVE_STORE"
+          npm run woolworths -- archive
+          npm run newworld -- archive "$NEWWORLD_STORE"
+          npm run freshchoice -- archive
+          npm run warehouse -- archive
+
+      - name: Commit changed observations
+        if: steps.schedule.outputs.run == 'true'
+        run: |
+          git add -f data/prices.jsonl
+          if git diff --cached --quiet; then
+            echo "No price observations changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(data): archive grocery prices"
+          git push

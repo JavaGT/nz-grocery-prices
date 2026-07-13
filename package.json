@@ -1,0 +1,69 @@
+{
+  "name": "nz-grocery-prices",
+  "version": "0.1.0",
+  "description": "Local-first New Zealand grocery price history and sale intelligence",
+  "type": "module",
+  "main": "./src/index.js",
+  "bin": {
+    "grocery-prices": "./scripts/grocery-prices.js",
+    "paknsave": "./scripts/paknsave.js",
+    "newworld": "./scripts/newworld.js",
+    "woolworths": "./scripts/woolworths.js",
+    "freshchoice": "./scripts/freshchoice.js",
+    "warehouse": "./scripts/warehouse.js"
+  },
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./foodstuffs": {
+      "types": "./src/adapters/foodstuffs.d.ts",
+      "import": "./src/adapters/foodstuffs.js"
+    },
+    "./woolworths": {
+      "types": "./src/adapters/woolworths.d.ts",
+      "import": "./src/adapters/woolworths.js"
+    },
+    "./freshchoice": {
+      "types": "./src/adapters/freshchoice.d.ts",
+      "import": "./src/adapters/freshchoice.js"
+    },
+    "./warehouse": {
+      "types": "./src/adapters/warehouse.d.ts",
+      "import": "./src/adapters/warehouse.js"
+    }
+  },
+  "files": [
+    "src",
+    "scripts/*.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check src/*.js && node --check src/adapters/*.js && node --check scripts/*.js",
+    "prices": "node scripts/grocery-prices.js",
+    "compact": "node scripts/compact-archive.js",
+    "paknsave": "node scripts/paknsave.js",
+    "newworld": "node scripts/newworld.js",
+    "woolworths": "node scripts/woolworths.js",
+    "freshchoice": "node scripts/freshchoice.js",
+    "warehouse": "node scripts/warehouse.js",
+    "pack:check": "npm pack --dry-run --cache .cache/npm"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "new-zealand",
+    "grocery",
+    "price-tracker",
+    "paknsave",
+    "new-world",
+    "woolworths",
+    "freshchoice",
+    "the-warehouse"
+  ],
+  "license": "MIT"
+}

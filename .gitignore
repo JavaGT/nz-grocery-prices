@@ -3,4 +3,7 @@ node_modules/
 .codebase-memory/
 *.tgz
 data/*.jsonl
+data/*.db
+data/*.sqlite
 research/*.har
+.worktrees/

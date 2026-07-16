@@ -1,13 +1,97 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { createServer, createConnection } from "node:net";
 
-const BASE = "http://localhost:7070";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DASHBOARD = join(__dirname, "..", "dashboard", "server.js");
 
-describe("Dashboard server API", () => {
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function waitForPort(port, timeoutMs = 8000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    function attempt() {
+      const sock = createConnection({ port, host: "127.0.0.1" }, () => {
+        sock.destroy();
+        resolve();
+      });
+      sock.on("error", () => {
+        if (Date.now() - start > timeoutMs) {
+          reject(new Error(`dashboard did not start on ${port} within ${timeoutMs}ms`));
+        } else {
+          setTimeout(attempt, 100);
+        }
+      });
+    }
+    attempt();
+  });
+}
+
+const records = [
+  { version: 2, type: "product", productId: "paknsave:milk-1l",
+    hash: "a".repeat(64), observedAt: "2026-07-01T10:00:00.000Z",
+    data: { id: "paknsave:milk-1l", name: "Anchor Blue Milk 1L", brand: "Anchor",
+      categories: ["Dairy"], size: "1L", image_url: null, source_id: null, gtin: "94171006" } },
+  { version: 2, type: "store", storeId: "paknsave:royaloak",
+    hash: "b".repeat(64), observedAt: "2026-07-01T10:00:00.000Z",
+    data: { id: "paknsave:royaloak", name: "PAK'nSAVE Royal Oak", retailer: "paknsave",
+      address: "Royal Oak, Auckland", region: "Auckland" } },
+  { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
+    productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
+    hash: "c".repeat(64), observedAt: "2026-07-15T12:00:00.000Z",
+    data: { price: { regularCents: 350, promoCents: 280, memberCents: null },
+      source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" },
+      promotion: { type: "SPECIAL", savePercent: 20, startsAt: "2026-07-14T00:00:00.000Z" } } },
+  { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
+    productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
+    hash: "d".repeat(64), observedAt: "2026-07-01T12:00:00.000Z",
+    data: { price: { regularCents: 350, promoCents: null, memberCents: null },
+      source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" } } },
+  { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
+    productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
+    hash: "e".repeat(64), observedAt: "2026-06-15T12:00:00.000Z",
+    data: { price: { regularCents: 360, promoCents: null, memberCents: null },
+      source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" } } },
+];
+
+let port, dir, child, BASE;
+
+before(async () => {
+  port = await freePort();
+  BASE = `http://127.0.0.1:${port}`;
+  dir = await mkdtemp(join(tmpdir(), "dashboard-test-"));
+  const jsonl = join(dir, "prices.jsonl");
+  await writeFile(jsonl, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  child = spawn(process.execPath, [DASHBOARD], {
+    env: { ...process.env, DASHBOARD_PORT: String(port), PRICE_FILE: jsonl },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", () => {});
+  child.stderr.on("data", () => {});
+  await waitForPort(port);
+});
+
+after(async () => {
+  if (child) child.kill("SIGTERM");
+  if (dir) await rm(dir, { recursive: true, force: true });
+});
+
+describe("Dashboard server API (self-contained)", () => {
   it("GET / returns HTML dashboard page", async () => {
     const res = await fetch(`${BASE}/`);
     assert.equal(res.status, 200);
@@ -39,7 +123,7 @@ describe("Dashboard server API", () => {
   });
 
   it("GET /api/feed returns feed with ongoingSales and sales", async () => {
-    const res = await fetch(`${BASE}/api/feed?minDropPercent=5`);
+    const res = await fetch(`${BASE}/api/feed?minDropPercent=5&at=2026-07-16T00:00:00.000Z`);
     assert.equal(res.status, 200);
     const feed = await res.json();
     assert("generatedAt" in feed);
@@ -56,9 +140,10 @@ describe("Dashboard server API", () => {
   });
 
   it("GET /api/feed respects limit parameter", async () => {
-    const full = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=5`)).json();
+    const at = "2026-07-16T00:00:00.000Z";
+    const full = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=5&at=${at}`)).json();
     assert(full.ongoingSales.length <= 5);
-    const huge = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=9999`)).json();
+    const huge = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=9999&at=${at}`)).json();
     assert(huge.ongoingSales.length <= 9999);
   });
 
@@ -85,7 +170,6 @@ describe("Dashboard server API", () => {
   });
 
   it("GET /api/products/:productId/history returns product history", async () => {
-    // First get a product ID
     const listRes = await fetch(`${BASE}/api/products?limit=1`);
     const list = await listRes.json();
     const pid = list.products[0].id;

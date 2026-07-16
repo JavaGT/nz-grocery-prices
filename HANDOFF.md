@@ -27,49 +27,56 @@ git diff --check
 
 All passed. Do **not** run `npm run archive:local` as a smoke test unless intentionally collecting live retailer data: it performs network collection and may change `data/prices.jsonl`.
 
-## Current blocker: macOS account resolution
+## macOS account resolution (resolved 2026-07-17)
 
-The active SSH shell is shown as `server`, UID 501, but macOS Directory Services cannot resolve that account. Observed results:
+The Directory Services record for `server` / UID 501 was repaired (by the Mac
+administrator). All previously-failing commands now succeed:
 
 ```text
-id                    -> uid=501 gid=20(staff) ...
-id -P                 -> id: getpwuid: Undefined error: 0
-dscacheutil / dscl    -> Directory Services error
-crontab -l            -> UID is not in the passwd file
-launchctl managername -> Could not get manager name
-sudo                  -> you do not exist in the passwd database
+id -P                 -> server:********:501:20::0:0:Server:/Users/server:/bin/zsh
+dscacheutil -q user   -> resolves (uid 501, gid 20, shell /bin/zsh)
+sudo -l               -> (ALL) NOPASSWD: ALL
+launchctl managername -> Background
 ```
 
-This is not a plist problem. It prevents scheduling with `sudo`, `launchd`, or `crontab` for this account. The earlier `~/Library/LaunchAgents` configuration was removed because it was also the wrong service type for an SSH/headless collector.
+`/Users/server/Code/prices/collector.env` exists, is empty, and has mode 600. It
+may later contain `KEY=value` settings such as `WOOLWORTHS_COOKIE`,
+`FRESHCHOICE_ORIGIN`, and `FRESHCHOICE_STORE_NAME`. Never commit it or put secret
+values in the plist.
 
-`/Users/server/Code/prices/collector.env` exists, is empty, and has mode 600. It may later contain `KEY=value` settings such as `WOOLWORTHS_COOKIE`, `FRESHCHOICE_ORIGIN`, and `FRESHCHOICE_STORE_NAME`. Never commit it or put secret values in the plist.
+## Archive daemon (installed and running)
 
-## Required external action
+The `nz.grocery-prices.archive` LaunchDaemon is installed and active in the
+system domain:
 
-Ask the Mac administrator to repair the Directory Services record for `server` / UID 501, or provide a valid local administrator/collector account. The record is ready when these work for the intended collector account:
-
-```sh
-id -P
-dscacheutil -q user -a name <collector-user>
-sudo -l
-launchctl managername
+```text
+/Library/LaunchDaemons/nz.grocery-prices.archive.plist
+  scheduled: 4:00am daily (StartCalendarInterval Hour=4 Minute=0)
+  user:      server
+  state:     not running (fires on schedule, not a persistent service)
 ```
 
-## Install after the account is fixed
+Verification of the last run (2026-07-17 04:01, `/tmp/nz-grocery-prices-archive.log`):
 
-Replace `<collector-user>` with a valid local account. The checkout at `/Users/server/Code/prices` must be readable to that user.
+```text
+{"fetched":2400,"added":133,...}
+{"store":"warehouse:national-online","fetched":116,"added":9,...}
+archive collection completed: /Users/server/Code/prices/data/prices.jsonl
+```
+
+`stderr` log was empty (0 bytes) — clean run. To check future runs:
 
 ```sh
-sudo cp /Users/server/Code/prices/ops/nz.grocery-prices.archive.daemon.plist.template /Library/LaunchDaemons/nz.grocery-prices.archive.plist
-sudo sed -i '' -e 's|/REPLACE/WITH/ABSOLUTE/PATH|/Users/server/Code/prices|g' -e 's|REPLACE_WITH_COLLECTOR_USERNAME|<collector-user>|g' /Library/LaunchDaemons/nz.grocery-prices.archive.plist
-sudo chown root:wheel /Library/LaunchDaemons/nz.grocery-prices.archive.plist
-sudo chmod 644 /Library/LaunchDaemons/nz.grocery-prices.archive.plist
-sudo plutil -lint /Library/LaunchDaemons/nz.grocery-prices.archive.plist
-sudo launchctl bootstrap system /Library/LaunchDaemons/nz.grocery-prices.archive.plist
+tail -40 /tmp/nz-grocery-prices-archive.log
+tail -40 /tmp/nz-grocery-prices-archive.error.log
+sudo launchctl print system/nz.grocery-prices.archive
+```
+
+To manually trigger a one-off collection (writes live data to the archive):
+
+```sh
 sudo launchctl kickstart -k system/nz.grocery-prices.archive
 ```
-
-The final `kickstart` intentionally performs a live collection. Review `/tmp/nz-grocery-prices-archive.log` and `/tmp/nz-grocery-prices-archive.error.log` afterwards.
 
 ## Broader product/app state
 

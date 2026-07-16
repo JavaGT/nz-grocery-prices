@@ -232,12 +232,18 @@ Collection runs on the local collector machine, not in GitHub Actions. The
 hosted application is read-only with respect to collected price data: deploy or
 mount the resulting `data/prices.jsonl` archive after a successful local run.
 
-The initial collection scopes are PAK'nSAVE Royal Oak, New World Green Bay,
-FreshChoice Queenstown, The Warehouse Online, and Woolworths' anonymous
-Glenfield fulfilment store:
+Daily collection scopes:
+
+- **PAK'nSAVE**: every store (57 at last count). Override with
+  `PAKNSAVE_STORE=Royal Oak` for a single store.
+- **New World**: Green Bay (override with `NEWWORLD_STORE`)
+- **FreshChoice**: Queenstown (override with `FRESHCHOICE_ORIGIN`)
+- **The Warehouse**: national online
+- **Woolworths**: anonymous Glenfield fulfilment store
 
 ```sh
-npm run paknsave -- archive "Royal Oak"
+npm run paknsave -- archive --all-stores
+# or one store: npm run paknsave -- archive "Royal Oak"
 npm run woolworths -- archive
 npm run newworld -- archive "Green Bay"
 npm run freshchoice -- archive

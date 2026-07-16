@@ -37,13 +37,13 @@
   },
   "files": [
     "src",
-    "scripts/*.js",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/*.js && node --check src/adapters/*.js && node --check src/server/*.js && node --check src/server/handlers/*.js && node --check src/sqlite/*.js && node --check src/app/*.js && node --check src/matching/*.js && node --check scripts/*.js",
+    "check": "node --check src/*.js && node --check src/adapters/*.js && node --check src/server/*.js && node --check src/server/handlers/*.js && node --check src/sqlite/*.js && node --check src/app/*.js && node --check src/matching/*.js && node --check scripts/*.js && node --check scripts/lib/*.js",
     "prices": "node scripts/grocery-prices.js",
     "build-db": "node scripts/build-db.js",
     "matching": "node scripts/matching-cli.js",

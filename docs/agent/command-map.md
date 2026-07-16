@@ -41,8 +41,9 @@ suffices for collectors and the legacy dashboard.
 
 | Task | Command | Footgun |
 |---|---|---|
-| One retailer | `npm run paknsave -- archive` | hits live retailer API |
-| All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. Never use as a smoke test. |
+| One PAK'nSAVE store | `npm run paknsave -- archive "Royal Oak"` | hits live retailer API |
+| Every PAK'nSAVE store | `npm run paknsave -- archive --all-stores` | ~57 stores, ~1s delay each; live network |
+| All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE defaults to all stores. Never use as a smoke test. |
 
 ## Known slow / side-effecting checks
 

@@ -88,7 +88,19 @@ run_archive() {
   health_record "$retailer" 0 "$records" "$started_at" "$ended_at" ""
 }
 
-run_archive paknsave "$npm_command" run paknsave -- archive "${PAKNSAVE_STORE:-Royal Oak}" --file "$stage_file"
+# PAK'nSAVE: default is every store. Set PAKNSAVE_STORE=Royal Oak (or any
+# store name/UUID) to collect a single store instead. PAKNSAVE_DELAY_MS
+# controls the pause between stores in all-stores mode (default 1000).
+if [ -n "${PAKNSAVE_STORE:-}" ]; then
+  run_archive paknsave "$npm_command" run paknsave -- archive "$PAKNSAVE_STORE" --file "$stage_file"
+else
+  delay_args=
+  if [ -n "${PAKNSAVE_DELAY_MS:-}" ]; then
+    delay_args="--delay-ms $PAKNSAVE_DELAY_MS"
+  fi
+  # shellcheck disable=SC2086
+  run_archive paknsave "$npm_command" run paknsave -- archive --all-stores $delay_args --file "$stage_file"
+fi
 run_archive woolworths "$npm_command" run woolworths -- archive --file "$stage_file"
 run_archive newworld "$npm_command" run newworld -- archive "${NEWWORLD_STORE:-Green Bay}" --file "$stage_file"
 run_archive freshchoice "$npm_command" run freshchoice -- archive --file "$stage_file"

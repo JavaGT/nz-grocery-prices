@@ -10,7 +10,9 @@ Run retailer price collection on this Mac and serve the completed archive to a h
 - It copies the existing archive to a same-directory temporary file, directs every collector to it, validates its JSONL, then atomically replaces the live archive only after every command succeeds.
 - It preserves the original archive and cleans up its temporary file on failure.
 - It rejects overlapping runs with a mkdir-based lock.
-- It supports `ARCHIVE_FILE`, `NPM_COMMAND`, `PAKNSAVE_STORE`, `NEWWORLD_STORE`, and optional `COLLECTOR_ENV_FILE` environment variables.
+- It supports `ARCHIVE_FILE`, `NPM_COMMAND`, `PAKNSAVE_STORE` (optional —
+  unset = every PAK'nSAVE store via `--all-stores`), `PAKNSAVE_DELAY_MS`,
+  `NEWWORLD_STORE`, and optional `COLLECTOR_ENV_FILE` environment variables.
 - `package.json` provides `npm run archive:local`.
 - `test/local-archive-runner.test.js` proves successful publication and failure preservation using a fake npm executable.
 - `ops/nz.grocery-prices.archive.daemon.plist.template` is the correct headless macOS `LaunchDaemon` template. It runs as a specified local user at 4:00am and does not contain secrets.
@@ -43,6 +45,17 @@ launchctl managername -> Background
 may later contain `KEY=value` settings such as `WOOLWORTHS_COOKIE`,
 `FRESHCHOICE_ORIGIN`, and `FRESHCHOICE_STORE_NAME`. Never commit it or put secret
 values in the plist.
+
+## PAK'nSAVE multi-store collection (2026-07-17)
+
+Daily archive now collects **every** PAK'nSAVE store (~57) via
+`npm run paknsave -- archive --all-stores`, with a 1s delay between stores.
+One failed store does not abort the rest; the CLI exits 0 if any store
+succeeded. To pin a single store again: set `PAKNSAVE_STORE=Royal Oak` in
+`collector.env` or the daemon environment. Tune delay with `PAKNSAVE_DELAY_MS`.
+
+Expect the PAK'nSAVE leg of the 4am run to take several minutes (was ~2s for
+Royal Oak alone).
 
 ## Archive daemon (installed and running)
 

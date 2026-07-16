@@ -3,6 +3,11 @@
 import { PriceArchive } from "../src/archive.js";
 import { NewWorldClient, PaknsaveClient } from "../src/adapters/foodstuffs.js";
 import { JsonlObservationRepository } from "../src/repository.js";
+import {
+  archiveEachStore,
+  exitCodeForStoreResults,
+  summarizeStoreResults,
+} from "./lib/store-archive-loop.js";
 
 const isNewWorld = process.env.FOODSTUFFS_BANNER === "newworld";
 const retailer = isNewWorld ? "newworld" : "paknsave";
@@ -16,10 +21,16 @@ function option(name, fallback) {
   return index === -1 ? fallback : args[index + 1];
 }
 
+function hasFlag(name) {
+  return args.includes(name);
+}
+
 function positional() {
   const values = [];
   for (let index = 0; index < args.length; index += 1) {
     if (args[index].startsWith("--")) {
+      // Flags without values (e.g. --all-stores) consume only themselves.
+      if (args[index + 1] === undefined || args[index + 1].startsWith("--")) continue;
       index += 1;
       continue;
     }
@@ -51,10 +62,13 @@ function printHelp() {
   ${executable} feed <store> [--pages all]
   ${executable} search <store> <product query> [--pages 1] [--json]
   ${executable} archive <store> [--pages all] [--file data/prices.jsonl]
+  ${executable} archive --all-stores [--pages all] [--file data/prices.jsonl] [--delay-ms 1000]
   ${executable} track <store> <product query> [--file data/prices.jsonl]
   ${executable} sales [--file data/prices.jsonl] [--drop 20] [--samples 2]
 
-Store can be a UUID or an unambiguous name such as "Royal Oak".`);
+Store can be a UUID or an unambiguous name such as "Royal Oak".
+Use archive --all-stores to collect every ${retailerName} store (one specials
+snapshot per store, ~1s delay between stores by default).`);
 }
 
 function summarize(observation) {
@@ -88,6 +102,51 @@ if (command === "help" || command === "--help" || command === "-h") {
     baselineDays: Number(option("--baseline-days", "90")),
   });
   console.log(JSON.stringify(feed, null, 2));
+} else if (command === "archive" && hasFlag("--all-stores")) {
+  const configuredPages = option("--pages", "all");
+  const maxPages =
+    configuredPages === "all" ? Number.POSITIVE_INFINITY : Number(configuredPages);
+  if (!Number.isFinite(maxPages) && configuredPages !== "all") {
+    throw new TypeError("--pages must be a number or all");
+  }
+  const delayMs = Number(option("--delay-ms", "1000"));
+  if (!Number.isFinite(delayMs) || delayMs < 0) {
+    throw new TypeError("--delay-ms must be a non-negative number");
+  }
+  const file = option("--file", "data/prices.jsonl");
+  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const stores = await client.listStores();
+  if (stores.length === 0) {
+    throw new Error(`No ${retailerName} stores returned by the store list API`);
+  }
+
+  const results = await archiveEachStore({
+    stores,
+    delayMs,
+    collectForStore: (store) =>
+      client.collectDeals({ storeId: store.id, store, maxPages }),
+    record: (observations) =>
+      archive.record(observations, { snapshotScope: "specials" }),
+  });
+  const summary = summarizeStoreResults(results);
+  console.log(
+    JSON.stringify(
+      {
+        retailer,
+        mode: "all-stores",
+        file,
+        stores: summary.stores,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        fetched: summary.fetched,
+        added: summary.added,
+        results: summary.results,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exitCode = exitCodeForStoreResults(summary);
 } else if (
   command === "deals" ||
   command === "feed" ||

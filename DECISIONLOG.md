@@ -1,0 +1,50 @@
+2026-07-16 Decision: Use SQLite as the initial website operational database while retaining the append-only JSONL archive. Reason: the initial deployment is local/single-writer and SQLite gives zero-setup durable relational queries; revisit before multiple independent writers or horizontal API serving.
+2026-07-16 Decision: Launch the website MVP with public search/comparison/history and signed-in store preferences/watch lists only. Reason: trusted, location-aware price intelligence is the load-bearing user outcome; social and notification features add substantial auth, moderation, and privacy scope without validating it.
+2026-07-16 Decision: Preserve retailer product listings and price contexts as distinct facts, with auditable product matching. Reason: store, pickup, store-site, and national-online prices are not universally interchangeable and uncertain matches must not mislead shoppers.
+2026-07-16 Decision: Host the first grocery website as `workbench/projects/grocery-prices` and use Workbench's built-in username/password and session-cookie auth. Reason: Workbench already provides one fail-closed authentication, authorization, and SQLite persistence path; no email system is available for passwordless sign-in.
+2026-07-16 Decision: Read the existing JSONL archive directly in the first Workbench vertical slice, while storing only private user data in Workbench SQLite. Reason: it validates public search and history without duplicating or prematurely migrating the proven collection record; the SQLite archive projection remains a later scale/read-performance step.
+2026-07-16 Decision: Run price collection on the local collector machine rather than GitHub Actions. Reason: the hosted app only needs a published archive, while local collection avoids repository write permissions, Actions scheduling constraints, and cloud handling of location-specific collection state.
+
+2026-07-16 Decision: Move the price-minder application from `workbench/projects/grocery-prices` into the `prices/` repo as the single canonical home. Reason: the Workbench prototype was a rapid integration test, but the app fundamentally depends on prices repo internals (archive, repository, analytics). Co-location eliminates cross-repo coupling, duplicate config, and confusing split ownership. The Workbench project is archived as a historical reference.
+
+2026-07-16 Decision: SQLite is a rebuildable READ-ONLY projection, NOT a dual-write system. Reason: JSONL is the authoritative lossless archive. Collectors write only to JSONL. SQLite is rebuilt deterministically from JSONL on fingerprint mismatch. Dual-write introduces write-ordering risks and violates the single-authority principle. The worktree's dual-write `SqliteObservationRepository` is refactored to read-only before merging.
+
+2026-07-16 Decision: Migration from JSONL-direct to SQLite-backed app happens in one cutover, not piecemeal. Reason: the old `dashboard/` serves from JSONL, the new `src/app/` serves from SQLite. Running both creates confusion about which is canonical. The old dashboard tests become regression tests for the new server. Once the new server passes all contract tests, the old dashboard is removed.
+
+2026-07-16 Decision: Use Node.js `crypto.scryptSync` for password hashing, not bcrypt or argon2. Reason: zero additional dependencies, adequate for local-first multi-user, consistent with zero-dep principle. Revisit if app gains public registration with real security requirements.
+
+2026-07-16 Decision: Session expiry defaults to 24 hours, stored in SQLite, not in-memory. Reason: survives server restart, consistent with local-first principle, enables session revocation. Configurable via env var.
+
+2026-07-16 Decision: Fuzzy-matching candidates are NEVER exposed as confirmed matches in the public API. Reason: false matches erode trust. Fuzzy results are stored with `review_state: 'pending'` and `match_method: 'fuzzy_candidate'`. They may appear in the UI only with "possible match — verify" label. Only `auto_gtin`, `auto_source_id`, and `human_reviewed` matches appear as confirmed.
+
+2026-07-16 Decision: Image fallback uses branded placeholder with retailer color, not external placeholder service. Reason: zero external dependencies, privacy-preserving (no requests to third-party image services), consistent with local-first principle.
+
+2026-07-16 Decision: The scheduling blocker (macOS account resolution) is environmental and MUST NOT be coded around. Reason: running collection in-process or on a timer would bypass the intended separation between collection and serving, risk overlapping writes, and violate the architectural boundary. The manual `npm run archive:local` path remains the only collection method until the OS account is fixed.
+
+2026-07-16 Decision (plan-checker reversal): Use built-in `node:sqlite` instead of `better-sqlite3`. Reason: Node 26.3.1 provides `DatabaseSync`/`StatementSync`/`backup` as a built-in module. Zero dependencies, zero native compilation, zero packaging risk. The worktree's `better-sqlite3` code must be rewritten for the `node:sqlite` API but the dependency savings outweigh rewrite cost.
+
+2026-07-16 Decision (plan-checker reversal): Use `crypto.scrypt` (async) instead of `crypto.scryptSync`. Reason: synchronous password KDF on HTTP request paths blocks the event loop. `crypto.scrypt` achieves the same zero-dep goal without blocking. The async variant MUST be used in request handlers.
+
+2026-07-16 Decision (plan-checker clarification): Separate `data/prices.db` (projection) and `data/app.db` (application state) instead of a single SQLite DB. Reason: fully rebuildable projection must never risk destroying auth/session/preference/watch/search data. Two-DB separation makes the safety boundary syntactic and testable. Rebuild scripts MUST NOT open `data/app.db`.
+
+2026-07-16 Decision (plan-checker reversal): Do NOT delete `dashboard/`, `.worktrees/`, or Workbench prototype. Replace destructive cleanup tasks with non-destructive deprecation pointers. Reason: preservation is mandatory — existing data and references must not be destroyed. Deprecation notices and pointer READMEs replace deletion.
+
+2026-07-16 Decision (plan-checker clarification): MUST-ID traceability matrix replaces blanket claims. Every MUST in the spec now has an adjacent MUST NOT or SHOULD NOT constraint, tracked in the traceability matrix in §14. This ensures all 31 MUSTs are independently testable and verifiable.
+
+2026-07-16 Decision: Rate limit register (5/min/IP) and login (20/min/IP) at the handler level, not middleware. Reason: per-route granularity lets registration be stricter than login (legitimate users may mistype passwords). Rate limiting uses the existing `AppDatabase.checkAndIncrementRateLimit` which was implemented in the app DB module but never called. The `Retry-After` header is set on 429 responses.
+
+2026-07-16 Decision: CSRF origin check compares against the server's bound address, not the Host header. Reason: the Host header is attacker-supplied and must not drive security decisions. The server's actual listening address and port from `server.address()` are the only trustworthy reference.
+
+2026-07-16 Decision: Secure cookie flag requires explicit `TRUST_PROXY_HEADERS=1` env var. Reason: `x-forwarded-proto` is trivially spoofable. Without an opt-in, the server must not trust proxy headers. `req.socket.encrypted` (direct TLS) still sets Secure without the env var.
+
+2026-07-16 Decision: Product matches API filters by `review_state IN ('accepted', 'confirmed')`. Reason: fuzzy candidates (`review_state = 'pending'`) must never be served as confirmed matches per MUST-22a. The query filter is the most reliable enforcement point — it prevents API-level exposure regardless of what the matching pipeline produces.
+
+2026-07-16 Decision: Public API reads match truth from AppDatabase (`product_match_pairs`), not projection DB (`product_matches`). Reason: the matching orchestrator writes to AppDatabase as the durable authority. Reading from the projection DB's separate `product_matches` table left the pipeline disconnected — matches written by the orchestrator were invisible to the API. Routing through AppDatabase closes this gap without a sync mechanism.
+
+2026-07-16 Decision: Product detail endpoint returns fuzzy candidates as separate `candidates` field, not in `matches`. Reason: matches are confirmed facts (auto_gtin, auto_source_id, human_reviewed with review_state=confirmed). Fuzzy candidates are suggestions (review_state=candidate) that must not be presented as confirmed cross-retailer comparisons per MUST-22a/MUST-23a.
+
+2026-07-16 Decision: `scripts/matching-cli.js` is a bounded CLI script, not a daemon or scheduler. Reason: the scheduling blocker (macOS account) remains unresolved. The matching CLI reads from projection DB products and writes to AppDatabase on demand. It accepts --fuzzy for candidate generation. Default paths align with standard data/ layout. No in-process collection or timer workaround introduced.
+
+2026-07-16 Decision: Deal signals are computed at runtime from offer data, not from a pre-built `deal_signals` table. Reason: the `deal_signals` table was never populated by any rebuild or ingestion pipeline. The analytics functions `calculateSales()` and `calculateOngoingSales()` in `src/analytics.js` compute deals on every request with configurable baseline/minSamples/freshness parameters. This satisfies MUST-01 (empty arrays when no deals, not errors) and provides fresher results without a rebuild step. The `deal_signals` table is retained in the projection schema for compatibility but is not written to.
+
+2026-07-16 Decision: The `product_matches` table in the projection DB is retained but not used as source of truth. Reason: cross-retailer match data lives in `product_match_pairs` in `data/app.db`. The projection DB's `product_matches` table (from `001_initial.sql`) is an obsolete schema artifact. Keeping it is harmless and preserves migration immutability; no code reads or writes it for match data.

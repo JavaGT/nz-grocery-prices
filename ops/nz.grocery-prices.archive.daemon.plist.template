@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>nz.grocery-prices.archive</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/REPLACE/WITH/ABSOLUTE/PATH/scripts/archive-daily-local.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/REPLACE/WITH/ABSOLUTE/PATH</string>
+  <key>UserName</key>
+  <string>REPLACE_WITH_COLLECTOR_USERNAME</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>COLLECTOR_ENV_FILE</key>
+    <string>/REPLACE/WITH/ABSOLUTE/PATH/collector.env</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/nz-grocery-prices-archive.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/nz-grocery-prices-archive.error.log</string>
+</dict>
+</plist>

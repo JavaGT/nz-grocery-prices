@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NZ Grocery Prices</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;line-height:1.5}
+#app{display:flex;min-height:100vh}
+.sidebar{width:220px;background:#1a1a2e;color:#fff;padding:24px 0;position:fixed;top:0;left:0;bottom:0;overflow-y:auto;z-index:10}
+.sidebar h1{font-size:18px;padding:0 20px 24px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:16px}
+.nav-link{display:block;padding:10px 20px;color:rgba(255,255,255,0.7);text-decoration:none;font-size:14px;transition:all .15s}
+.nav-link:hover{color:#fff;background:rgba(255,255,255,.05)}
+.nav-link.active{color:#4ade80;background:rgba(74,222,128,.1);border-right:3px solid #4ade80}
+#main-content{margin-left:220px;flex:1;padding:32px;max-width:1200px}
+.card{background:#fff;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}
+th{font-weight:600;color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+tr.clickable{cursor:pointer;transition:background .1s}
+tr.clickable:hover{background:#f9f9f9}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;border:none;font-size:14px;cursor:pointer;transition:all .15s;text-decoration:none}
+.btn-primary{background:#2d8a4e;color:#fff}
+.btn-primary:hover{background:#236b3d}
+.btn-outline{background:transparent;border:1px solid #ddd;color:#666}
+.btn-outline:hover{border-color:#999;color:#333}
+.btn-danger{background:transparent;border:1px solid #fecaca;color:#dc2626}
+.btn-danger:hover{background:#fef2f2}
+.btn-sm{padding:4px 10px;font-size:12px}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase}
+.badge-paknsave{background:#fef9c3;color:#854d0e}
+.badge-newworld{background:#dcfce7;color:#166534}
+.badge-woolworths{background:#dbeafe;color:#1e40af}
+.badge-freshchoice{background:#f3e8ff;color:#6b21a8}
+.badge-warehouse{background:#fce7f3;color:#9d174d}
+.badge-default{background:#f0f0f0;color:#555}
+input,select{padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none;transition:border-color .15s;background:#fff}
+input:focus,select:focus{border-color:#2d8a4e}
+.filter-bar{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.price-current{font-size:24px;font-weight:700;color:#1a1a2e}
+.price-regular{font-size:14px;color:#999;text-decoration:line-through}
+.price-save{font-size:14px;font-weight:600;color:#dc2626}
+.price-drops{font-size:14px;font-weight:600;color:#2d8a4e}
+.product-card{cursor:pointer;transition:transform .1s,box-shadow .1s}
+.product-card:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.loading{text-align:center;padding:48px;color:#999;font-size:14px}
+.error{text-align:center;padding:48px;color:#dc2626}
+.chart-container{margin:20px 0}
+.chart-legend{display:flex;gap:16px;margin-bottom:12px}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#666}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{text-align:center;padding:24px}
+.stat-value{font-size:32px;font-weight:700;color:#2d8a4e}
+.stat-label{font-size:13px;color:#666;margin-top:4px}
+.page-header{margin-bottom:24px}
+.page-header h2{font-size:24px;font-weight:700}
+.page-header p{color:#666;font-size:14px;margin-top:4px}
+.atl-badge{background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:0;border-bottom:2px solid #eee;margin-bottom:20px}
+.tab{padding:10px 20px;border:none;background:none;font-size:14px;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;font-family:inherit}
+.tab.active{color:#2d8a4e;border-bottom-color:#2d8a4e}
+.pagination{display:flex;justify-content:center;gap:8px;margin-top:20px}
+.pagination button{padding:6px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:13px}
+.pagination button:disabled{opacity:.5;cursor:default}
+.pagination button.active{border-color:#2d8a4e;color:#2d8a4e;font-weight:600}
+.empty-state{text-align:center;padding:48px;color:#999}
+.empty-state p{font-size:14px;margin-top:8px}
+.back-link{display:inline-flex;align-items:center;gap:4px;color:#666;text-decoration:none;font-size:14px;margin-bottom:16px;cursor:pointer;border:none;background:none;font-family:inherit;padding:0}
+.back-link:hover{color:#333}
+.info-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14px}
+.info-grid dt{color:#888;font-weight:500}
+.page-wrap{min-height:100vh}
+@media(max-width:700px){.sidebar{width:60px;padding:16px 0}.sidebar h1,.nav-link span{display:none}.nav-link{padding:10px;text-align:center;font-size:20px}#main-content{margin-left:60px;padding:16px}.stats-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div id="app">
+<nav class="sidebar">
+<h1>NZ Grocery</h1>
+<a href="#deals" class="nav-link">Deals</a>
+<a href="#browse" class="nav-link">Browse</a>
+<a href="#favorites" class="nav-link">Favorites</a>
+<a href="#stats" class="nav-link">Stats</a>
+</nav>
+<main id="main-content"></main>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

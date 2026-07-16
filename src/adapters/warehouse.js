@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fetchWithRetry } from "./fetch-with-retry.js";
 
 const DEFAULT_ORIGIN = "https://www.thewarehouse.co.nz";
 const DEFAULT_CATEGORY = "foodhouseholdpets-fooddrink";
@@ -133,6 +134,9 @@ export class WarehouseClient {
   #fetch;
   #headers;
   #transport;
+  #signal;
+  #timeout;
+  #retry;
 
   constructor(options = {}) {
     this.origin = (options.origin ?? DEFAULT_ORIGIN).replace(/\/$/, "");
@@ -142,6 +146,9 @@ export class WarehouseClient {
     this.scopeName = options.scopeName ?? "The Warehouse Online";
     this.region = options.region;
     this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#signal = options.signal ?? undefined;
+    this.#timeout = options.timeout ?? 15000;
+    this.#retry = options.retry;
     this.#transport = options.transport ?? (options.fetch ? "fetch" : "curl");
     this.curlPath = options.curlPath ?? "curl";
     this.#headers = { ...options.headers };
@@ -171,7 +178,13 @@ export class WarehouseClient {
 
     if (this.#transport === "fetch") {
       const response = assertOk(
-        await this.#fetch(url, { headers }),
+        await fetchWithRetry(url, {
+          headers,
+          fetch: this.#fetch,
+          signal: this.#signal,
+          timeout: this.#timeout,
+          retry: this.#retry,
+        }),
         url.pathname,
       );
       return response.text();

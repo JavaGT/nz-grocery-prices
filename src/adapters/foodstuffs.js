@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fetchWithRetry } from "./fetch-with-retry.js";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; nz-grocery-prices/0.1; +https://github.com/)";
@@ -113,6 +114,9 @@ export class FoodstuffsClient {
   #expiresAt = 0;
   #fetch;
   #fingerprint;
+  #signal;
+  #timeout;
+  #retry;
 
   constructor(options = {}) {
     const banner = options.banner ?? "paknsave";
@@ -129,6 +133,9 @@ export class FoodstuffsClient {
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#fingerprint = options.fingerprint ?? randomUUID().replaceAll("-", "");
+    this.#signal = options.signal ?? undefined;
+    this.#timeout = options.timeout ?? 15000;
+    this.#retry = options.retry;
   }
 
   async #authenticate() {
@@ -137,7 +144,7 @@ export class FoodstuffsClient {
     }
 
     const response = assertOk(
-      await this.#fetch(`${this.webOrigin}/api/user/get-current-user`, {
+      await fetchWithRetry(`${this.webOrigin}/api/user/get-current-user`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -147,6 +154,10 @@ export class FoodstuffsClient {
           fingerprintUser: this.#fingerprint,
           fingerprintGuest: this.userAgent,
         }),
+        fetch: this.#fetch,
+        signal: this.#signal,
+        timeout: this.#timeout,
+        retry: this.#retry,
       }),
       "anonymous authentication",
     );
@@ -163,7 +174,7 @@ export class FoodstuffsClient {
   async #request(path, init = {}) {
     const accessToken = await this.#authenticate();
     const response = assertOk(
-      await this.#fetch(`${this.apiOrigin}${path}`, {
+      await fetchWithRetry(`${this.apiOrigin}${path}`, {
         ...init,
         headers: {
           accept: "application/json",
@@ -173,6 +184,10 @@ export class FoodstuffsClient {
           "user-agent": this.userAgent,
           ...init.headers,
         },
+        fetch: this.#fetch,
+        signal: this.#signal,
+        timeout: this.#timeout,
+        retry: this.#retry,
       }),
       path,
     );

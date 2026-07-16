@@ -1,6 +1,6 @@
+import { fetchWithRetry } from "./fetch-with-retry.js";
+
 const DEFAULT_ORIGIN = "https://www.woolworths.co.nz";
-// Woolworths' edge currently resets HTTP/2 streams for some long bot-style
-// user-agent values. A short, honest identifier is accepted reliably.
 const DEFAULT_USER_AGENT = "nz-grocery-prices/0.1";
 
 function assertOk(response, operation) {
@@ -102,18 +102,24 @@ export function toWoolworthsObservation(product, fulfilment, options = {}) {
 export class WoolworthsClient {
   #fetch;
   #headers;
+  #signal;
+  #timeout;
+  #retry;
 
   constructor(options = {}) {
     this.origin = options.origin ?? DEFAULT_ORIGIN;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#signal = options.signal ?? undefined;
+    this.#timeout = options.timeout ?? 15000;
+    this.#retry = options.retry;
     this.#headers = { ...options.headers };
     if (options.cookie) this.#headers.cookie = options.cookie;
   }
 
   async #request(path) {
     const response = assertOk(
-      await this.#fetch(`${this.origin}${path}`, {
+      await fetchWithRetry(`${this.origin}${path}`, {
         headers: {
           accept: "application/json",
           "content-type": "application/json",
@@ -122,6 +128,10 @@ export class WoolworthsClient {
           "x-requested-with": "OnlineShopping.WebApp",
           ...this.#headers,
         },
+        fetch: this.#fetch,
+        signal: this.#signal,
+        timeout: this.#timeout,
+        retry: this.#retry,
       }),
       path,
     );

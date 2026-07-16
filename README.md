@@ -1,6 +1,8 @@
 # nz-grocery-prices
 
-A dependency-free Node.js library and CLI for collecting New Zealand grocery prices, keeping a local history, and producing sale data that an agent can use for meal and shopping planning.
+A local-first New Zealand grocery price intelligence application. It collects supermarket prices over the long term, preserves a durable historical archive, and helps each user find meaningful savings on the products, categories, and searches they care about. The resulting data can also power meal planning, shopping lists, and other agent-assisted decisions.
+
+The application is intended to support user accounts. Each user will be able to follow individual products, product categories, and saved search terms; mark favourite stores; and receive a focused view of relevant price changes and promotions. Store preferences should make it possible to prioritise nearby or preferred locations while still comparing the same item across retailers.
 
 It currently has live collectors for the retailers in this priority order:
 
@@ -9,18 +11,136 @@ It currently has live collectors for the retailers in this priority order:
 | PAK'nSAVE | Selected physical store | Stores, search, specials, archive |
 | Woolworths NZ | Selected fulfilment store | Specials, archive |
 | New World | Selected physical store | Stores, search, specials, archive |
+| SuperValue | Selected store | Planned: stores, search, specials, archive |
 | FreshChoice | Selected store website | Search, specials, archive |
 | The Warehouse | National online catalogue | Search, food/drink specials, archive |
 
-Prices are stored as integer NZ cents. Every observation records the retailer, price scope, product source ID, collection time, regular/promotion/member prices, and promotion metadata when available.
+Coverage is intended to include the major supermarket brands relevant to NZ grocery shopping: PAK'nSAVE, New World, Woolworths, SuperValue, FreshChoice, and The Warehouse's grocery catalogue. Each retailer may expose a different price scope—physical store, fulfilment store, store website, or national online catalogue—and the application must retain that scope rather than implying that all prices are directly interchangeable.
+
+Prices are stored as integer NZ cents. Every observation records the retailer, price scope, product source ID, collection time, regular/promotion/member prices, and promotion metadata when available. The archive is designed to grow for years, allowing current prices to be judged against meaningful long-term baselines rather than only the most recent snapshot.
+
+## Product direction
+
+The central user outcome is:
+
+> Find the groceries I care about at a price I can trust, in the stores I prefer, with enough history to know whether it is genuinely good value.
+
+The application should let a user:
+
+- create an account and keep their preferences across devices;
+- follow specific products, categories, and search terms;
+- choose favourite stores and prioritise those stores in results;
+- compare offers for the same product across supported retailers and locations;
+- inspect long-term price history, promotions, and all-time lows;
+- receive relevant deal and price-drop information without monitoring every product manually.
+
+This is a price-history and decision-support product, not an online checkout system. It is also not intended to claim complete nationwide coverage unless the underlying archive actually contains the relevant stores and observations.
 
 ## Quick start
 
-Node 20 or newer is required. No runtime packages need to be installed.
+### App server (price·minder)
+
+Node 20+ required. No runtime packages need to be installed. SQLite is
+built into Node 26.3.1+ (`node:sqlite`). For older Node 20+, rebuild
+still works; the app server requires Node 26+ for `node:sqlite`.
 
 ```sh
-# Discover stores and inspect live results.
-npm run paknsave -- stores Auckland
+# Build the projection database from the JSONL archive
+npm run build-db
+
+# Start the app server (default port 3010)
+npm start
+
+# Or specify custom paths and port
+PORT=3010 JSONL_PATH=data/prices.jsonl node src/app/server.js
+```
+
+The server serves:
+- **API** at `/api/` — deals, products, stores, search, health (public)
+- **Auth API** at `/api/auth/` — register, login, logout
+- **Private API** at `/api/` — watch list, preferred stores, saved searches, new products
+- **SPA** at `/` — price·minder frontend (static HTML+JS, see `public/`)
+
+Environment variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `3010` | HTTP listener port |
+| `HOST` | `127.0.0.1` | Listen address |
+| `JSONL_PATH` | `data/prices.jsonl` | Authoritative archive path |
+| `PRICES_DB` | `data/prices.db` | Projection DB path (rebuildable) |
+| `APP_DB` | `data/app.db` | Application DB path (auth, prefs, user data) |
+
+### Two-DB lifecycle
+
+- **`data/prices.db` (projection DB):** A rebuildable read-only materialization
+  of the JSONL archive. Created by `npm run build-db` or on first app startup.
+  Destroy and rebuild at any time — it contains NO user data.
+- **`data/app.db` (application DB):** Persistent user data (accounts, sessions,
+  watch lists, saved searches, preferred stores, product match pairs). NEVER
+  rebuilt from JSONL. Preserved across rebuilds. Backup regularly.
+
+The app server opens both databases at startup:
+1. Open `data/app.db` (create if absent), apply pending app migrations
+2. Open `data/prices.db` (create if absent), verify fingerprint, rebuild if stale
+3. Start HTTP listener
+
+### Matching (cross-retailer product linking)
+
+Product matching uses a two-DB pipeline:
+
+1. **Matching engine** (`src/matching/`): Reads products from the projection DB,
+   finds matches by shared GTIN, shared Foodstuffs source IDs, or fuzzy name
+   similarity, and writes results to `data/app.db` → `product_match_pairs`.
+2. **Public API** reads match truth from `data/app.db`:
+   - `review_state: 'confirmed'` → returned as `matches` (confirmed facts:
+     auto_gtin, auto_source_id, human_reviewed)
+   - `review_state: 'candidate'` → returned as `candidates` (fuzzy suggestions,
+     never auto-confirmed)
+   - `review_state: 'rejected'` → excluded
+
+Run matching after building the projection DB:
+
+```sh
+# Auto-match by GTIN and shared source_id only
+npm run matching
+
+# Include fuzzy candidate generation (slower)
+npm run matching -- --fuzzy
+```
+
+Matching CLI options: `--prices-db <path>` (default `data/prices.db`),
+`--app-db <path>` (default `data/app.db`), `--fuzzy` (include fuzzy candidates).
+
+### Deals (runtime computation)
+
+Deal signals are computed **at runtime** from offer data, not from a pre-built
+table. The `GET /api/deals` endpoint calls `calculateSales()` and
+`calculateOngoingSales()` from `src/analytics.js` with a 90-day baseline,
+3-sample minimum, and 7-day freshness window. No rebuild step is required
+for deals to reflect the latest data.
+
+**Truth semantics (MUST-11 constraint):**
+- An advertised deal requires `promo_cents < regular_cents` — a concrete
+  retailer-reported reduction. Equal-price "NEW_PRICE" promotions are explicitly
+  excluded (they are shelf price changes, not deals).
+- A history-backed deal requires at least 3 prior observations within the
+  90-day baseline window and a current price below the baseline average.
+  Products with insufficient history are correctly excluded.
+- Member-only prices are not shown as deals under the default `public` price
+  policy. The analytics support `member` policy for future use.
+- Offers where `promo_cents > regular_cents` are never classified as deals.
+
+The legacy `deal_signals` and `product_matches` tables in the projection DB
+schema (`001_initial.sql`) are retained for compatibility but are **not**
+populated by any current pipeline. Source of truth for cross-retailer matching
+is `product_match_pairs` in `data/app.db`.
+
+### Collector commands (existing, unchanged)
+
+Discover stores and inspect live results:
+
+```sh
 npm run paknsave -- deals "Royal Oak" --pages 1
 npm run newworld -- search "Green Bay" butter --json
 npm run woolworths -- deals --pages 1
@@ -106,22 +226,64 @@ Product IDs are printed by retailer `search` and `deals` commands. A history sig
 
 For a simple local schedule, archive once each morning and generate a feed afterward. Keep request rates modest: these are public but undocumented retailer endpoints and page structures.
 
-## Daily GitHub archive
+## Daily archive on the collector machine
 
-[`.github/workflows/daily-archive.yml`](.github/workflows/daily-archive.yml) runs the five archive commands at 4:00am `Pacific/Auckland`, commits `data/prices.jsonl`, and can also be started from the Actions tab with **Run workflow**. It has two UTC cron entries and a local-time gate so it follows New Zealand daylight saving time.
+Collection runs on the local collector machine, not in GitHub Actions. The
+hosted application is read-only with respect to collected price data: deploy or
+mount the resulting `data/prices.jsonl` archive after a successful local run.
 
-The committed defaults match the initial live scopes: PAK'nSAVE Royal Oak, New World Green Bay, FreshChoice Queenstown, The Warehouse Online, and Woolworths' anonymous Glenfield fulfilment store. Configure repository **Actions variables** to select different public scopes:
+The initial collection scopes are PAK'nSAVE Royal Oak, New World Green Bay,
+FreshChoice Queenstown, The Warehouse Online, and Woolworths' anonymous
+Glenfield fulfilment store:
 
-- `PAKNSAVE_STORE`
-- `NEWWORLD_STORE`
-- `FRESHCHOICE_ORIGIN`
-- `FRESHCHOICE_STORE_NAME`
+```sh
+npm run paknsave -- archive "Royal Oak"
+npm run woolworths -- archive
+npm run newworld -- archive "Green Bay"
+npm run freshchoice -- archive
+npm run warehouse -- archive
+```
 
-Set the optional `WOOLWORTHS_COOKIE` Actions secret after choosing a different Woolworths fulfilment location in a browser; otherwise the public site default is used. The workflow needs the repository's Actions setting to permit workflow write permissions, because it commits the archive.
+Set `WOOLWORTHS_COOKIE` in the collector machine's environment only if a
+different Woolworths fulfilment location is selected in a browser; otherwise
+the public-site default is used. Add further location-specific archive runs
+only where that retailer exposes a stable public store context.
 
-All selected locations append into the same normalized archive, so the same product can accumulate offers from many stores. The included workflow starts with one scope per retailer to keep its daily crawl small and respectful; it is not presented as a complete crawl of every branch nationwide. Add further location-specific archive runs only where that retailer exposes a stable public store context.
+Schedule those commands using the machine's scheduler (for example `launchd`
+on macOS), and publish the archive only after all intended commands finish.
+If a collection fails, retain the previous archive and its timestamps rather
+than replacing it with a partial result.
 
-On a public repository, standard GitHub-hosted Linux runners are free. A private repository uses the owner account's included Actions minutes; this daily crawl should be monitored from the Actions usage page. GitHub schedules run in UTC, can be delayed under load, and public-repository schedules are disabled after 60 days without repository activity.
+`npm run archive:local` implements that rule. It copies the current archive to
+a same-directory temporary file, runs every collector against that file,
+validates the JSONL, and atomically replaces the live archive only after all
+five commands complete. A lock prevents overlapping runs. Optional collector
+settings can be stored in a mode-600 environment file and passed via
+`COLLECTOR_ENV_FILE`; do not place `WOOLWORTHS_COOKIE` in a plist or logs.
+
+To schedule it at 4:00am on a headless macOS collector (including one reached
+over SSH), use a system `LaunchDaemon`, not a GUI `LaunchAgent`:
+
+1. Copy [the daemon template](ops/nz.grocery-prices.archive.daemon.plist.template)
+   to `/Library/LaunchDaemons/nz.grocery-prices.archive.plist`.
+2. Replace both `/REPLACE/WITH/ABSOLUTE/PATH` values with this repository's
+   absolute path, and replace `REPLACE_WITH_COLLECTOR_USERNAME` with the local
+   account that owns the repository. Create the referenced `collector.env` with
+   `chmod 600`; it may contain `WOOLWORTHS_COOKIE`, `FRESHCHOICE_ORIGIN`, and
+   `FRESHCHOICE_STORE_NAME` as `KEY=value` lines.
+3. Validate, secure, and load it:
+
+   ```sh
+   sudo plutil -lint /Library/LaunchDaemons/nz.grocery-prices.archive.plist
+   sudo chown root:wheel /Library/LaunchDaemons/nz.grocery-prices.archive.plist
+   sudo chmod 644 /Library/LaunchDaemons/nz.grocery-prices.archive.plist
+   sudo launchctl bootstrap system /Library/LaunchDaemons/nz.grocery-prices.archive.plist
+   ```
+
+Use `sudo launchctl kickstart -k system/nz.grocery-prices.archive` for a manual
+scheduled-job test. The daemon starts the script as the configured collector
+user, while `launchd` keeps it available without a GUI login. The standard
+output and error logs are in `/tmp` as named by the template.
 
 ## Library API
 
@@ -192,3 +354,52 @@ The project intentionally starts with live-data smoke checks rather than a synth
 npm run check
 npm run pack:check
 ```
+
+```sh
+# Full test suite (432+ tests)
+npm test
+
+# Run specific test groups
+node --test test/sqlite/          # Projection DB rebuild, schema, rollback
+node --test test/app/             # Auth, app DB
+node --test test/server/          # API contract, security, permissions
+node --test test/matching/        # Matching engine (GTIN, source_id, fuzzy)
+
+# Rebuild projection DB (safe — app DB untouched)
+npm run build-db
+
+# Run cross-retailer matching
+npm run matching
+```
+
+### Security
+
+- All SQL is parameterised via `node:sqlite` prepared statements
+- Password hashing: `crypto.scrypt` (async, N=16384, r=8, p=1, 16-byte salt)
+- Session tokens: 32-byte random, hex-encoded, SHA-256 hashed in DB, 24h expiry
+- HTTP-only, SameSite=Strict cookies
+- Rate limiting: register (5/min/IP), login (20/min/IP), `Retry-After` header
+- Request size limit: 64KB (413 on oversized bodies)
+- CSRF: origin/hostname check vs server address
+- CORS not needed (same-origin only)
+
+Set `TRUST_PROXY_HEADERS=1` when behind a reverse proxy that sets
+`X-Forwarded-Proto`. Set `ENABLE_HSTS=1` to add `Strict-Transport-Security`
+headers (requires TLS termination upstream).
+
+### Collector health
+
+Collection health is logged to stdout per run (see `src/collection-health.js`).
+Counts per retailer, total archive size, and any failures are recorded. The
+archive runner preserves the existing archive on failure.
+
+## Deprecation notice
+
+The old `dashboard/` server (`npm run dashboard`, port 7070) is **deprecated**.
+It serves the same JSONL archive directly without the SQLite projection layer
+or user accounts. Use `npm start` for the new price·minder server.
+
+- The `dashboard/` directory and files are preserved but not maintained.
+- The `npm run dashboard` command will continue to work for fallback.
+- The old `test/server.test.js` tests the dashboard server on port 7070.
+- All new development should target `src/app/server.js`.

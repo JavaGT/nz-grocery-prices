@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "./fetch-with-retry.js";
+
 const DEFAULT_ORIGIN = "https://queenstown.store.freshchoice.co.nz";
 const DEFAULT_USER_AGENT = "nz-grocery-prices/0.1";
 
@@ -134,6 +136,9 @@ export function toFreshChoiceObservation(product, store, options = {}) {
 export class FreshChoiceClient {
   #fetch;
   #headers;
+  #signal;
+  #timeout;
+  #retry;
 
   constructor(options = {}) {
     this.origin = (options.origin ?? DEFAULT_ORIGIN).replace(/\/$/, "");
@@ -143,6 +148,9 @@ export class FreshChoiceClient {
     this.storeAddress = options.storeAddress;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#signal = options.signal ?? undefined;
+    this.#timeout = options.timeout ?? 15000;
+    this.#retry = options.retry;
     this.#headers = { ...options.headers };
   }
 
@@ -162,12 +170,16 @@ export class FreshChoiceClient {
       if (value !== undefined) url.searchParams.append(name, String(value));
     }
     const response = assertOk(
-      await this.#fetch(url, {
+      await fetchWithRetry(url, {
         headers: {
           accept: "text/html,application/xhtml+xml",
           "user-agent": this.userAgent,
           ...this.#headers,
         },
+        fetch: this.#fetch,
+        signal: this.#signal,
+        timeout: this.#timeout,
+        retry: this.#retry,
       }),
       url.pathname,
     );

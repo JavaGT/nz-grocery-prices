@@ -232,22 +232,25 @@ Collection runs on the local collector machine, not in GitHub Actions. The
 hosted application is read-only with respect to collected price data: deploy or
 mount the resulting `data/prices.jsonl` archive after a successful local run.
 
-Daily collection scopes:
+Daily collection scopes (`npm run archive:local`):
 
-- **PAK'nSAVE**: every store (57 at last count). Override with
-  `PAKNSAVE_STORE=Royal Oak` for a single store.
-- **New World**: Green Bay (override with `NEWWORLD_STORE`)
-- **FreshChoice**: Queenstown (override with `FRESHCHOICE_ORIGIN`)
-- **The Warehouse**: national online
-- **Woolworths**: anonymous Glenfield fulfilment store
+- **PAK'nSAVE**: every store (~57). Override with `PAKNSAVE_STORE=Royal Oak`.
+- **New World**: every store (~148). Override with `NEWWORLD_STORE=Green Bay`.
+- **FreshChoice**: every storefront (~76). Override with
+  `FRESHCHOICE_ORIGIN=https://queenstown.store.freshchoice.co.nz`.
+- **Woolworths**: one fulfilment store (anonymous Glenfield by default). No
+  public multi-store API — cookie/session picks the store.
+- **The Warehouse**: national online only (no per-store prices).
 
 ```sh
 npm run paknsave -- archive --all-stores
-# or one store: npm run paknsave -- archive "Royal Oak"
+npm run newworld -- archive --all-stores
+npm run freshchoice -- archive --all-stores
 npm run woolworths -- archive
-npm run newworld -- archive "Green Bay"
-npm run freshchoice -- archive
 npm run warehouse -- archive
+# single store still works:
+# npm run paknsave -- archive "Royal Oak"
+# npm run freshchoice -- archive --origin https://queenstown.store.freshchoice.co.nz
 ```
 
 Set `WOOLWORTHS_COOKIE` in the collector machine's environment only if a

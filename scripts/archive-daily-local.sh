@@ -88,9 +88,13 @@ run_archive() {
   health_record "$retailer" 0 "$records" "$started_at" "$ended_at" ""
 }
 
-# PAK'nSAVE: default is every store. Set PAKNSAVE_STORE=Royal Oak (or any
-# store name/UUID) to collect a single store instead. PAKNSAVE_DELAY_MS
-# controls the pause between stores in all-stores mode (default 1000).
+# Multi-store retailers default to every store. Set *_STORE (or
+# FRESHCHOICE_ORIGIN) to pin a single store. *_DELAY_MS controls the pause
+# between stores in all-stores mode (default 1000).
+#
+# Woolworths has no public multi-store API (cookie/session picks one
+# fulfilment store). Warehouse is national-online only.
+
 if [ -n "${PAKNSAVE_STORE:-}" ]; then
   run_archive paknsave "$npm_command" run paknsave -- archive "$PAKNSAVE_STORE" --file "$stage_file"
 else
@@ -101,9 +105,37 @@ else
   # shellcheck disable=SC2086
   run_archive paknsave "$npm_command" run paknsave -- archive --all-stores $delay_args --file "$stage_file"
 fi
+
 run_archive woolworths "$npm_command" run woolworths -- archive --file "$stage_file"
-run_archive newworld "$npm_command" run newworld -- archive "${NEWWORLD_STORE:-Green Bay}" --file "$stage_file"
-run_archive freshchoice "$npm_command" run freshchoice -- archive --file "$stage_file"
+
+if [ -n "${NEWWORLD_STORE:-}" ]; then
+  run_archive newworld "$npm_command" run newworld -- archive "$NEWWORLD_STORE" --file "$stage_file"
+else
+  delay_args=
+  if [ -n "${NEWWORLD_DELAY_MS:-}" ]; then
+    delay_args="--delay-ms $NEWWORLD_DELAY_MS"
+  fi
+  # shellcheck disable=SC2086
+  run_archive newworld "$npm_command" run newworld -- archive --all-stores $delay_args --file "$stage_file"
+fi
+
+if [ -n "${FRESHCHOICE_ORIGIN:-}" ] || [ -n "${FRESHCHOICE_STORE:-}" ]; then
+  # Single-store mode: FRESHCHOICE_ORIGIN selects the storefront URL;
+  # FRESHCHOICE_STORE is accepted as an alias that sets --origin if needed.
+  if [ -n "${FRESHCHOICE_ORIGIN:-}" ]; then
+    run_archive freshchoice "$npm_command" run freshchoice -- archive --origin "$FRESHCHOICE_ORIGIN" --file "$stage_file"
+  else
+    run_archive freshchoice "$npm_command" run freshchoice -- archive --origin "https://${FRESHCHOICE_STORE}.store.freshchoice.co.nz" --file "$stage_file"
+  fi
+else
+  delay_args=
+  if [ -n "${FRESHCHOICE_DELAY_MS:-}" ]; then
+    delay_args="--delay-ms $FRESHCHOICE_DELAY_MS"
+  fi
+  # shellcheck disable=SC2086
+  run_archive freshchoice "$npm_command" run freshchoice -- archive --all-stores $delay_args --file "$stage_file"
+fi
+
 run_archive warehouse "$npm_command" run warehouse -- archive --file "$stage_file"
 
 health_finish

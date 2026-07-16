@@ -1,6 +1,7 @@
 import { fetchWithRetry } from "./fetch-with-retry.js";
 
 const DEFAULT_ORIGIN = "https://queenstown.store.freshchoice.co.nz";
+const DEFAULT_STORE_LIST_URL = "https://store.freshchoice.co.nz/";
 const DEFAULT_USER_AGENT = "nz-grocery-prices/0.1";
 
 function assertOk(response, operation) {
@@ -48,6 +49,74 @@ function titleCaseSlug(slug) {
     .filter(Boolean)
     .map((part) => `${part[0]?.toLocaleUpperCase("en-NZ") ?? ""}${part.slice(1)}`)
     .join(" ");
+}
+
+/**
+ * Parse the national FreshChoice store-chooser page into store records.
+ * Each card exposes a name, address lines, and a per-store origin like
+ * https://queenstown.store.freshchoice.co.nz.
+ */
+export function parseFreshChoiceStoreList(html) {
+  if (!html) return [];
+  const stores = [];
+  const seen = new Set();
+  // Match top-level StoreCard cards only (not nested StoreCard__* divs).
+  const cardPattern =
+    /<div class="StoreCard(?:\s[^"]*)?"[^>]*>[\s\S]*?<span class="StoreCard__Name">([^<]+)<\/span>([\s\S]*?)(?=<div class="StoreCard(?:\s[^"]*)?"|$)/g;
+
+  for (const match of html.matchAll(cardPattern)) {
+    const name = text(match[1]);
+    const body = match[2] ?? "";
+    const originMatch = body.match(
+      /href="(https:\/\/([a-z0-9-]+)\.store\.freshchoice\.co\.nz)(?:\/[^"]*)?"/i,
+    );
+    if (!originMatch) continue;
+    const origin = originMatch[1];
+    const slug = originMatch[2];
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+
+    const detailsBody = body.match(
+      /<span class="StoreCard__Details">([\s\S]*?)<\/span>/i,
+    )?.[1] ?? "";
+    const addressLines = detailsBody
+      .split(/<br\s*\/?>/i)
+      .map((line) => text(line))
+      .filter((line) => line && !/^open\b/i.test(line) && !/^closed\b/i.test(line));
+    const addressFromMaps = decodeHtml(
+      (body.match(/maps\.google\.com\?q=([^"'#]+)/i)?.[1] ?? "").replaceAll("+", " "),
+    ).trim();
+    const address = addressLines.join(", ") || addressFromMaps;
+
+    stores.push({
+      id: `freshchoice:${slug}`,
+      slug,
+      retailer: "freshchoice",
+      name: name.startsWith("FreshChoice") ? name : `FreshChoice ${name}`,
+      ...(address ? { address: decodeHtml(address) } : {}),
+      origin,
+    });
+  }
+
+  // Fallback: origin links only (if markup changes but origins remain).
+  if (stores.length === 0) {
+    for (const match of html.matchAll(
+      /https:\/\/([a-z0-9-]+)\.store\.freshchoice\.co\.nz/gi,
+    )) {
+      const slug = match[1].toLocaleLowerCase("en-NZ");
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      stores.push({
+        id: `freshchoice:${slug}`,
+        slug,
+        retailer: "freshchoice",
+        name: `FreshChoice ${titleCaseSlug(slug)}`,
+        origin: `https://${slug}.store.freshchoice.co.nz`,
+      });
+    }
+  }
+
+  return stores.sort((left, right) => left.name.localeCompare(right.name, "en-NZ"));
 }
 
 export function parseFreshChoiceProducts(html) {
@@ -146,6 +215,7 @@ export class FreshChoiceClient {
     this.storeSlug = options.storeSlug ?? hostname.split(".")[0];
     this.storeName = options.storeName ?? `FreshChoice ${titleCaseSlug(this.storeSlug)}`;
     this.storeAddress = options.storeAddress;
+    this.storeListUrl = options.storeListUrl ?? DEFAULT_STORE_LIST_URL;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#signal = options.signal ?? undefined;
@@ -162,6 +232,29 @@ export class FreshChoiceClient {
       ...(this.storeAddress ? { address: this.storeAddress } : {}),
       origin: this.origin,
     };
+  }
+
+  /**
+   * List every FreshChoice storefront from the national store-chooser page.
+   * Returns records with { id, slug, name, address?, origin }.
+   */
+  async listStores() {
+    const listUrl = this.storeListUrl ?? DEFAULT_STORE_LIST_URL;
+    const response = assertOk(
+      await fetchWithRetry(listUrl, {
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          "user-agent": this.userAgent,
+          ...this.#headers,
+        },
+        fetch: this.#fetch,
+        signal: this.#signal,
+        timeout: this.#timeout,
+        retry: this.#retry,
+      }),
+      "store list",
+    );
+    return parseFreshChoiceStoreList(await response.text());
   }
 
   async #request(path, parameters = {}) {

@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseFreshChoiceProducts, toFreshChoiceObservation } from "../../src/adapters/freshchoice.js";
+import {
+  parseFreshChoiceProducts,
+  parseFreshChoiceStoreList,
+  toFreshChoiceObservation,
+} from "../../src/adapters/freshchoice.js";
 
 const freshchoiceHtml = `<div class="talker special talker--Special" data-talker id="line_12345">
   <a href="/product/anchor-milk-2l"><figure><img src="https://example.com/milk.jpg"></figure></a>
@@ -36,6 +40,66 @@ describe("parseFreshChoiceProducts", () => {
     assert.deepEqual(result, []);
   });
 
+});
+
+const storeListHtml = `
+<div class="StoreCard StoreCard--WithStoreAttributes">
+<span class="StoreCard__Name">Queenstown</span>
+<span class="StoreCard__Details">
+<strong>Open today  7:00 am - 10:00 pm</strong>
+<br>
+64 Gorge Road
+<br>
+Queenstown 9300
+<br>
+</span>
+<div class="StoreCard__CallToActions">
+<a href="https://queenstown.store.freshchoice.co.nz/catalogues">Catalogue</a>
+<a href="http://maps.google.com?q=64+Gorge+Road%2C+Queenstown%2C+Otago%2C+9300">Directions</a>
+</div>
+</div>
+<div class="StoreCard StoreCard--WithStoreAttributes">
+<span class="StoreCard__Name">Avondale</span>
+<span class="StoreCard__Details">
+<strong>Open today  7:00 am - 9:00 pm</strong>
+<br>
+2021 Great North Road
+<br>
+Auckland 1026
+</span>
+<a href="https://avondale.store.freshchoice.co.nz/catalogues">Catalogue</a>
+</div>
+`;
+
+describe("parseFreshChoiceStoreList", () => {
+  it("parses store cards into origin/slug/name records", () => {
+    const stores = parseFreshChoiceStoreList(storeListHtml);
+    assert.equal(stores.length, 2);
+    const qt = stores.find((s) => s.slug === "queenstown");
+    assert.ok(qt);
+    assert.equal(qt.id, "freshchoice:queenstown");
+    assert.equal(qt.origin, "https://queenstown.store.freshchoice.co.nz");
+    assert.match(qt.name, /Queenstown/);
+    assert.equal(stores.find((s) => s.slug === "avondale")?.origin,
+      "https://avondale.store.freshchoice.co.nz");
+  });
+
+  it("deduplicates by slug and sorts by name", () => {
+    const stores = parseFreshChoiceStoreList(
+      storeListHtml + storeListHtml.replaceAll("Queenstown", "Queenstown"),
+    );
+    assert.equal(stores.length, 2);
+    assert.ok(stores[0].name.localeCompare(stores[1].name, "en-NZ") <= 0);
+  });
+
+  it("falls back to origin-only links when cards are missing", () => {
+    const stores = parseFreshChoiceStoreList(
+      'Visit <a href="https://huntly.store.freshchoice.co.nz/">Huntly</a>',
+    );
+    assert.equal(stores.length, 1);
+    assert.equal(stores[0].slug, "huntly");
+    assert.equal(stores[0].origin, "https://huntly.store.freshchoice.co.nz");
+  });
 });
 
 describe("toFreshChoiceObservation", () => {

@@ -46,16 +46,28 @@ may later contain `KEY=value` settings such as `WOOLWORTHS_COOKIE`,
 `FRESHCHOICE_ORIGIN`, and `FRESHCHOICE_STORE_NAME`. Never commit it or put secret
 values in the plist.
 
-## PAK'nSAVE multi-store collection (2026-07-17)
+## Multi-store collection (2026-07-17)
 
-Daily archive now collects **every** PAK'nSAVE store (~57) via
-`npm run paknsave -- archive --all-stores`, with a 1s delay between stores.
-One failed store does not abort the rest; the CLI exits 0 if any store
-succeeded. To pin a single store again: set `PAKNSAVE_STORE=Royal Oak` in
-`collector.env` or the daemon environment. Tune delay with `PAKNSAVE_DELAY_MS`.
+Daily archive collects **every store** where the retailer exposes a public
+store list:
 
-Expect the PAK'nSAVE leg of the 4am run to take several minutes (was ~2s for
-Royal Oak alone).
+| Retailer | Mode | Count (approx) | Override env |
+|---|---|---|---|
+| PAK'nSAVE | all stores | ~57 | `PAKNSAVE_STORE` |
+| New World | all stores | ~148 | `NEWWORLD_STORE` |
+| FreshChoice | all storefronts | ~76 | `FRESHCHOICE_ORIGIN` or `FRESHCHOICE_STORE` |
+| Woolworths | single fulfilment | 1 | `WOOLWORTHS_COOKIE` |
+| Warehouse | national online | 1 | — |
+
+One failed store does not abort the rest of that retailer's loop; the CLI
+exits 0 if any store succeeded. Delays: `PAKNSAVE_DELAY_MS`,
+`NEWWORLD_DELAY_MS`, `FRESHCHOICE_DELAY_MS` (default 1000 each).
+
+**Woolworths** has no public multi-store price API (session/cookie picks one
+fulfilment store). **Warehouse** prices are national, not per-store.
+
+Expect the 4am run to take much longer than before (Foodstuffs + FreshChoice
+across ~280 storefronts).
 
 ## Archive daemon (installed and running)
 

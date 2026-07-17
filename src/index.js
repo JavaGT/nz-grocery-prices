@@ -8,7 +8,9 @@ export {
   toPriceObservation,
 } from "./adapters/foodstuffs.js";
 export {
+  CookieJar,
   WoolworthsClient,
+  parseWoolworthsPickupStores,
   toWoolworthsObservation,
 } from "./adapters/woolworths.js";
 export {

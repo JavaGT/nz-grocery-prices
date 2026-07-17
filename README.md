@@ -238,18 +238,20 @@ Daily collection scopes (`npm run archive:local`):
 - **New World**: every store (~148). Override with `NEWWORLD_STORE=Green Bay`.
 - **FreshChoice**: every storefront (~76). Override with
   `FRESHCHOICE_ORIGIN=https://queenstown.store.freshchoice.co.nz`.
-- **Woolworths**: one fulfilment store (anonymous Glenfield by default). No
-  public multi-store API — cookie/session picks the store.
+- **Woolworths**: every click-and-collect store (~180). Session switches
+  pickup store, then scrapes specials for that fulfilment context.
+  Override with `WOOLWORTHS_STORE=Queenstown`.
 - **The Warehouse**: national online only (no per-store prices).
 
 ```sh
 npm run paknsave -- archive --all-stores
 npm run newworld -- archive --all-stores
 npm run freshchoice -- archive --all-stores
-npm run woolworths -- archive
+npm run woolworths -- archive --all-stores
 npm run warehouse -- archive
 # single store still works:
 # npm run paknsave -- archive "Royal Oak"
+# npm run woolworths -- archive --store Queenstown
 # npm run freshchoice -- archive --origin https://queenstown.store.freshchoice.co.nz
 ```
 

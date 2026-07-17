@@ -3,6 +3,11 @@
 import { PriceArchive } from "../src/archive.js";
 import { WoolworthsClient } from "../src/adapters/woolworths.js";
 import { JsonlObservationRepository } from "../src/repository.js";
+import {
+  archiveEachStore,
+  exitCodeForStoreResults,
+  summarizeStoreResults,
+} from "./lib/store-archive-loop.js";
 
 const client = new WoolworthsClient({ cookie: process.env.WOOLWORTHS_COOKIE });
 const [command = "help", ...args] = process.argv.slice(2);
@@ -10,6 +15,23 @@ const [command = "help", ...args] = process.argv.slice(2);
 function option(name, fallback) {
   const index = args.indexOf(name);
   return index === -1 ? fallback : args[index + 1];
+}
+
+function hasFlag(name) {
+  return args.includes(name);
+}
+
+function positional() {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index].startsWith("--")) {
+      if (args[index + 1] === undefined || args[index + 1].startsWith("--")) continue;
+      index += 1;
+      continue;
+    }
+    values.push(args[index]);
+  }
+  return values;
 }
 
 function summarize(observation) {
@@ -34,19 +56,95 @@ function summarize(observation) {
 
 function printHelp() {
   console.log(`Usage:
-  woolworths store
-  woolworths deals [--pages 1] [--size 100] [--json]
-  woolworths feed [--pages all] [--size 100]
-  woolworths archive [--pages all] [--size 100] [--file data/prices.jsonl]
+  woolworths stores [search]
+  woolworths store [--store Queenstown]
+  woolworths deals [--pages 1] [--size 100] [--json] [--store Queenstown]
+  woolworths feed [--pages all] [--size 100] [--store Queenstown]
+  woolworths archive [--pages all] [--size 100] [--file data/prices.jsonl] [--store Queenstown]
+  woolworths archive --all-stores [--pages all] [--size 100] [--file data/prices.jsonl] [--delay-ms 1000]
 
-The anonymous site defaults to its Glenfield fulfilment store. Set
-WOOLWORTHS_COOKIE to reuse another location selected in your browser.`);
+Prices are fulfilment-store specific. Anonymous default is Glenfield (courier).
+--store switches the session to that click-and-collect store first.
+--all-stores walks every Woolworths pickup store (~180).
+WOOLWORTHS_COOKIE can still seed a browser session if needed.`);
+}
+
+async function maybeSelectStore() {
+  const storeQuery = option("--store", process.env.WOOLWORTHS_STORE);
+  if (!storeQuery) return null;
+  const store = await client.resolveStore(storeQuery);
+  const selected = await client.setPickupStore(store.pickupAddressId);
+  return { requested: store, selected };
 }
 
 if (command === "help" || command === "--help" || command === "-h") {
   printHelp();
+} else if (command === "stores") {
+  const query = positional().join(" ").toLocaleLowerCase("en-NZ");
+  const stores = await client.listStores();
+  const filtered = query
+    ? stores.filter(
+        (store) =>
+          store.name.toLocaleLowerCase("en-NZ").includes(query) ||
+          store.address?.toLocaleLowerCase("en-NZ").includes(query) ||
+          store.id.includes(query),
+      )
+    : stores;
+  for (const store of filtered) {
+    console.log(`${store.id}\t${store.name}\t${store.address ?? ""}`);
+  }
 } else if (command === "store") {
+  await maybeSelectStore();
   console.log(JSON.stringify(await client.getStore(), null, 2));
+} else if (command === "archive" && hasFlag("--all-stores")) {
+  const configuredPages = option("--pages", "all");
+  const maxPages =
+    configuredPages === "all" ? Number.POSITIVE_INFINITY : Number(configuredPages);
+  const size = Number(option("--size", "100"));
+  if ((!Number.isFinite(maxPages) && configuredPages !== "all") || !Number.isFinite(size)) {
+    throw new TypeError("--pages must be a number or all, and --size must be a number");
+  }
+  const delayMs = Number(option("--delay-ms", "1000"));
+  if (!Number.isFinite(delayMs) || delayMs < 0) {
+    throw new TypeError("--delay-ms must be a non-negative number");
+  }
+  const file = option("--file", "data/prices.jsonl");
+  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const stores = await client.listStores();
+  if (stores.length === 0) {
+    throw new Error("No Woolworths pickup stores returned");
+  }
+
+  // One sticky session: switch pickup store, then collect specials for that store.
+  const results = await archiveEachStore({
+    stores,
+    delayMs,
+    collectForStore: async (store) => {
+      await client.setPickupStore(store.pickupAddressId);
+      return client.collectDeals({ maxPages, size });
+    },
+    record: (observations) =>
+      archive.record(observations, { snapshotScope: "specials" }),
+  });
+  const summary = summarizeStoreResults(results);
+  console.log(
+    JSON.stringify(
+      {
+        retailer: "woolworths",
+        mode: "all-stores",
+        file,
+        stores: summary.stores,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        fetched: summary.fetched,
+        added: summary.added,
+        results: summary.results,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exitCode = exitCodeForStoreResults(summary);
 } else if (["deals", "feed", "archive"].includes(command)) {
   const configuredPages = option("--pages", ["feed", "archive"].includes(command) ? "all" : "1");
   const maxPages = configuredPages === "all" ? Number.POSITIVE_INFINITY : Number(configuredPages);
@@ -55,17 +153,18 @@ if (command === "help" || command === "--help" || command === "-h") {
     throw new TypeError("--pages must be a number or all, and --size must be a number");
   }
 
+  const selected = await maybeSelectStore();
   const observations = await client.collectDeals({ maxPages, size });
   if (command === "archive") {
     const file = option("--file", "data/prices.jsonl");
     const archive = new PriceArchive(new JsonlObservationRepository(file));
     const added = await archive.record(observations, {
-      ...(command === "archive" ? { snapshotScope: "specials" } : {}),
+      snapshotScope: "specials",
     });
     console.log(
       JSON.stringify(
         {
-          store: observations[0]?.store,
+          store: observations[0]?.store ?? selected?.selected,
           fetched: observations.length,
           added,
           file,
@@ -80,7 +179,7 @@ if (command === "help" || command === "--help" || command === "-h") {
         {
           generatedAt: new Date().toISOString(),
           currency: "NZD",
-          store: observations[0]?.store,
+          store: observations[0]?.store ?? selected?.selected,
           sales: observations.map(summarize),
         },
         null,

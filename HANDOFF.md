@@ -56,18 +56,24 @@ store list:
 | PAK'nSAVE | all stores | ~57 | `PAKNSAVE_STORE` |
 | New World | all stores | ~148 | `NEWWORLD_STORE` |
 | FreshChoice | all storefronts | ~76 | `FRESHCHOICE_ORIGIN` or `FRESHCHOICE_STORE` |
-| Woolworths | single fulfilment | 1 | `WOOLWORTHS_COOKIE` |
+| Woolworths | all pickup stores | ~180 | `WOOLWORTHS_STORE` |
 | Warehouse | national online | 1 | — |
 
 One failed store does not abort the rest of that retailer's loop; the CLI
 exits 0 if any store succeeded. Delays: `PAKNSAVE_DELAY_MS`,
-`NEWWORLD_DELAY_MS`, `FRESHCHOICE_DELAY_MS` (default 1000 each).
+`NEWWORLD_DELAY_MS`, `FRESHCHOICE_DELAY_MS`, `WOOLWORTHS_DELAY_MS` (default
+1000 each).
 
-**Woolworths** has no public multi-store price API (session/cookie picks one
-fulfilment store). **Warehouse** prices are national, not per-store.
+**Woolworths multi-store** works by keeping a sticky session cookie jar,
+listing `/api/v1/addresses/pickup-addresses`, then for each store:
+`PUT /fulfilment/my/methods/pickup` once + `PUT .../pickup-addresses` with
+`{addressId}`, then collect specials. Prices are fulfilment-store specific
+(verified: same SKU, different regular price across Queenstown vs Ponsonby).
+`WOOLWORTHS_COOKIE` is still optional seed; not required for all-stores.
 
-Expect the 4am run to take much longer than before (Foodstuffs + FreshChoice
-across ~280 storefronts).
+**Warehouse** prices are national, not per-store.
+
+Expect the 4am run to take much longer (~460 multi-store legs + delays).
 
 ## Archive daemon (installed and running)
 

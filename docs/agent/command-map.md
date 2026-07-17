@@ -45,7 +45,8 @@ suffices for collectors and the legacy dashboard.
 | Every PAK'nSAVE store | `npm run paknsave -- archive --all-stores` | ~57 stores, ~1s delay each |
 | Every New World store | `npm run newworld -- archive --all-stores` | ~148 stores |
 | Every FreshChoice store | `npm run freshchoice -- archive --all-stores` | ~76 storefronts |
-| All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE / New World / FreshChoice default to all stores. Woolworths + Warehouse stay single-context. Never use as a smoke test. |
+| Every Woolworths store | `npm run woolworths -- archive --all-stores` | ~180 pickup stores; session-switches fulfilment |
+| All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE / New World / FreshChoice / Woolworths default to all stores. Warehouse stays national-online. Never use as a smoke test. |
 
 ## Known slow / side-effecting checks
 

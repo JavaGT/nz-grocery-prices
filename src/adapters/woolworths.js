@@ -23,6 +23,93 @@ function productName(product) {
   return `${name} ${size}`;
 }
 
+/**
+ * Minimal cookie jar for sticky Woolworths sessions.
+ * Store switching is session-bound (ASP.NET_SessionId + related cookies).
+ */
+export class CookieJar {
+  #cookies = new Map();
+
+  constructor(initialCookieHeader = "") {
+    this.mergeHeader(initialCookieHeader);
+  }
+
+  mergeHeader(header) {
+    if (!header) return;
+    for (const part of String(header).split(";")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const name = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim();
+      if (name) this.#cookies.set(name, value);
+    }
+  }
+
+  storeFromResponse(response) {
+    const setCookies =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [];
+    for (const raw of setCookies) {
+      const pair = raw.split(";", 1)[0] ?? "";
+      const eq = pair.indexOf("=");
+      if (eq <= 0) continue;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (!name) continue;
+      // Empty value clears the cookie (common delete pattern).
+      if (value === "") this.#cookies.delete(name);
+      else this.#cookies.set(name, value);
+    }
+  }
+
+  header() {
+    if (this.#cookies.size === 0) return "";
+    return [...this.#cookies.entries()]
+      .map(([name, value]) => `${name}=${value}`)
+      .join("; ");
+  }
+
+  clear() {
+    this.#cookies.clear();
+  }
+}
+
+/**
+ * Parse the national pickup-address list into unique store records.
+ * The API returns the same stores under regional area buckets and an
+ * "All Pick up locations" bucket — we dedupe by pickup address id.
+ * Remote halls/lockers (no "Woolworths" name) are dropped by default.
+ */
+export function parseWoolworthsPickupStores(payload, options = {}) {
+  const includeRemote = Boolean(options.includeRemote);
+  const byId = new Map();
+
+  for (const area of payload?.storeAreas ?? []) {
+    for (const store of area.storeAddresses ?? []) {
+      if (store?.id == null) continue;
+      const id = String(store.id);
+      if (byId.has(id)) continue;
+      const name = String(store.name ?? "").trim() || `Pickup ${id}`;
+      const isWoolworthsStore = /^woolworths\b/i.test(name);
+      if (!includeRemote && !isWoolworthsStore) continue;
+      byId.set(id, {
+        id,
+        pickupAddressId: Number(store.id),
+        retailer: "woolworths",
+        name,
+        ...(store.address ? { address: String(store.address).trim() } : {}),
+      });
+    }
+  }
+
+  return [...byId.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, "en-NZ"),
+  );
+}
+
 export function toWoolworthsObservation(product, fulfilment, options = {}) {
   const originalCents = cents(product.price?.originalPrice);
   const saleCents = cents(product.price?.salePrice);
@@ -105,6 +192,8 @@ export class WoolworthsClient {
   #signal;
   #timeout;
   #retry;
+  #jar;
+  #pickupMethodReady = false;
 
   constructor(options = {}) {
     this.origin = options.origin ?? DEFAULT_ORIGIN;
@@ -114,20 +203,33 @@ export class WoolworthsClient {
     this.#timeout = options.timeout ?? 15000;
     this.#retry = options.retry;
     this.#headers = { ...options.headers };
-    if (options.cookie) this.#headers.cookie = options.cookie;
+    // Session cookies live in the jar (seeded by WOOLWORTHS_COOKIE if set).
+    // Do not also put cookie on static headers — that would double-send.
+    this.#jar = options.cookieJar ?? new CookieJar(options.cookie ?? "");
   }
 
-  async #request(path) {
+  async #request(path, options = {}) {
+    const method = options.method ?? "GET";
+    const headers = {
+      accept: "application/json",
+      "content-type": "application/json",
+      referer: `${this.origin}/shop/specials`,
+      "user-agent": this.userAgent,
+      "x-requested-with": "OnlineShopping.WebApp",
+      ...this.#headers,
+    };
+    const jarCookie = this.#jar.header();
+    if (jarCookie) {
+      headers.cookie = headers.cookie ? `${headers.cookie}; ${jarCookie}` : jarCookie;
+    }
+
     const response = assertOk(
       await fetchWithRetry(`${this.origin}${path}`, {
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          referer: `${this.origin}/shop/specials`,
-          "user-agent": this.userAgent,
-          "x-requested-with": "OnlineShopping.WebApp",
-          ...this.#headers,
-        },
+        method,
+        headers,
+        ...(options.body !== undefined
+          ? { body: typeof options.body === "string" ? options.body : JSON.stringify(options.body) }
+          : {}),
         fetch: this.#fetch,
         signal: this.#signal,
         timeout: this.#timeout,
@@ -135,7 +237,11 @@ export class WoolworthsClient {
       }),
       path,
     );
-    const result = await response.json();
+    this.#jar.storeFromResponse(response);
+
+    const text = await response.text();
+    if (!text) return {};
+    const result = JSON.parse(text);
     if (result.isSuccessful === false) {
       throw new Error(`Woolworths ${path} returned an unsuccessful response`);
     }
@@ -150,6 +256,92 @@ export class WoolworthsClient {
       size: String(options.size ?? 100),
     });
     return this.#request(`/api/v1/products?${parameters}`);
+  }
+
+  /**
+   * List every Woolworths click-and-collect store (~180).
+   * Requires a live session (warms cookies automatically).
+   */
+  async listStores(options = {}) {
+    // Warm the session so subsequent PUTs share ASP.NET_SessionId.
+    await this.listDeals({ page: 1, size: 1 });
+    const payload = await this.#request("/api/v1/addresses/pickup-addresses");
+    return parseWoolworthsPickupStores(payload, options);
+  }
+
+  /**
+   * Resolve a store by pickup address id, name substring, or address substring.
+   */
+  async resolveStore(query, options = {}) {
+    const needle = String(query ?? "").trim().toLocaleLowerCase("en-NZ");
+    if (!needle) throw new Error("Store query is required");
+    const stores = await this.listStores(options);
+    const exactId = stores.find((store) => store.id === needle || String(store.pickupAddressId) === needle);
+    if (exactId) return exactId;
+    const matches = stores.filter(
+      (store) =>
+        store.name.toLocaleLowerCase("en-NZ").includes(needle) ||
+        store.address?.toLocaleLowerCase("en-NZ").includes(needle),
+    );
+    if (matches.length === 1) return matches[0];
+    if (matches.length === 0) {
+      throw new Error(`No Woolworths store matched "${query}"`);
+    }
+    const names = matches
+      .slice(0, 8)
+      .map((store) => store.name)
+      .join(", ");
+    throw new Error(
+      `Ambiguous Woolworths store "${query}" (${matches.length} matches): ${names}`,
+    );
+  }
+
+  /**
+   * Switch the session to pickup at the given store.
+   * Prices on subsequent product requests reflect that fulfilment store.
+   */
+  async setPickupStore(pickupAddressId) {
+    const addressId = Number(pickupAddressId);
+    if (!Number.isFinite(addressId)) {
+      throw new TypeError("pickupAddressId must be a number");
+    }
+
+    if (!this.#pickupMethodReady) {
+      // Ensure we have a session cookie before mutating fulfilment.
+      await this.listDeals({ page: 1, size: 1 });
+      await this.#request("/api/v1/fulfilment/my/methods/pickup", {
+        method: "PUT",
+        body: {},
+      });
+      this.#pickupMethodReady = true;
+    }
+
+    const result = await this.#request("/api/v1/fulfilment/my/pickup-addresses", {
+      method: "PUT",
+      body: { addressId },
+    });
+    const fulfilment = result.context?.fulfilment;
+    if (!fulfilment?.fulfilmentStoreId) {
+      throw new Error(
+        `Woolworths did not confirm fulfilment after selecting pickup address ${addressId}`,
+      );
+    }
+    if (
+      fulfilment.pickupAddressId &&
+      Number(fulfilment.pickupAddressId) !== addressId
+    ) {
+      throw new Error(
+        `Woolworths fulfilment pickupAddressId ${fulfilment.pickupAddressId} did not match requested ${addressId}`,
+      );
+    }
+    return {
+      id: String(fulfilment.fulfilmentStoreId),
+      name: `Woolworths ${fulfilment.address ?? fulfilment.fulfilmentStoreId}`,
+      address: fulfilment.address,
+      retailer: "woolworths",
+      pickupAddressId: fulfilment.pickupAddressId ?? addressId,
+      context: structuredClone(fulfilment),
+    };
   }
 
   async getStore() {

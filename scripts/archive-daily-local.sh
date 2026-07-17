@@ -92,8 +92,7 @@ run_archive() {
 # FRESHCHOICE_ORIGIN) to pin a single store. *_DELAY_MS controls the pause
 # between stores in all-stores mode (default 1000).
 #
-# Woolworths has no public multi-store API (cookie/session picks one
-# fulfilment store). Warehouse is national-online only.
+# Warehouse is national-online only (no per-store prices).
 
 if [ -n "${PAKNSAVE_STORE:-}" ]; then
   run_archive paknsave "$npm_command" run paknsave -- archive "$PAKNSAVE_STORE" --file "$stage_file"
@@ -106,7 +105,16 @@ else
   run_archive paknsave "$npm_command" run paknsave -- archive --all-stores $delay_args --file "$stage_file"
 fi
 
-run_archive woolworths "$npm_command" run woolworths -- archive --file "$stage_file"
+if [ -n "${WOOLWORTHS_STORE:-}" ]; then
+  run_archive woolworths "$npm_command" run woolworths -- archive --store "$WOOLWORTHS_STORE" --file "$stage_file"
+else
+  delay_args=
+  if [ -n "${WOOLWORTHS_DELAY_MS:-}" ]; then
+    delay_args="--delay-ms $WOOLWORTHS_DELAY_MS"
+  fi
+  # shellcheck disable=SC2086
+  run_archive woolworths "$npm_command" run woolworths -- archive --all-stores $delay_args --file "$stage_file"
+fi
 
 if [ -n "${NEWWORLD_STORE:-}" ]; then
   run_archive newworld "$npm_command" run newworld -- archive "$NEWWORLD_STORE" --file "$stage_file"

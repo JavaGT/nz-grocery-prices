@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.acnz.prices</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/server/Code/prices/site/server.mjs</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key>
+    <string>7070</string>
+    <key>PRICE_ARCHIVE_FILE</key>
+    <string>/Users/server/Code/prices/data/archive.db</string>
+    <key>NODE_NO_WARNINGS</key>
+    <string>1</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>/Users/server/Code/prices</string>
+  <key>UserName</key>
+  <string>server</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/server/Deployment/prices/out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/server/Deployment/prices/err.log</string>
+</dict>
+</plist>

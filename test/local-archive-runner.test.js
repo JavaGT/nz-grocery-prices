@@ -80,26 +80,38 @@ test("local archive runner publishes only after every collector succeeds", async
   ]);
 });
 
-test("local archive runner preserves the live archive after a collector failure", async () => {
+test("local archive runner keeps successful collectors when one fails", async () => {
+  // A single collector failing must not discard the retailers that already ran.
+  // The runner writes directly to the archive (no staging), logs the failure to
+  // the health file, and continues — completing with exit 0.
   const { archiveFile, directory, code, stderr } = await runArchive({ failCommand: "newworld" });
-  assert.equal(code, 17);
-  assert.match(stderr, /archive collection failed/);
-  assert.equal(await readFile(archiveFile, "utf8"), '{"existing":true}\n');
+  assert.equal(code, undefined);
+  assert.match(stderr, /archive collection failed: newworld/);
+
+  // Every collector except the failed newworld records its data.
+  const records = (await readFile(archiveFile, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.deepEqual(records, [
+    { existing: true },
+    { command: "paknsave" }, { command: "woolworths" },
+    { command: "freshchoice" }, { command: "warehouse" },
+  ]);
   const files = await readdir(directory);
   assert.equal(files.some((file) => file.includes(".tmp.") || file.endsWith(".collect.lock")), false);
 
   const healthFile = resolveHealthFile(archiveFile);
   const healthContent = await readFile(healthFile, "utf8");
   const healthRecords = healthContent.trim().split("\n").filter(Boolean).map(JSON.parse);
-  assert.ok(healthRecords.length >= 3, "health records for paknsave, woolworths, newworld");
-  assert.equal(healthRecords[0].retailer, "paknsave");
-  assert.equal(healthRecords[0].status, "success");
-  assert.equal(healthRecords[1].retailer, "woolworths");
-  assert.equal(healthRecords[1].status, "success");
-  assert.equal(healthRecords[2].retailer, "newworld");
+  assert.equal(healthRecords.length, 5);
+  assert.deepEqual(healthRecords.map((r) => r.retailer), [
+    "paknsave", "woolworths", "newworld", "freshchoice", "warehouse",
+  ]);
   assert.equal(healthRecords[2].status, "failure");
   assert.equal(healthRecords[2].exitCode, 17);
   assert.ok(healthRecords[2].errorMessage !== undefined);
+  for (const index of [0, 1, 3, 4]) {
+    assert.equal(healthRecords[index].status, "success");
+    assert.equal(healthRecords[index].exitCode, 0);
+  }
 });
 
 test("collection health file contains no secrets", async () => {

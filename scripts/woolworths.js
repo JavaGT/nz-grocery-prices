@@ -2,10 +2,11 @@
 
 import { PriceArchive } from "../src/archive.js";
 import { WoolworthsClient } from "../src/adapters/woolworths.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 import {
   archiveEachStore,
   exitCodeForStoreResults,
+  makeFreshnessSkip,
   summarizeStoreResults,
 } from "./lib/store-archive-loop.js";
 
@@ -60,12 +61,13 @@ function printHelp() {
   woolworths store [--store Queenstown]
   woolworths deals [--pages 1] [--size 100] [--json] [--store Queenstown]
   woolworths feed [--pages all] [--size 100] [--store Queenstown]
-  woolworths archive [--pages all] [--size 100] [--file data/prices.jsonl] [--store Queenstown]
-  woolworths archive --all-stores [--pages all] [--size 100] [--file data/prices.jsonl] [--delay-ms 1000]
+  woolworths archive [--pages all] [--size 100] [--file data/archive.db] [--store Queenstown]
+  woolworths archive --all-stores [--pages all] [--size 100] [--file data/archive.db] [--delay-ms 1000] [--max-age-hours 12]
 
 Prices are fulfilment-store specific. Anonymous default is Glenfield (courier).
 --store switches the session to that click-and-collect store first.
 --all-stores walks every Woolworths pickup store (~180).
+--max-age-hours skips stores observed more recently (0 = never skip).
 WOOLWORTHS_COOKIE can still seed a browser session if needed.`);
 }
 
@@ -108,8 +110,13 @@ if (command === "help" || command === "--help" || command === "-h") {
   if (!Number.isFinite(delayMs) || delayMs < 0) {
     throw new TypeError("--delay-ms must be a non-negative number");
   }
-  const file = option("--file", "data/prices.jsonl");
-  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const maxAgeHours = Number(option("--max-age-hours", "12"));
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours < 0) {
+    throw new TypeError("--max-age-hours must be a non-negative number");
+  }
+  const file = option("--file", "data/archive.db");
+  const repository = createObservationRepository(file);
+  const archive = new PriceArchive(repository);
   const stores = await client.listStores();
   if (stores.length === 0) {
     throw new Error("No Woolworths pickup stores returned");
@@ -119,6 +126,11 @@ if (command === "help" || command === "--help" || command === "-h") {
   const results = await archiveEachStore({
     stores,
     delayMs,
+    shouldSkip: makeFreshnessSkip({
+      repository,
+      retailer: "woolworths",
+      maxAgeMs: maxAgeHours * 3_600_000,
+    }),
     collectForStore: async (store) => {
       await client.setPickupStore(store.pickupAddressId);
       return client.collectDeals({ maxPages, size });
@@ -133,8 +145,10 @@ if (command === "help" || command === "--help" || command === "-h") {
         retailer: "woolworths",
         mode: "all-stores",
         file,
+        maxAgeHours,
         stores: summary.stores,
         succeeded: summary.succeeded,
+        skipped: summary.skipped,
         failed: summary.failed,
         fetched: summary.fetched,
         added: summary.added,
@@ -156,8 +170,8 @@ if (command === "help" || command === "--help" || command === "-h") {
   const selected = await maybeSelectStore();
   const observations = await client.collectDeals({ maxPages, size });
   if (command === "archive") {
-    const file = option("--file", "data/prices.jsonl");
-    const archive = new PriceArchive(new JsonlObservationRepository(file));
+    const file = option("--file", "data/archive.db");
+    const archive = new PriceArchive(createObservationRepository(file));
     const added = await archive.record(observations, {
       snapshotScope: "specials",
     });

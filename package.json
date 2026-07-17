@@ -48,10 +48,10 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/*.js && node --check src/adapters/*.js && node --check src/server/*.js && node --check src/server/handlers/*.js && node --check src/sqlite/*.js && node --check src/app/*.js && node --check src/matching/*.js && node --check scripts/*.js && node --check scripts/lib/*.js",
+    "check": "node --check src/*.js && node --check src/adapters/*.js && node --check src/sqlite/*.js && node --check scripts/*.js && node --check scripts/lib/*.js && node --check site/server.mjs",
     "prices": "node scripts/grocery-prices.js",
     "build-db": "node scripts/build-db.js",
-    "matching": "node scripts/matching-cli.js",
+    "migrate-archive": "node scripts/migrate-jsonl-to-archive.js",
     "compact": "node scripts/compact-archive.js",
     "paknsave": "node scripts/paknsave.js",
     "newworld": "node scripts/newworld.js",
@@ -60,8 +60,10 @@
     "supervalue": "node scripts/supervalue.js",
     "warehouse": "node scripts/warehouse.js",
     "archive:local": "sh scripts/archive-daily-local.sh",
-    "dashboard": "DASHBOARD_PORT=7070 node dashboard/server.js",
-    "start": "node src/app/server.js",
+    "dashboard": "DASHBOARD_PORT=7071 node dashboard/server.js",
+    "start": "node site/server.mjs",
+    "site": "node site/server.mjs",
+    "test:site": "node --test site/test/server.test.mjs",
     "pack:check": "npm pack --dry-run --cache .cache/npm"
   },
   "engines": {

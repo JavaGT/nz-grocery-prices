@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { PriceArchive } from "../src/archive.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
@@ -37,15 +37,15 @@ function printHelp() {
   grocery-prices product <product-id>
   grocery-prices stats [--retailer RETAILER]
 
-All commands read data/prices.jsonl unless --file specifies another archive.
+All commands read data/archive.db unless --file specifies another archive.
 feed returns both current advertised promotions and history-backed price drops
 or all-time lows. product returns content-addressed product revisions, such as
 a changed title, image, size, or description. Repeat --product to restrict
 feed output to favourites.`);
 }
 
-const file = option("--file", "data/prices.jsonl");
-const archive = new PriceArchive(new JsonlObservationRepository(file));
+const file = option("--file", "data/archive.db");
+const archive = new PriceArchive(createObservationRepository(file));
 
 if (command === "help" || command === "--help" || command === "-h") {
   printHelp();

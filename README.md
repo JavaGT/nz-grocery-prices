@@ -36,107 +36,53 @@ The application should let a user:
 
 This is a price-history and decision-support product, not an online checkout system. It is also not intended to claim complete nationwide coverage unless the underlying archive actually contains the relevant stores and observations.
 
+## One repo layout
+
+| | Live product | Collectors / library |
+|---|---|---|
+| What | https://prices.javagrant.ac.nz | Retailer scrape + archive |
+| Code | **`site/`** | `src/adapters`, `scripts/`, `src/archive.js`, `src/sqlite/` |
+| Command | `npm start` (port **7070**) | `npm run paknsave`, … |
+| Data | **`data/archive.db`** (preferred) | collectors append here |
+
+Live UI uses the **Workbench framework** (`node_modules/workbench` →
+`/Users/server/Code/workbench`). See `site/README.md` and `HANDOFF.md`.
+
 ## Quick start
 
-### App server (price·minder)
-
-Node 20+ required. No runtime packages need to be installed. SQLite is
-built into Node 26.3.1+ (`node:sqlite`). For older Node 20+, rebuild
-still works; the app server requires Node 26+ for `node:sqlite`.
+### Live site (product)
 
 ```sh
-# Build the projection database from the JSONL archive
-npm run build-db
-
-# Start the app server (default port 3010)
-npm start
-
-# Or specify custom paths and port
-PORT=3010 JSONL_PATH=data/prices.jsonl node src/app/server.js
+mkdir -p node_modules && ln -sfn /Users/server/Code/workbench node_modules/workbench
+PORT=7070 npm start
 ```
 
-The server serves:
-- **API** at `/api/` — deals, products, stores, search, health (public)
-- **Auth API** at `/api/auth/` — register, login, logout
-- **Private API** at `/api/` — watch list, preferred stores, saved searches, new products
-- **SPA** at `/` — price·minder frontend (static HTML+JS, see `public/`)
-
-Environment variables:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PORT` | `3010` | HTTP listener port |
-| `HOST` | `127.0.0.1` | Listen address |
-| `JSONL_PATH` | `data/prices.jsonl` | Authoritative archive path |
-| `PRICES_DB` | `data/prices.db` | Projection DB path (rebuildable) |
-| `APP_DB` | `data/app.db` | Application DB path (auth, prefs, user data) |
-
-### Two-DB lifecycle
-
-- **`data/prices.db` (projection DB):** A rebuildable read-only materialization
-  of the JSONL archive. Created by `npm run build-db` or on first app startup.
-  Destroy and rebuild at any time — it contains NO user data.
-- **`data/app.db` (application DB):** Persistent user data (accounts, sessions,
-  watch lists, saved searches, preferred stores, product match pairs). NEVER
-  rebuilt from JSONL. Preserved across rebuilds. Backup regularly.
-
-The app server opens both databases at startup:
-1. Open `data/app.db` (create if absent), apply pending app migrations
-2. Open `data/prices.db` (create if absent), verify fingerprint, rebuild if stale
-3. Start HTTP listener
-
-### Matching (cross-retailer product linking)
-
-Product matching uses a two-DB pipeline:
-
-1. **Matching engine** (`src/matching/`): Reads products from the projection DB,
-   finds matches by shared GTIN, shared Foodstuffs source IDs, or fuzzy name
-   similarity, and writes results to `data/app.db` → `product_match_pairs`.
-2. **Public API** reads match truth from `data/app.db`:
-   - `review_state: 'confirmed'` → returned as `matches` (confirmed facts:
-     auto_gtin, auto_source_id, human_reviewed)
-   - `review_state: 'candidate'` → returned as `candidates` (fuzzy suggestions,
-     never auto-confirmed)
-   - `review_state: 'rejected'` → excluded
-
-Run matching after building the projection DB:
+### Collectors
 
 ```sh
-# Auto-match by GTIN and shared source_id only
-npm run matching
-
-# Include fuzzy candidate generation (slower)
-npm run matching -- --fuzzy
+npm run paknsave -- archive "Royal Oak"   # hits live APIs
+npm run archive:local
 ```
 
-Matching CLI options: `--prices-db <path>` (default `data/prices.db`),
-`--app-db <path>` (default `data/app.db`), `--fuzzy` (include fuzzy candidates).
+Write into **`data/archive.db`**. Legacy `data/prices.jsonl` is backup only.
+
+### Data lifecycle
+
+- **`data/archive.db`:** Authoritative multi-store collection history. Live site
+  reads this. Collectors append here. Migrate once from JSONL with
+  `npm run migrate-archive`.
+- **`data/prices.jsonl`:** Legacy backup only.
+- **`data/prices.db`:** Optional projection tooling (`npm run build-db`). Not
+  required for the live site.
+- **`site/grocery-prices.db`:** Workbench users/sessions (not price data).
 
 ### Deals (runtime computation)
 
-Deal signals are computed **at runtime** from offer data, not from a pre-built
-table. The `GET /api/deals` endpoint calls `calculateSales()` and
-`calculateOngoingSales()` from `src/analytics.js` with a 90-day baseline,
-3-sample minimum, and 7-day freshness window. No rebuild step is required
-for deals to reflect the latest data.
+`GET /api/deals` computes deals at request time via `src/analytics.js`
+(`calculateSales` / `calculateOngoingSales`) from the archive — no pre-built
+deal table.
 
-**Truth semantics (MUST-11 constraint):**
-- An advertised deal requires `promo_cents < regular_cents` — a concrete
-  retailer-reported reduction. Equal-price "NEW_PRICE" promotions are explicitly
-  excluded (they are shelf price changes, not deals).
-- A history-backed deal requires at least 3 prior observations within the
-  90-day baseline window and a current price below the baseline average.
-  Products with insufficient history are correctly excluded.
-- Member-only prices are not shown as deals under the default `public` price
-  policy. The analytics support `member` policy for future use.
-- Offers where `promo_cents > regular_cents` are never classified as deals.
-
-The legacy `deal_signals` and `product_matches` tables in the projection DB
-schema (`001_initial.sql`) are retained for compatibility but are **not**
-populated by any current pipeline. Source of truth for cross-retailer matching
-is `product_match_pairs` in `data/app.db`.
-
-### Collector commands (existing, unchanged)
+### Collector commands
 
 Discover stores and inspect live results:
 
@@ -160,7 +106,7 @@ npm run supervalue -- archive
 npm run warehouse -- archive
 ```
 
-The default archive is `data/prices.jsonl`. It is a change-only, append-only JSONL archive: a product revision is stored once by content hash, prices are stored as product/store offers, and each daily archive records only a compact special-listing delta for each store. An unchanged daily run therefore adds just one snapshot record per collected store, rather than duplicating the whole catalogue. Use `--file path/to/prices.jsonl` to select another archive.
+The default archive is `data/archive.db` (normalized SQLite). It is change-only: a product revision is stored once by content hash, prices are product/store offers, and each daily archive records only a compact special-listing delta per store. An unchanged daily run therefore adds just one snapshot per collected store. Use `--file path/to/archive.db` (or a `.jsonl` path for the legacy format).
 
 The normalized shape is designed for one product to have offers at every collected supermarket store:
 
@@ -232,7 +178,7 @@ For a simple local schedule, archive once each morning and generate a feed after
 
 Collection runs on the local collector machine, not in GitHub Actions. The
 hosted application is read-only with respect to collected price data: deploy or
-mount the resulting `data/prices.jsonl` archive after a successful local run.
+mount the resulting `data/archive.db` (or legacy `prices.jsonl`) after a successful local run.
 
 Daily collection scopes (`npm run archive:local`):
 
@@ -302,7 +248,7 @@ output and error logs are in `/tmp` as named by the template.
 
 ```js
 import {
-  JsonlObservationRepository,
+  createObservationRepository,
   PaknsaveClient,
   PriceArchive,
 } from "nz-grocery-prices";
@@ -315,7 +261,7 @@ const observations = await client.collectDeals({
 });
 
 const archive = new PriceArchive(
-  new JsonlObservationRepository("data/prices.jsonl"),
+  createObservationRepository("data/archive.db"),
 );
 await archive.record(observations, { snapshotScope: "specials" });
 
@@ -333,7 +279,7 @@ const agentFeed = await archive.agentFeed({
 });
 ```
 
-Retailer clients are exported from the package root and as subpath exports: `nz-grocery-prices/foodstuffs`, `/woolworths`, `/freshchoice`, and `/warehouse`. Collection and storage are separate, so another repository implementation can replace the supplied memory and JSONL repositories.
+Retailer clients are exported from the package root and as subpath exports: `nz-grocery-prices/foodstuffs`, `/woolworths`, `/freshchoice`, and `/warehouse`. Collection and storage are separate: `createObservationRepository(path)` picks SQLite (`.db`) or JSONL from the path extension.
 
 Foodstuffs product IDs use the shared `foodstuffs:` namespace, allowing one favourite ID to match that product at both PAK'nSAVE and New World when their source SKU agrees. Other product IDs remain retailer-namespaced; cross-chain matching can use GTINs where retailers publish them. Every collected store is retained as a separate offer for that product, so a favourite can be compared across stores without copying its product metadata.
 
@@ -408,11 +354,11 @@ archive runner preserves the existing archive on failure.
 
 ## Deprecation notice
 
-The old `dashboard/` server (`npm run dashboard`, port 7070) is **deprecated**.
-It serves the same JSONL archive directly without the SQLite projection layer
-or user accounts. Use `npm start` for the new price·minder server.
+| Surface | Status |
+|---|---|
+| **`site/`** | **Live product** — edit here |
+| `workbench/projects/grocery-prices` | POINTER stub (moved to `site/`) |
+| **`dashboard/`** | Deprecated local JSONL UI |
+| Lab SQLite app / matching | **Removed** 2026-07-17 |
 
-- The `dashboard/` directory and files are preserved but not maintained.
-- The `npm run dashboard` command will continue to work for fallback.
-- The old `test/server.test.js` tests the dashboard server on port 7070.
-- All new development should target `src/app/server.js`.
+New live UI/API → `site/`. Collectors → `src/adapters/` + `scripts/`.

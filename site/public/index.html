@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="New Zealand grocery price history and deals">
+<title>NZ Grocery Prices</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;line-height:1.5}
+#app{display:flex;min-height:100vh}
+.sidebar{width:220px;background:#1a1a2e;color:#fff;padding:24px 0;position:fixed;top:0;left:0;bottom:0;overflow-y:auto;z-index:10}
+.sidebar h1{font-size:18px;padding:0 20px 24px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:16px;letter-spacing:-.02em}
+.nav-link{display:block;padding:10px 20px;color:rgba(255,255,255,.7);text-decoration:none;font-size:14px;transition:all .15s}
+.nav-link:hover{color:#fff;background:rgba(255,255,255,.05)}
+.nav-link.active{color:#4ade80;background:rgba(74,222,128,.1);border-right:3px solid #4ade80}
+#main-content{margin-left:220px;flex:1;padding:32px;max-width:1240px;width:100%}
+.card{background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee;vertical-align:middle}
+th{font-weight:600;color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+tr.clickable{cursor:pointer;transition:background .1s}
+tr.clickable:hover{background:#f9f9f9}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;border:none;font-size:14px;cursor:pointer;transition:all .15s;text-decoration:none;font-family:inherit;background:#fff}
+.btn-primary{background:#2d8a4e;color:#fff}
+.btn-primary:hover{background:#236b3d}
+.btn-outline{background:transparent;border:1px solid #ddd;color:#666}
+.btn-outline:hover{border-color:#999;color:#333}
+.btn-danger{background:transparent;border:1px solid #fecaca;color:#dc2626}
+.btn-danger:hover{background:#fef2f2}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn.active{border-color:#2d8a4e;color:#2d8a4e;background:#f0fdf4}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase}
+.badge-paknsave{background:#fef9c3;color:#854d0e}
+.badge-newworld{background:#dcfce7;color:#166534}
+.badge-woolworths{background:#dbeafe;color:#1e40af}
+.badge-freshchoice{background:#f3e8ff;color:#6b21a8}
+.badge-warehouse{background:#fce7f3;color:#9d174d}
+.badge-default{background:#f0f0f0;color:#555}
+input,select{padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none;transition:border-color .15s;background:#fff;font-family:inherit}
+input:focus,select:focus{border-color:#2d8a4e}
+.filter-bar{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center}
+.filter-bar input[type=text]{min-width:220px;flex:1}
+.view-toggle{display:inline-flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto}
+.view-toggle .btn{border:0;border-radius:0;margin:0;padding:7px 12px}
+.view-toggle .btn + .btn{border-left:1px solid #ddd}
+.price-current{font-size:22px;font-weight:700;color:#1a1a2e}
+.price-regular{font-size:14px;color:#999;text-decoration:line-through}
+.price-save{font-size:13px;font-weight:600;color:#dc2626}
+.price-drops{font-size:13px;font-weight:600;color:#2d8a4e}
+.loading,.error,.empty-state{text-align:center;padding:48px;color:#999;font-size:14px}
+.error{color:#dc2626}
+.page-header{margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.page-header h2{font-size:24px;font-weight:700}
+.page-header p{color:#666;font-size:14px;margin-top:4px}
+.atl-badge{background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
+.pagination{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}
+.pagination button{padding:6px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit}
+.pagination button:disabled{opacity:.5;cursor:default}
+.pagination button.active{border-color:#2d8a4e;color:#2d8a4e;font-weight:600}
+.back-link{display:inline-flex;align-items:center;gap:4px;color:#666;font-size:14px;margin-bottom:16px;cursor:pointer;border:none;background:none;font-family:inherit;padding:0}
+.back-link:hover{color:#333}
+.info-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14px}
+.info-grid dt{color:#888;font-weight:500}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{text-align:center;padding:24px}
+.stat-value{font-size:32px;font-weight:700;color:#2d8a4e}
+.stat-label{font-size:13px;color:#666;margin-top:4px}
+.chart-legend{display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#666}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+.section-title{margin:28px 0 14px;font-size:18px;font-weight:700}
+.section-title:first-of-type{margin-top:0}
+
+/* Grid cards */
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.product-card{cursor:pointer;transition:transform .12s,box-shadow .12s;padding:0;overflow:hidden;display:flex;flex-direction:column;margin:0}
+.product-card:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.1)}
+.card-img{aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.card-img img{width:100%;height:100%;object-fit:contain;padding:6px;display:block}
+.card-img .ph{font-size:24px;font-weight:700;color:#c5c9d0;user-select:none}
+.card-img .fav-mark{position:absolute;top:6px;right:6px;color:#dc2626;font-size:13px;text-shadow:0 1px 2px #fff}
+.card-body{padding:8px 10px 10px;display:flex;flex-direction:column;gap:4px;flex:1}
+.card-body h3{font-size:12px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-meta{font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-prices{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;margin-top:auto}
+.card-prices .price-current{font-size:15px}
+.card-prices .price-regular,.card-prices .price-save,.card-prices .price-drops{font-size:11px}
+.card-signals{display:flex;gap:4px;flex-wrap:wrap;margin-top:1px}
+.card-signals .atl-badge{font-size:10px;padding:1px 5px}
+.card-signals .muted{font-size:10px}
+
+/* List rows with thumb */
+.list-row{display:grid;grid-template-columns:56px 1fr auto;gap:14px;align-items:center;padding:10px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background .1s}
+.list-row:hover{background:#f9f9f9}
+.list-row:last-child{border-bottom:0}
+.list-thumb{width:56px;height:56px;border-radius:8px;background:#f3f4f6;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.list-thumb img{width:100%;height:100%;object-fit:contain;padding:4px}
+.list-thumb .ph{font-size:18px;font-weight:700;color:#c5c9d0}
+.list-main{min-width:0}
+.list-main h3{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-main .meta{font-size:12px;color:#888;margin-top:2px}
+.list-side{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.list-side .price-current{font-size:16px}
+.list-wrap{padding:0;overflow:hidden}
+
+/* Product detail hero */
+.detail-hero{display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:start}
+.detail-img{width:200px;height:200px;border-radius:12px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.detail-img img{width:100%;height:100%;object-fit:contain;padding:12px}
+.detail-img .ph{font-size:48px;font-weight:700;color:#c5c9d0}
+.muted{color:#888;font-size:13px}
+
+@media(max-width:800px){
+  .sidebar{width:60px;padding:16px 0}
+  .sidebar h1,.nav-link span{display:none}
+  .nav-link{padding:12px 0;text-align:center;font-size:18px}
+  #main-content{margin-left:60px;padding:16px}
+  .detail-hero{grid-template-columns:1fr}
+  .detail-img{width:140px;height:140px}
+  .cards-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav class="sidebar" aria-label="Main">
+    <h1>NZ Grocery</h1>
+    <a href="#deals" class="nav-link" data-view="deals">★ <span>Deals</span></a>
+    <a href="#browse" class="nav-link" data-view="browse">⌕ <span>Browse</span></a>
+    <a href="#favorites" class="nav-link" data-view="favorites">♥ <span>Favorites</span></a>
+    <a href="#stats" class="nav-link" data-view="stats">☰ <span>Stats</span></a>
+  </nav>
+  <main id="main-content"></main>
+</div>
+<script type="module">
+const FAV_KEY = 'nz-grocery-favorites';
+const VIEW_KEY = 'nz-grocery-view-mode';
+
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); }
+  catch { return []; }
+}
+function addFavorite(id) {
+  const favs = getFavorites();
+  if (!favs.includes(id)) {
+    favs.push(id);
+    localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+  }
+}
+function removeFavorite(id) {
+  localStorage.setItem(FAV_KEY, JSON.stringify(getFavorites().filter((x) => x !== id)));
+}
+function isFavorite(id) { return getFavorites().includes(id); }
+
+function getViewMode() {
+  return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+}
+function setViewMode(mode) {
+  localStorage.setItem(VIEW_KEY, mode === 'list' ? 'list' : 'grid');
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+function $c(v) {
+  return Number.isFinite(v) ? `$${(v / 100).toFixed(2)}` : '';
+}
+function fmtDate(iso, withYear = false) {
+  if (!iso) return '—';
+  const opts = withYear
+    ? { month: 'short', day: 'numeric', year: 'numeric' }
+    : { month: 'short', day: 'numeric' };
+  return new Date(iso).toLocaleDateString('en-NZ', opts);
+}
+function badgeClass(retailer) {
+  return `badge badge-${retailer || 'default'}`;
+}
+function initial(name) {
+  return (name || '?').trim().charAt(0).toUpperCase() || '?';
+}
+
+async function apiGet(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.json();
+}
+
+// Session-lived cache so re-navigating between views is instant instead of
+// re-fetching (and re-scanning the archive server-side). Keyed by path; the
+// pending promise is cached so concurrent callers share one request. Stores,
+// deals and stats change at most once a day, so a fresh page load is enough to
+// pick up new data; product searches stay uncached (query-dependent).
+const responseCache = new Map();
+function cachedGet(path) {
+  if (!responseCache.has(path)) {
+    const p = apiGet(path).catch((e) => { responseCache.delete(path); throw e; });
+    responseCache.set(path, p);
+  }
+  return responseCache.get(path);
+}
+
+const api = {
+  deals: () => cachedGet('/api/deals'),
+  products: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== '')),
+    ).toString();
+    return apiGet(`/api/products${qs ? `?${qs}` : ''}`);
+  },
+  productHistory: (id) => apiGet(`/api/products/${encodeURIComponent(id)}/history`),
+  stores: async () => {
+    const body = await cachedGet('/api/stores');
+    return body.stores || body;
+  },
+  stats: () => cachedGet('/api/stats'),
+};
+
+function imgHtml(url, name, cls = '') {
+  if (url) {
+    return `<img src="${esc(url)}" alt="${esc(name || '')}" loading="lazy" class="${cls}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'${esc(initial(name))}'})">`;
+  }
+  return `<div class="ph">${esc(initial(name))}</div>`;
+}
+
+function viewToggleHtml(mode) {
+  return `<div class="view-toggle" role="group" aria-label="View mode">
+    <button type="button" class="btn btn-sm ${mode === 'grid' ? 'active' : ''}" data-viewmode="grid" aria-pressed="${mode === 'grid'}">Grid</button>
+    <button type="button" class="btn btn-sm ${mode === 'list' ? 'active' : ''}" data-viewmode="list" aria-pressed="${mode === 'list'}">List</button>
+  </div>`;
+}
+
+function bindViewToggle(container, onChange) {
+  container.querySelectorAll('[data-viewmode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.viewmode;
+      setViewMode(mode);
+      onChange(mode);
+    });
+  });
+}
+
+function dealCardHtml(s) {
+  const save = s.savePercent != null ? s.savePercent : s.dropPercent;
+  const was = s.regularCents ?? s.baselineAverageCents;
+  return `<article class="card product-card" data-pid="${esc(s.productId)}" tabindex="0" role="link">
+    <div class="card-img">
+      ${imgHtml(s.imageUrl, s.productName)}
+      ${isFavorite(s.productId) ? '<span class="fav-mark">♥</span>' : ''}
+    </div>
+    <div class="card-body">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <h3>${esc(s.productName)}</h3>
+        <span class="${badgeClass(s.retailer)}">${esc(s.retailer)}</span>
+      </div>
+      <div class="card-meta">${s.brand ? esc(s.brand) + ' · ' : ''}${esc(s.storeName || '')}</div>
+      <div class="card-prices">
+        <span class="price-current">${$c(s.currentCents)}</span>
+        ${was != null ? `<span class="price-regular">${$c(was)}</span>` : ''}
+        ${save != null ? `<span class="${s.dropPercent != null ? 'price-drops' : 'price-save'}">${s.dropPercent != null ? '↓' : '−'}${Number(save).toFixed(0)}%</span>` : ''}
+      </div>
+      <div class="card-signals">
+        ${s.isAllTimeLow ? '<span class="atl-badge">🏆 All-time low</span>' : ''}
+        ${s.signalLabel ? `<span class="muted">${esc(s.signalLabel)}</span>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+function dealListHtml(s) {
+  const save = s.savePercent != null ? s.savePercent : s.dropPercent;
+  const was = s.regularCents ?? s.baselineAverageCents;
+  return `<div class="list-row" data-pid="${esc(s.productId)}" tabindex="0" role="link">
+    <div class="list-thumb">${imgHtml(s.imageUrl, s.productName)}</div>
+    <div class="list-main">
+      <h3>${esc(s.productName)}${isFavorite(s.productId) ? ' <span style="color:#dc2626">♥</span>' : ''}</h3>
+      <div class="meta">${s.brand ? esc(s.brand) + ' · ' : ''}${esc(s.storeName || '')} · <span class="${badgeClass(s.retailer)}">${esc(s.retailer)}</span></div>
+    </div>
+    <div class="list-side">
+      <span class="price-current">${$c(s.currentCents)}</span>
+      <div>
+        ${was != null ? `<span class="price-regular">${$c(was)}</span> ` : ''}
+        ${save != null ? `<span class="${s.dropPercent != null ? 'price-drops' : 'price-save'}">${s.dropPercent != null ? '↓' : '−'}${Number(save).toFixed(0)}%</span>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function productCardHtml(p) {
+  return `<article class="card product-card" data-pid="${esc(p.id)}" tabindex="0" role="link">
+    <div class="card-img">
+      ${imgHtml(p.imageUrl, p.name)}
+      ${isFavorite(p.id) ? '<span class="fav-mark">♥</span>' : ''}
+    </div>
+    <div class="card-body">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <h3>${esc(p.name)}</h3>
+        <span class="${badgeClass(p.retailer)}">${esc(p.retailer)}</span>
+      </div>
+      <div class="card-meta">${p.brand ? esc(p.brand) + ' · ' : ''}${esc(p.storeName || '')}</div>
+      <div class="card-prices">
+        ${p.currentCents != null ? `<span class="price-current">${$c(p.currentCents)}</span>` : '<span class="muted">No price</span>'}
+        ${p.regularCents != null && p.regularCents !== p.currentCents ? `<span class="price-regular">${$c(p.regularCents)}</span>` : ''}
+      </div>
+      <div class="muted">${fmtDate(p.lastSeen)}</div>
+    </div>
+  </article>`;
+}
+
+function productListHtml(p) {
+  return `<div class="list-row" data-pid="${esc(p.id)}" tabindex="0" role="link">
+    <div class="list-thumb">${imgHtml(p.imageUrl, p.name)}</div>
+    <div class="list-main">
+      <h3>${esc(p.name)}${isFavorite(p.id) ? ' <span style="color:#dc2626">♥</span>' : ''}</h3>
+      <div class="meta">${p.brand ? esc(p.brand) + ' · ' : ''}<span class="${badgeClass(p.retailer)}">${esc(p.retailer)}</span> · ${fmtDate(p.lastSeen)}</div>
+    </div>
+    <div class="list-side">
+      ${p.currentCents != null ? `<span class="price-current">${$c(p.currentCents)}</span>` : '<span class="muted">—</span>'}
+    </div>
+  </div>`;
+}
+
+function bindProductClicks(container) {
+  const go = (el) => {
+    const pid = el.closest('[data-pid]')?.dataset.pid;
+    if (pid) location.hash = `product/${encodeURIComponent(pid)}`;
+  };
+  container.querySelectorAll('[data-pid]').forEach((el) => {
+    el.addEventListener('click', () => go(el));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(el); }
+    });
+  });
+}
+
+const CHART_PALETTE = [
+  '#2d8a4e', '#457b9d', '#e9c46a', '#e76f51', '#6d597a',
+  '#2a9d8f', '#f4a261', '#264653', '#bc6c25', '#9b5de5',
+];
+
+function seriesKeyForObservation(o) {
+  const store = o.store || {};
+  return store.id || `${store.retailer || 'unknown'}:${store.name || 'store'}`;
+}
+
+function seriesLabelForObservation(o) {
+  const store = o.store || {};
+  const name = store.name || store.id || 'Store';
+  // Drop long banner prefix when every series is the same chain.
+  return name
+    .replace(/^PAK['\u2019]nSAVE\s+/i, "P'nS ")
+    .replace(/^Woolworths\s+/i, 'WW ')
+    .replace(/^New World\s+/i, 'NW ');
+}
+
+function renderPriceChart(container, observations) {
+  if (!observations || !observations.length) {
+    container.innerHTML = '<p class="muted">Not enough data for a chart.</p>';
+    return;
+  }
+
+  // One series per store — multi-store collect must not draw as one zigzag.
+  const byStore = new Map();
+  for (const o of observations) {
+    const key = seriesKeyForObservation(o);
+    if (!byStore.has(key)) {
+      byStore.set(key, {
+        key,
+        label: seriesLabelForObservation(o),
+        retailer: o.store?.retailer || 'unknown',
+        points: [],
+      });
+    }
+    const r = (o.price?.regularCents ?? o.price?.currentCents) / 100;
+    if (!Number.isFinite(r)) continue;
+    byStore.get(key).points.push({
+      t: new Date(o.observedAt || o.lastSeenAt).getTime(),
+      r,
+      p: o.price?.promoCents != null ? o.price.promoCents / 100 : null,
+      mem: o.price?.memberCents != null ? o.price.memberCents / 100 : null,
+    });
+  }
+
+  const series = [...byStore.values()]
+    .map((s) => ({
+      ...s,
+      points: s.points
+        .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.r))
+        .sort((a, b) => a.t - b.t),
+    }))
+    .filter((s) => s.points.length > 0)
+    .sort((a, b) => a.label.localeCompare(b.label, 'en-NZ'));
+
+  const allPoints = series.flatMap((s) => s.points);
+  if (!allPoints.length) {
+    container.innerHTML = '<p class="muted">Not enough data for a chart.</p>';
+    return;
+  }
+
+  const chartW = Math.min(container.clientWidth - 8 || 640, 800);
+  const chartH = 280;
+  const m = { top: 16, right: 12, bottom: 32, left: 56 };
+  const iw = chartW - m.left - m.right;
+  const ih = chartH - m.top - m.bottom;
+
+  const allY = allPoints.flatMap((p) => [p.r, p.p, p.mem].filter((v) => v != null));
+  let tMin = Math.min(...allPoints.map((p) => p.t));
+  let tMax = Math.max(...allPoints.map((p) => p.t));
+  if (tMax === tMin) {
+    // Single collect day: give the x-axis a little width so dots don't stack on the edge.
+    tMin -= 3_600_000;
+    tMax += 3_600_000;
+  }
+  const yMin = Math.min(...allY);
+  const yMax = Math.max(...allY);
+  const yPad = (yMax - yMin) * 0.15 || 0.5;
+  const yL = yMin - yPad;
+  const yH = yMax + yPad;
+  const x = (t) => m.left + ((t - tMin) / (tMax - tMin || 1)) * iw;
+  const y = (v) => m.top + ih - ((v - yL) / (yH - yL || 1)) * ih;
+  const fmtPrice = Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' });
+  const fmtD = new Intl.DateTimeFormat('en-NZ', { month: 'short', day: 'numeric' });
+
+  // Colour by retailer first; fall back to palette per series when many stores.
+  const retailerColor = {
+    paknsave: '#2d8a4e',
+    newworld: '#c1121f',
+    woolworths: '#007a33',
+    freshchoice: '#e9c46a',
+    warehouse: '#e63946',
+  };
+  const multiRetailer = new Set(series.map((s) => s.retailer)).size > 1;
+  const colorFor = (s, index) => {
+    if (multiRetailer && retailerColor[s.retailer]) return retailerColor[s.retailer];
+    return CHART_PALETTE[index % CHART_PALETTE.length];
+  };
+
+  let svg = `<svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" style="max-width:100%" role="img" aria-label="Price history by store">`;
+  for (let i = 0; i <= 5; i++) {
+    const v = yL + (i / 5) * (yH - yL);
+    const yy = y(v);
+    svg += `<line x1="${m.left}" y1="${yy}" x2="${m.left + iw}" y2="${yy}" stroke="#eee" stroke-dasharray="3,3"/>`;
+    svg += `<text x="${m.left - 6}" y="${yy + 3.5}" text-anchor="end" font-size="11" fill="#888">${fmtPrice.format(v)}</text>`;
+  }
+  const timeTicks = [...new Set(allPoints.map((p) => p.t))].sort((a, b) => a - b);
+  const nX = Math.min(Math.max(timeTicks.length - 1, 1), 6);
+  for (let i = 0; i <= nX; i++) {
+    const idx = Math.round((i / nX) * (timeTicks.length - 1));
+    const tt = timeTicks[idx];
+    svg += `<text x="${x(tt)}" y="${m.top + ih + 18}" text-anchor="middle" font-size="10" fill="#888">${fmtD.format(new Date(tt))}</text>`;
+  }
+
+  series.forEach((s, index) => {
+    const color = colorFor(s, index);
+    const pts = s.points.map((p) => `${x(p.t)},${y(p.r)}`).join(' ');
+    // Line only when this store has a real history (2+ points).
+    if (s.points.length >= 2) {
+      svg += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
+    }
+    s.points.forEach((p) => {
+      svg += `<circle cx="${x(p.t)}" cy="${y(p.r)}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1.2"><title>${esc(s.label)} · ${fmtPrice.format(p.r)}</title></circle>`;
+      if (p.p != null && Math.abs(p.p - p.r) > 0.01) {
+        svg += `<circle cx="${x(p.t)}" cy="${y(p.p)}" r="3" fill="#e63946" stroke="#fff" stroke-width="1"><title>${esc(s.label)} promo · ${fmtPrice.format(p.p)}</title></circle>`;
+      }
+      if (p.mem != null) {
+        svg += `<circle cx="${x(p.t)}" cy="${y(p.mem)}" r="2.5" fill="#457b9d" stroke="#fff" stroke-width="1"><title>${esc(s.label)} member · ${fmtPrice.format(p.mem)}</title></circle>`;
+      }
+    });
+  });
+  svg += '</svg>';
+
+  // Legend: retailers if mixed; stores if few; otherwise count note.
+  let legend = '';
+  if (multiRetailer) {
+    const seen = new Set();
+    legend = series.map((s) => {
+      if (seen.has(s.retailer)) return '';
+      seen.add(s.retailer);
+      return `<span class="legend-item"><span class="legend-dot" style="background:${retailerColor[s.retailer] || '#666'}"></span>${esc(s.retailer)}</span>`;
+    }).join('');
+  } else if (series.length <= 12) {
+    legend = series.map((s, i) =>
+      `<span class="legend-item"><span class="legend-dot" style="background:${colorFor(s, i)}"></span>${esc(s.label)}</span>`,
+    ).join('');
+  } else {
+    legend = `<span class="legend-item muted">${series.length} stores · each dot is one store’s price</span>`;
+  }
+  legend += `
+    <span class="legend-item"><span class="legend-dot" style="background:#e63946"></span> Promo</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#457b9d"></span> Member</span>`;
+
+  container.innerHTML = `<div class="chart-legend">${legend}</div>${svg}`;
+}
+
+// ——— Views ———
+
+async function renderDeals(container) {
+  container.innerHTML = '<div class="loading">Loading deals…</div>';
+  try {
+    const [feed, stores] = await Promise.all([api.deals(), api.stores()]);
+    const sales = feed.historyBacked || feed.sales || [];
+    const ongoing = feed.advertised || feed.ongoingSales || [];
+    let storeFilter = '';
+    let mode = getViewMode();
+
+    function paint() {
+      const s1 = storeFilter ? sales.filter((x) => x.storeId === storeFilter) : sales;
+      const s2 = storeFilter ? ongoing.filter((x) => x.storeId === storeFilter) : ongoing;
+      const renderItems = (items) => mode === 'list'
+        ? `<div class="card list-wrap">${items.map(dealListHtml).join('')}</div>`
+        : `<div class="cards-grid">${items.map(dealCardHtml).join('')}</div>`;
+
+      container.innerHTML = `
+        <div class="page-header">
+          <div>
+            <h2>Deals</h2>
+            <p>${s1.length} price drops · ${s2.length} promotions</p>
+          </div>
+          ${viewToggleHtml(mode)}
+        </div>
+        <div class="filter-bar">
+          <select id="deals-filter">
+            <option value="">All stores</option>
+            ${stores.map((s) => `<option value="${esc(s.id)}"${s.id === storeFilter ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+        ${s1.length ? `<h3 class="section-title">Price drops</h3>${renderItems(s1)}` : ''}
+        ${s2.length ? `<h3 class="section-title">Current promotions</h3>${renderItems(s2)}` : ''}
+        ${!s1.length && !s2.length ? '<div class="empty-state"><p>No deals to show.</p></div>' : ''}
+      `;
+      document.getElementById('deals-filter').addEventListener('change', (e) => {
+        storeFilter = e.target.value;
+        paint();
+      });
+      bindViewToggle(container, (m) => { mode = m; paint(); });
+      bindProductClicks(container);
+    }
+    paint();
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load deals: ${esc(e.message)}</div>`;
+  }
+}
+
+async function renderBrowse(container) {
+  container.innerHTML = '<div class="loading">Loading products…</div>';
+  try {
+    const stores = await api.stores();
+    const retailers = [...new Set(stores.map((s) => s.retailer).filter(Boolean))].sort();
+    let searchQuery = '';
+    let retailerFilter = '';
+    let mode = getViewMode();
+    let page = 0;
+    const PAGE = 42;
+
+    // Render the shell (header, search box, filters) once so refreshes update
+    // only the results — the search input keeps focus/caret and the page never
+    // flashes a full-screen loading state between keystrokes.
+    container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h2>Browse products</h2>
+          <p id="browse-count">&nbsp;</p>
+        </div>
+        ${viewToggleHtml(mode)}
+      </div>
+      <div class="filter-bar">
+        <input type="text" id="search-input" placeholder="Search products…" aria-label="Search products">
+        <select id="retailer-filter" aria-label="Retailer">
+          <option value="">All retailers</option>
+          ${retailers.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="browse-results" style="transition:opacity .1s"><div class="loading">Loading products…</div></div>
+      <div id="browse-pager"></div>`;
+
+    const countEl = container.querySelector('#browse-count');
+    const resultsEl = container.querySelector('#browse-results');
+    const pagerEl = container.querySelector('#browse-pager');
+
+    let reqId = 0;
+    async function refresh() {
+      const mine = ++reqId;
+      resultsEl.style.opacity = '0.5';
+      let data;
+      try {
+        data = await api.products({
+          limit: PAGE,
+          offset: page * PAGE,
+          retailer: retailerFilter || undefined,
+          query: searchQuery || undefined,
+        });
+      } catch (e) {
+        if (mine !== reqId) return; // a newer request superseded this one
+        resultsEl.style.opacity = '1';
+        resultsEl.innerHTML = `<div class="error">Failed to load products: ${esc(e.message || e)}</div>`;
+        pagerEl.innerHTML = '';
+        return;
+      }
+      if (mine !== reqId) return; // stale response — ignore
+      const list = data.products || [];
+      const total = Number(data.total) || list.length;
+      const pages = Math.max(1, Math.ceil(total / PAGE));
+      if (page >= pages) { page = Math.max(0, pages - 1); }
+
+      countEl.textContent = `${total.toLocaleString()} products`;
+      resultsEl.style.opacity = '1';
+      resultsEl.innerHTML = !list.length
+        ? '<div class="empty-state"><p>No products match your search.</p></div>'
+        : mode === 'list'
+          ? `<div class="card list-wrap">${list.map(productListHtml).join('')}</div>`
+          : `<div class="cards-grid">${list.map(productCardHtml).join('')}</div>`;
+
+      let pager = '';
+      if (pages > 1) {
+        pager = '<div class="pagination">';
+        pager += `<button type="button" ${page === 0 ? 'disabled' : ''} data-page="${page - 1}">← Prev</button>`;
+        for (let i = 0; i < pages; i++) {
+          if (pages > 12 && Math.abs(i - page) > 3 && i !== 0 && i !== pages - 1) {
+            if (i === 1 || i === pages - 2) pager += '<span class="muted" style="padding:6px">…</span>';
+            continue;
+          }
+          pager += `<button type="button" class="${i === page ? 'active' : ''}" data-page="${i}">${i + 1}</button>`;
+        }
+        pager += `<button type="button" ${page >= pages - 1 ? 'disabled' : ''} data-page="${page + 1}">Next →</button>`;
+        pager += '</div>';
+      }
+      pagerEl.innerHTML = pager;
+      pagerEl.querySelectorAll('[data-page]').forEach((el) => {
+        el.addEventListener('click', () => {
+          page = Number(el.dataset.page);
+          refresh();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+      bindProductClicks(resultsEl);
+    }
+
+    const searchEl = container.querySelector('#search-input');
+    let searchTimer;
+    searchEl.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      page = 0;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(refresh, 250);
+    });
+    container.querySelector('#retailer-filter').addEventListener('change', (e) => {
+      retailerFilter = e.target.value;
+      page = 0;
+      refresh();
+    });
+    bindViewToggle(container, (m) => {
+      mode = m;
+      container.querySelectorAll('[data-viewmode]').forEach((btn) => {
+        const active = btn.dataset.viewmode === m;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      refresh();
+    });
+
+    await refresh();
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load products: ${esc(e.message)}</div>`;
+  }
+}
+
+async function renderFavorites(container) {
+  container.innerHTML = '<div class="loading">Loading favorites…</div>';
+  try {
+    const favs = getFavorites();
+    if (!favs.length) {
+      container.innerHTML = `
+        <div class="page-header"><div><h2>Favorites</h2></div></div>
+        <div class="empty-state"><p>No favorites saved yet.</p><p class="muted" style="margin-top:6px">Open a product and click Save.</p></div>`;
+      return;
+    }
+    const data = await api.products({ limit: 500 });
+    const products = (data.products || []).filter((p) => favs.includes(p.id));
+    let mode = getViewMode();
+
+    function paint() {
+      const body = !products.length
+        ? '<div class="empty-state"><p>Saved products not found in the current data.</p></div>'
+        : mode === 'list'
+          ? `<div class="card list-wrap">${products.map(productListHtml).join('')}</div>`
+          : `<div class="cards-grid">${products.map(productCardHtml).join('')}</div>`;
+      container.innerHTML = `
+        <div class="page-header">
+          <div><h2>Favorites</h2><p>${products.length} saved</p></div>
+          ${viewToggleHtml(mode)}
+        </div>
+        ${body}`;
+      bindViewToggle(container, (m) => { mode = m; paint(); });
+      bindProductClicks(container);
+    }
+    paint();
+  } catch (e) {
+    container.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function renderStats(container) {
+  container.innerHTML = '<div class="loading">Loading stats…</div>';
+  try {
+    const stats = await api.stats();
+    const { retailers = [], stores = [], totalProducts, totalObservations, totalStores, dateRange } = stats;
+    container.innerHTML = `
+      <div class="page-header"><div><h2>Stats</h2><p>Overview of collected price data</p></div></div>
+      <div class="stats-grid">
+        <div class="card stat-card"><div class="stat-value">${Number(totalProducts || 0).toLocaleString()}</div><div class="stat-label">Products tracked</div></div>
+        <div class="card stat-card"><div class="stat-value">${totalStores || 0}</div><div class="stat-label">Stores</div></div>
+        <div class="card stat-card"><div class="stat-value">${Number(totalObservations || 0).toLocaleString()}</div><div class="stat-label">Price records</div></div>
+        <div class="card stat-card"><div class="stat-value">${retailers.length}</div><div class="stat-label">Retailers</div></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:16px">Retailers</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${retailers.map((r) => `<span class="${badgeClass(r)}" style="font-size:13px;padding:4px 12px">${esc(r)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:16px">Date range</h3>
+        <p class="muted">${dateRange?.earliest ? fmtDate(dateRange.earliest, true) : '—'} → ${dateRange?.latest ? fmtDate(dateRange.latest, true) : '—'}</p>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table>
+          <thead><tr><th>Store</th><th>Retailer</th><th>Region</th><th>Address</th></tr></thead>
+          <tbody>
+            ${stores.map((s) => `
+              <tr>
+                <td><strong>${esc(s.name || s.id)}</strong></td>
+                <td><span class="${badgeClass(s.retailer)}">${esc(s.retailer)}</span></td>
+                <td>${s.region ? esc(s.region) : '—'}</td>
+                <td class="muted">${s.address ? esc(s.address) : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load stats: ${esc(e.message)}</div>`;
+  }
+}
+
+async function renderProduct(container, productId) {
+  container.innerHTML = '<div class="loading">Loading product…</div>';
+  try {
+    const data = await api.productHistory(productId);
+    const history = data.history || data.offers || [];
+    if (!history.length) {
+      container.innerHTML = '<div class="empty-state"><p>Product not found.</p></div>';
+      return;
+    }
+    const latest = history[history.length - 1];
+    const p = data.product || latest.product || {};
+    const store = data.store || latest.store || {};
+    const imageUrl = data.imageUrl || p.images && (
+      typeof p.images === 'string' ? p.images
+        : p.images.primary || p.images['400'] || p.images.big
+          || Object.values(p.images).find((v) => typeof v === 'string')
+    );
+    let fav = isFavorite(productId);
+
+    container.innerHTML = `
+      <button type="button" class="back-link" id="back-btn">← Back</button>
+      <div class="card detail-hero">
+        <div class="detail-img">${imgHtml(imageUrl, p.name)}</div>
+        <div>
+          <div class="page-header" style="margin:0 0 12px">
+            <div>
+              <h2>${esc(p.name || productId)}</h2>
+              ${p.brand ? `<p>${esc(p.brand)}</p>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+            <button type="button" class="btn ${fav ? 'btn-danger' : 'btn-outline'} btn-sm" id="fav-btn">${fav ? '♥ Saved' : '♡ Save'}</button>
+            ${store.retailer ? `<span class="${badgeClass(store.retailer)}">${esc(store.retailer)}</span>` : ''}
+            ${latest.price ? `<span class="price-current">${$c(latest.price.promoCents ?? latest.price.memberCents ?? latest.price.regularCents ?? latest.price.currentCents)}</span>` : ''}
+          </div>
+          <dl class="info-grid">
+            <dt>Product ID</dt><dd style="font-family:monospace;font-size:12px">${esc(productId)}</dd>
+            ${p.gtin ? `<dt>GTIN</dt><dd>${esc(p.gtin)}</dd>` : ''}
+            ${p.categories?.length ? `<dt>Categories</dt><dd>${p.categories.map((c) => esc(c)).join(' · ')}</dd>` : ''}
+            ${store.name ? `<dt>Store</dt><dd>${esc(store.name)}${store.address ? ` — ${esc(store.address)}` : ''}</dd>` : ''}
+            <dt>Observations</dt><dd>${history.length} price records</dd>
+          </dl>
+        </div>
+      </div>
+      <h3 class="section-title">Price history</h3>
+      <div class="card" id="chart-container"></div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table>
+          <thead><tr><th>Date</th><th>Store</th><th>Regular</th><th>Promo</th><th>Member</th></tr></thead>
+          <tbody>
+            ${[...history].reverse().map((o) => `
+              <tr>
+                <td>${fmtDate(o.observedAt, true)}</td>
+                <td>${esc(o.store?.name || '—')}</td>
+                <td>${$c(o.price?.regularCents)}</td>
+                <td>${o.price?.promoCents != null ? $c(o.price.promoCents) : '—'}</td>
+                <td>${o.price?.memberCents != null ? $c(o.price.memberCents) : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    document.getElementById('back-btn').addEventListener('click', () => {
+      if (window.history.length > 1) window.history.back();
+      else location.hash = 'browse';
+    });
+    document.getElementById('fav-btn').addEventListener('click', () => {
+      if (isFavorite(productId)) {
+        removeFavorite(productId);
+        fav = false;
+      } else {
+        addFavorite(productId);
+        fav = true;
+      }
+      const btn = document.getElementById('fav-btn');
+      btn.textContent = fav ? '♥ Saved' : '♡ Save';
+      btn.className = `btn ${fav ? 'btn-danger' : 'btn-outline'} btn-sm`;
+    });
+    renderPriceChart(document.getElementById('chart-container'), history);
+  } catch (e) {
+    container.innerHTML = `<div class="error">Failed to load product: ${esc(e.message)}</div>`;
+  }
+}
+
+// ——— Router ———
+const main = document.getElementById('main-content');
+
+function route() {
+  const hash = location.hash.slice(1) || 'deals';
+  const [view, ...rest] = hash.split('/');
+  const param = decodeURIComponent(rest.join('/') || '');
+
+  document.querySelectorAll('.nav-link').forEach((link) => {
+    link.classList.toggle('active', link.dataset.view === view);
+  });
+
+  switch (view) {
+    case 'deals':
+      renderDeals(main);
+      break;
+    case 'browse':
+      renderBrowse(main);
+      break;
+    case 'favorites':
+      renderFavorites(main);
+      break;
+    case 'stats':
+      renderStats(main);
+      break;
+    case 'product':
+      if (param) renderProduct(main, param);
+      else location.hash = 'browse';
+      break;
+    default:
+      location.hash = 'deals';
+  }
+}
+
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>

@@ -46,10 +46,10 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 ## Known footguns in verification
 
 - **`npm run archive:local` and `npm run <retailer>` are NOT tests.** They hit
-  live retailer APIs and mutate `data/prices.jsonl`. Never run them to "verify"
-  a change.
-- **`data/prices.jsonl` is live data.** Tests use temp dirs; never point a test
-  at the real archive.
+  live retailer APIs and mutate `data/archive.db` (or `ARCHIVE_FILE` /
+  legacy `prices.jsonl`). Never run them to "verify" a change.
+- **`data/archive.db` / `data/prices.jsonl` are live data.** Tests use temp
+  dirs; never point a test at the real archive.
 - **Node version.** SQLite/app/server tests fail on Node 20 with an
   `ERR_MODULE_NOT_FOUND` for `node:sqlite`. Use Node 26.3.1+.
 - **Dead tables.** The projection schema has `deal_signals` and `product_matches`

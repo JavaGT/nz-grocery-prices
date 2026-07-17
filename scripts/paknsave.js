@@ -2,10 +2,11 @@
 
 import { PriceArchive } from "../src/archive.js";
 import { NewWorldClient, PaknsaveClient } from "../src/adapters/foodstuffs.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 import {
   archiveEachStore,
   exitCodeForStoreResults,
+  makeFreshnessSkip,
   summarizeStoreResults,
 } from "./lib/store-archive-loop.js";
 
@@ -61,14 +62,15 @@ function printHelp() {
   ${executable} deals <store> [--pages 1] [--json]
   ${executable} feed <store> [--pages all]
   ${executable} search <store> <product query> [--pages 1] [--json]
-  ${executable} archive <store> [--pages all] [--file data/prices.jsonl]
-  ${executable} archive --all-stores [--pages all] [--file data/prices.jsonl] [--delay-ms 1000]
-  ${executable} track <store> <product query> [--file data/prices.jsonl]
-  ${executable} sales [--file data/prices.jsonl] [--drop 20] [--samples 2]
+  ${executable} archive <store> [--pages all] [--file data/archive.db]
+  ${executable} archive --all-stores [--pages all] [--file data/archive.db] [--delay-ms 1000] [--max-age-hours 12]
+  ${executable} track <store> <product query> [--file data/archive.db]
+  ${executable} sales [--file data/archive.db] [--drop 20] [--samples 2]
 
 Store can be a UUID or an unambiguous name such as "Royal Oak".
 Use archive --all-stores to collect every ${retailerName} store (one specials
-snapshot per store, ~1s delay between stores by default).`);
+snapshot per store, ~1s delay between stores by default).
+--max-age-hours skips stores observed more recently (0 = never skip).`);
 }
 
 function summarize(observation) {
@@ -94,8 +96,8 @@ if (command === "help" || command === "--help" || command === "-h") {
     console.log(`${store.id}\t${store.name}\t${store.address}`);
   }
 } else if (command === "sales") {
-  const file = option("--file", "data/prices.jsonl");
-  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const file = option("--file", "data/archive.db");
+  const archive = new PriceArchive(createObservationRepository(file));
   const feed = await archive.agentFeed({
     minDropPercent: Number(option("--drop", "0")),
     minSamples: Number(option("--samples", "2")),
@@ -113,8 +115,13 @@ if (command === "help" || command === "--help" || command === "-h") {
   if (!Number.isFinite(delayMs) || delayMs < 0) {
     throw new TypeError("--delay-ms must be a non-negative number");
   }
-  const file = option("--file", "data/prices.jsonl");
-  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const maxAgeHours = Number(option("--max-age-hours", "12"));
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours < 0) {
+    throw new TypeError("--max-age-hours must be a non-negative number");
+  }
+  const file = option("--file", "data/archive.db");
+  const repository = createObservationRepository(file);
+  const archive = new PriceArchive(repository);
   const stores = await client.listStores();
   if (stores.length === 0) {
     throw new Error(`No ${retailerName} stores returned by the store list API`);
@@ -123,6 +130,11 @@ if (command === "help" || command === "--help" || command === "-h") {
   const results = await archiveEachStore({
     stores,
     delayMs,
+    shouldSkip: makeFreshnessSkip({
+      repository,
+      retailer,
+      maxAgeMs: maxAgeHours * 3_600_000,
+    }),
     collectForStore: (store) =>
       client.collectDeals({ storeId: store.id, store, maxPages }),
     record: (observations) =>
@@ -135,8 +147,10 @@ if (command === "help" || command === "--help" || command === "-h") {
         retailer,
         mode: "all-stores",
         file,
+        maxAgeHours,
         stores: summary.stores,
         succeeded: summary.succeeded,
+        skipped: summary.skipped,
         failed: summary.failed,
         fetched: summary.fetched,
         added: summary.added,
@@ -176,8 +190,8 @@ if (command === "help" || command === "--help" || command === "-h") {
       : await client.collectDeals({ storeId: store.id, store, maxPages });
 
   if (command === "archive" || command === "track") {
-    const file = option("--file", "data/prices.jsonl");
-    const archive = new PriceArchive(new JsonlObservationRepository(file));
+    const file = option("--file", "data/archive.db");
+    const archive = new PriceArchive(createObservationRepository(file));
     const added = await archive.record(observations, {
       ...(command === "archive" ? { snapshotScope: "specials" } : {}),
     });

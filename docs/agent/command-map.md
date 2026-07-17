@@ -32,9 +32,11 @@ suffices for collectors and the legacy dashboard.
 
 | Task | Command | Port | Env |
 |---|---|---|---|
-| App server (canonical) | `npm start` | 3010 | `PORT`, `HOST`, `JSONL_PATH`, `PRICES_DB`, `APP_DB`, `TRUST_PROXY_HEADERS=1`, `ENABLE_HSTS=1` |
-| Legacy dashboard (deprecated) | `npm run dashboard` | 7070 | `DASHBOARD_PORT`, `PRICE_FILE` |
-| Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db` |
+| Live public site | `npm start` / `npm run site` | 7070 | `site/server.mjs`. Needs `node_modules/workbench` link. `PORT`, `PRICE_ARCHIVE_FILE` (default `data/archive.db`), `SITE_DB`. nginx → 7070. |
+| Site tests | `npm run test:site` | — | Workbench app contract tests |
+| Legacy dashboard (deprecated) | `npm run dashboard` | 7071 | Avoid 7070 (live site). |
+| Rebuild projection DB | `npm run build-db` | — | from `data/archive.db` (fallback `prices.jsonl`); does not touch `app.db` |
+| Migrate JSONL → archive.db | `npm run migrate-archive` | — | one-shot stream import; never opens `app.db` |
 | Run matching | `npm run matching -- --fuzzy` | — | writes to `app.db.product_match_pairs` |
 
 ## Collectors (live network — do not run casually)
@@ -46,7 +48,7 @@ suffices for collectors and the legacy dashboard.
 | Every New World store | `npm run newworld -- archive --all-stores` | ~148 stores |
 | Every FreshChoice store | `npm run freshchoice -- archive --all-stores` | ~76 storefronts |
 | Every Woolworths store | `npm run woolworths -- archive --all-stores` | ~180 pickup stores; session-switches fulfilment |
-| All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE / New World / FreshChoice / Woolworths default to all stores. Warehouse stays national-online. Never use as a smoke test. |
+| All retailers → live DB | `npm run archive:local` | **writes straight into `data/archive.db`** (or `ARCHIVE_FILE`). No stage/rename. Skips stores observed within `MAX_AGE_HOURS` (default 12; set `0` to force). PAK'nSAVE / New World / FreshChoice / Woolworths = all stores. Warehouse national-online. Never a smoke test. |
 
 ## Known slow / side-effecting checks
 

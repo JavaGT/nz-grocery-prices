@@ -7,7 +7,6 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   applyMigrations,
   applyProjectionMigrations,
-  applyAppMigrations,
   ensureMigrationTable,
   getAppliedMigrations,
 } from '../../src/sqlite/schema.js';
@@ -134,26 +133,6 @@ describe('schema migrations', () => {
       assert.ok(tables.includes('store_revisions'));
       const views = db.prepare("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name").all().map(r => r.name);
       assert.ok(views.includes('price_observations'));
-    } finally { db.close(); rmSync(dir, { recursive: true }); }
-  });
-
-  it('applyAppMigrations applies 001_app_auth.sql from the project', () => {
-    const { db, dir } = tmp();
-    try {
-      applyAppMigrations(db);
-      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r => r.name);
-      assert.ok(tables.includes('users'));
-      assert.ok(tables.includes('sessions'));
-      assert.ok(tables.includes('user_store_preferences'));
-      assert.ok(tables.includes('saved_searches'));
-      assert.ok(tables.includes('watch_list_entries'));
-      assert.ok(tables.includes('new_product_notices'));
-      assert.ok(tables.includes('rate_limit'));
-      assert.ok(tables.includes('product_match_pairs'));
-      const applied = getAppliedMigrations(db);
-      assert.equal(applied.length, 2);
-      assert.equal(applied[0].name, '001_app_auth');
-      assert.equal(applied[1].name, '002_product_matching');
     } finally { db.close(); rmSync(dir, { recursive: true }); }
   });
 

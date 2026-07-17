@@ -77,6 +77,14 @@ export class CookieJar {
   }
 }
 
+/** Avoid "Woolworths Woolworths …" when the API address already includes the brand. */
+export function woolworthsStoreName(fulfilment) {
+  const address = String(fulfilment?.address ?? "").trim();
+  if (!address) return `Woolworths ${fulfilment?.fulfilmentStoreId ?? "store"}`;
+  if (/^woolworths\b/i.test(address)) return address;
+  return `Woolworths ${address}`;
+}
+
 /**
  * Parse the national pickup-address list into unique store records.
  * The API returns the same stores under regional area buckets and an
@@ -137,7 +145,7 @@ export function toWoolworthsObservation(product, fulfilment, options = {}) {
     store: {
       id: `woolworths:${fulfilment.fulfilmentStoreId}`,
       retailer: "woolworths",
-      name: `Woolworths ${fulfilment.address ?? fulfilment.fulfilmentStoreId}`,
+      name: woolworthsStoreName(fulfilment),
       ...(fulfilment.address ? { address: fulfilment.address } : {}),
     },
     price: {
@@ -336,7 +344,7 @@ export class WoolworthsClient {
     }
     return {
       id: String(fulfilment.fulfilmentStoreId),
-      name: `Woolworths ${fulfilment.address ?? fulfilment.fulfilmentStoreId}`,
+      name: woolworthsStoreName(fulfilment),
       address: fulfilment.address,
       retailer: "woolworths",
       pickupAddressId: fulfilment.pickupAddressId ?? addressId,
@@ -352,7 +360,7 @@ export class WoolworthsClient {
     }
     return {
       id: String(fulfilment.fulfilmentStoreId),
-      name: `Woolworths ${fulfilment.address ?? fulfilment.fulfilmentStoreId}`,
+      name: woolworthsStoreName(fulfilment),
       address: fulfilment.address,
       retailer: "woolworths",
       context: structuredClone(fulfilment),

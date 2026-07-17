@@ -1,22 +1,26 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProjectionRepository } from '../src/sqlite/projection-repository.js';
 
 function usage() {
-  console.error('Usage: node scripts/build-db.js [--file <jsonl-path>] [--output <db-path>] [--force]');
+  console.error('Usage: node scripts/build-db.js [--file <archive-or-jsonl>] [--output <db-path>] [--force]');
   process.exit(1);
 }
 
 function main() {
   const args = process.argv.slice(2);
-  let jsonlPath = resolve('data/prices.jsonl');
+  let sourcePath = resolve('data/archive.db');
+  if (!existsSync(sourcePath) && existsSync(resolve('data/prices.jsonl'))) {
+    sourcePath = resolve('data/prices.jsonl');
+  }
   let dbPath = resolve('data/prices.db');
   let force = false;
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case '--file':
-        jsonlPath = resolve(args[++i]);
+        sourcePath = resolve(args[++i]);
         break;
       case '--output':
         dbPath = resolve(args[++i]);
@@ -34,10 +38,10 @@ function main() {
     }
   }
 
-  const repo = new ProjectionRepository(jsonlPath, dbPath);
+  const repo = new ProjectionRepository(sourcePath, dbPath);
 
   try {
-    const result = repo.rebuild({ jsonlPath, dbPath, force });
+    const result = repo.rebuild({ jsonlPath: sourcePath, dbPath, force });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === 'rebuilt' || result.status === 'skipped' ? 0 : 1);
   } catch (err) {

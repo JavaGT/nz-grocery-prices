@@ -1,4 +1,14 @@
-import { readFileSync, renameSync, unlinkSync, mkdirSync, rmdirSync } from 'node:fs';
+import {
+  closeSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  unlinkSync,
+  mkdirSync,
+  rmdirSync,
+  statSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -33,14 +43,37 @@ export class ProjectionRepository {
     this.#dbPath = dbPath;
   }
 
+  #acquireLock(dbPath) {
+    const lockPath = dbPath + '.lock';
+    for (let i = 0; i < 50; i++) {
+      try { mkdirSync(lockPath); return () => { try { rmdirSync(lockPath); } catch { /* ok */ } }; }
+      catch {
+        const deadline = Date.now() + 10;
+        while (Date.now() < deadline) { /* spin */ }
+      }
+    }
+    return () => {};
+  }
+
+  /**
+   * Rebuild prices.db. Source may be JSONL (streamed line-by-line) or archive.db.
+   * Never loads the whole archive into one Node string.
+   */
   rebuild(options = {}) {
-    const jsonlPath = options.jsonlPath || this.#jsonlPath;
+    const sourcePath = options.jsonlPath || options.archivePath || this.#jsonlPath;
     const dbPath = options.dbPath || this.#dbPath;
     const force = options.force || false;
 
-    let contents;
+    if (/\.(db|sqlite|sqlite3)$/i.test(String(sourcePath))) {
+      return this.#rebuildFromArchiveDb(sourcePath, dbPath, force);
+    }
+    return this.#rebuildFromJsonl(sourcePath, dbPath, force);
+  }
+
+  #rebuildFromJsonl(jsonlPath, dbPath, force) {
+    let size;
     try {
-      contents = readFileSync(jsonlPath, 'utf8');
+      size = statSync(jsonlPath).size;
     } catch (err) {
       if (err.code === 'ENOENT') {
         throw Object.assign(new Error(`JSONL file not found: ${jsonlPath}`), { code: 'ENOENT' });
@@ -48,7 +81,11 @@ export class ProjectionRepository {
       throw err;
     }
 
-    const fingerprint = createHash('sha256').update(contents).digest('hex');
+    // Stream fingerprint (size + mtime + first/last chunk hash) — avoid whole-file hash for multi-GB.
+    const st = statSync(jsonlPath);
+    const fingerprint = createHash('sha256')
+      .update(`${jsonlPath}\0${st.size}\0${st.mtimeMs}`)
+      .digest('hex');
 
     if (!force) {
       try {
@@ -67,24 +104,9 @@ export class ProjectionRepository {
     const pid = process.pid;
     const rand = Math.random().toString(36).slice(2, 8);
     const tmpPath = dbPath + '.tmp-' + pid + '-' + rand;
-
-    // Acquire rebuild lock (mkdir is atomic on all platforms)
-    const lockPath = dbPath + '.lock';
-    function acquireLock() {
-      for (let i = 0; i < 50; i++) {
-        try { mkdirSync(lockPath); return true; } catch {
-          const deadline = Date.now() + 10;
-          while (Date.now() < deadline) { /* spin */ }
-        }
-      }
-      return false;
-    }
-    function releaseLock() {
-      try { rmdirSync(lockPath); } catch { /* ok */ }
-    }
+    const releaseLock = this.#acquireLock(dbPath);
 
     try { unlinkSync(tmpPath); } catch { /* ok */ }
-
     mkdirSync(dirname(dbPath), { recursive: true });
 
     const tmpDb = new DatabaseSync(tmpPath);
@@ -92,43 +114,70 @@ export class ProjectionRepository {
     try {
       tmpDb.exec('PRAGMA journal_mode=WAL');
       tmpDb.exec('PRAGMA foreign_keys=ON');
-
       applyProjectionMigrations(tmpDb);
 
       const startedAt = new Date().toISOString();
       tmpDb.prepare(
         "INSERT INTO import_runs(jsonl_path, jsonl_hash, jsonl_size, started_at, status) VALUES(?, ?, ?, ?, 'running')"
-      ).run(jsonlPath, fingerprint, Buffer.byteLength(contents, 'utf8'), startedAt);
-
+      ).run(jsonlPath, fingerprint, size, startedAt);
       const runId = Number(tmpDb.prepare('SELECT last_insert_rowid() AS id').get().id);
 
-      const lines = contents.split('\n');
       let recordsImported = 0;
       let errors = 0;
       const errorDetails = [];
+      let lineNo = 0;
+      let nonEmpty = 0;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line === '') continue;
-
-        try {
-          const record = JSON.parse(line);
-          if (record.version === 2 && record.type) {
-            this.#insertRecord(tmpDb, record);
-            recordsImported++;
-          } else if (record.product && record.store && record.price && record.source) {
-            recordsImported++;
-          } else {
-            throw new TypeError('Unknown archive record structure');
+      // Cap whole-file path to 64 MiB to prevent Invalid string length / OOM.
+      const MAX_SYNC = 64 * 1024 * 1024;
+      if (size <= MAX_SYNC) {
+        const contents = readFileSync(jsonlPath, 'utf8');
+        const lines = contents.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          lineNo = i + 1;
+          const line = lines[i].trim();
+          if (line === '') continue;
+          nonEmpty++;
+          try {
+            const record = JSON.parse(line);
+            if (record.version === 2 && record.type) {
+              this.#insertRecord(tmpDb, record);
+              recordsImported++;
+            } else if (record.product && record.store && record.price && record.source) {
+              recordsImported++;
+            } else {
+              throw new TypeError('Unknown archive record structure');
+            }
+          } catch (err) {
+            errors++;
+            errorDetails.push(`Line ${lineNo}: ${err.message}`);
           }
-        } catch (err) {
-          errors++;
-          errorDetails.push(`Line ${i + 1}: ${err.message}`);
         }
+      } else {
+        // Large file: chunked line parse without one giant string.
+        this.#streamJsonlSync(jsonlPath, (line, n) => {
+          lineNo = n;
+          const trimmed = line.trim();
+          if (trimmed === '') return;
+          nonEmpty++;
+          try {
+            const record = JSON.parse(trimmed);
+            if (record.version === 2 && record.type) {
+              this.#insertRecord(tmpDb, record);
+              recordsImported++;
+            } else if (record.product && record.store && record.price && record.source) {
+              recordsImported++;
+            } else {
+              throw new TypeError('Unknown archive record structure');
+            }
+          } catch (err) {
+            errors++;
+            errorDetails.push(`Line ${n}: ${err.message}`);
+          }
+        });
       }
 
-      const nonEmptyLines = lines.filter(l => l.trim() !== '');
-      if (nonEmptyLines.length > 0 && recordsImported === 0) {
+      if (nonEmpty > 0 && recordsImported === 0) {
         throw new Error(
           `Archive contains zero valid recognized records (${errors} malformed line${errors !== 1 ? 's' : ''})`
         );
@@ -154,8 +203,6 @@ export class ProjectionRepository {
       );
 
       tmpDb.close();
-
-      acquireLock();
       try {
         renameSync(tmpPath, dbPath);
       } finally {
@@ -165,6 +212,219 @@ export class ProjectionRepository {
       return { status: 'rebuilt', fingerprint, recordsImported, errors };
     } catch (err) {
       try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      releaseLock();
+      throw err;
+    }
+  }
+
+  #streamJsonlSync(path, onLine) {
+    const fd = openSync(path, 'r');
+    const buf = Buffer.alloc(1024 * 1024);
+    let leftover = '';
+    let lineNo = 0;
+    try {
+      for (;;) {
+        const n = readSync(fd, buf, 0, buf.length, null);
+        if (n === 0) break;
+        leftover += buf.toString('utf8', 0, n);
+        let idx;
+        while ((idx = leftover.indexOf('\n')) !== -1) {
+          const line = leftover.slice(0, idx);
+          leftover = leftover.slice(idx + 1);
+          lineNo += 1;
+          onLine(line, lineNo);
+        }
+      }
+      if (leftover.length) {
+        lineNo += 1;
+        onLine(leftover, lineNo);
+      }
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  #rebuildFromArchiveDb(archivePath, dbPath, force) {
+    let archiveDb;
+    try {
+      archiveDb = new DatabaseSync(archivePath, { readOnly: true });
+    } catch (err) {
+      if (err.code === 'ENOENT' || /no such file/i.test(err.message)) {
+        throw Object.assign(new Error(`Archive DB not found: ${archivePath}`), { code: 'ENOENT' });
+      }
+      throw err;
+    }
+
+    let fingerprint;
+    try {
+      const counts = archiveDb.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM product_revisions) AS p,
+          (SELECT COUNT(*) FROM store_revisions) AS s,
+          (SELECT COUNT(*) FROM offer_revisions) AS o,
+          (SELECT COUNT(*) FROM listing_snapshots) AS l,
+          (SELECT next_seq FROM archive_seq WHERE id = 1) AS seq
+      `).get();
+      fingerprint = createHash('sha256')
+        .update(JSON.stringify(counts))
+        .digest('hex');
+    } catch (err) {
+      archiveDb.close();
+      throw err;
+    }
+
+    if (!force) {
+      try {
+        const existingDb = new DatabaseSync(dbPath);
+        const row = existingDb.prepare("SELECT value FROM _meta WHERE key = 'jsonl_fingerprint'").get();
+        existingDb.close();
+        if (row && row.value === fingerprint) {
+          archiveDb.close();
+          return { status: 'skipped', fingerprint };
+        }
+      } catch {
+        // rebuild
+      }
+    }
+
+    const pid = process.pid;
+    const rand = Math.random().toString(36).slice(2, 8);
+    const tmpPath = dbPath + '.tmp-' + pid + '-' + rand;
+    const releaseLock = this.#acquireLock(dbPath);
+    try { unlinkSync(tmpPath); } catch { /* ok */ }
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const tmpDb = new DatabaseSync(tmpPath);
+
+    try {
+      tmpDb.exec('PRAGMA journal_mode=WAL');
+      tmpDb.exec('PRAGMA foreign_keys=ON');
+      applyProjectionMigrations(tmpDb);
+
+      const startedAt = new Date().toISOString();
+      const st = statSync(archivePath);
+      tmpDb.prepare(
+        "INSERT INTO import_runs(jsonl_path, jsonl_hash, jsonl_size, started_at, status) VALUES(?, ?, ?, ?, 'running')"
+      ).run(archivePath, fingerprint, st.size, startedAt);
+      const runId = Number(tmpDb.prepare('SELECT last_insert_rowid() AS id').get().id);
+
+      let recordsImported = 0;
+
+      for (const row of archiveDb.prepare(
+        'SELECT hash, product_id, retailer_id, data, observed_at FROM product_revisions ORDER BY seq',
+      ).iterate()) {
+        this.#insertRecord(tmpDb, {
+          type: 'product',
+          productId: row.product_id,
+          hash: row.hash,
+          observedAt: new Date(row.observed_at).toISOString(),
+          data: JSON.parse(row.data),
+        });
+        recordsImported++;
+      }
+
+      for (const row of archiveDb.prepare(`
+        SELECT sr.hash, sr.data, sr.observed_at, pc.store_id, pc.retailer_id
+        FROM store_revisions sr
+        JOIN price_contexts pc ON pc.id = sr.context_id
+        ORDER BY sr.seq
+      `).iterate()) {
+        const data = JSON.parse(row.data);
+        if (!data.id) data.id = row.store_id;
+        if (!data.retailer) data.retailer = row.retailer_id;
+        this.#insertRecord(tmpDb, {
+          type: 'store',
+          storeId: row.store_id,
+          hash: row.hash,
+          observedAt: new Date(row.observed_at).toISOString(),
+          data,
+        });
+        recordsImported++;
+      }
+
+      for (const row of archiveDb.prepare(`
+        SELECT o.rev_hash, o.price_regular_cents, o.price_promo_cents, o.price_member_cents,
+               o.comparative, o.promotion_data, o.source_data, o.observed_at,
+               oi.offer_key, oi.product_id, pc.store_id
+        FROM offer_revisions o
+        JOIN offer_identities oi ON oi.id = o.identity_id
+        JOIN price_contexts pc ON pc.id = oi.context_id
+        ORDER BY o.seq
+      `).iterate()) {
+        const price = { regularCents: row.price_regular_cents };
+        if (row.price_promo_cents != null) price.promoCents = row.price_promo_cents;
+        if (row.price_member_cents != null) price.memberCents = row.price_member_cents;
+        if (row.comparative) {
+          try { price.comparative = JSON.parse(row.comparative); } catch { /* ignore */ }
+        }
+        const data = {
+          price,
+          source: JSON.parse(row.source_data || '{}'),
+        };
+        if (row.promotion_data) {
+          try { data.promotion = JSON.parse(row.promotion_data); } catch { /* ignore */ }
+        }
+        this.#insertRecord(tmpDb, {
+          type: 'offer',
+          offerId: row.offer_key,
+          productId: row.product_id,
+          storeId: row.store_id,
+          hash: row.rev_hash,
+          observedAt: new Date(row.observed_at).toISOString(),
+          data,
+        });
+        recordsImported++;
+      }
+
+      for (const row of archiveDb.prepare(`
+        SELECT ls.offers_hash, ls.offer_count, ls.observed_at, ls.scope, ls.id AS snapshot_id,
+               pc.store_id
+        FROM listing_snapshots ls
+        JOIN price_contexts pc ON pc.id = ls.context_id
+        ORDER BY ls.seq
+      `).iterate()) {
+        const changes = archiveDb.prepare(
+          'SELECT oi.offer_key, c.change FROM listing_snapshot_changes c JOIN offer_identities oi ON oi.id = c.identity_id WHERE c.snapshot_id = ?',
+        ).all(row.snapshot_id);
+        const added = changes.filter((c) => c.change === 'added').map((c) => c.offer_key);
+        const removed = changes.filter((c) => c.change === 'removed').map((c) => c.offer_key);
+        this.#insertRecord(tmpDb, {
+          type: 'snapshot',
+          scope: row.scope,
+          storeId: row.store_id,
+          observedAt: new Date(row.observed_at).toISOString(),
+          offerCount: row.offer_count,
+          offersHash: row.offers_hash,
+          added,
+          removed,
+        });
+        recordsImported++;
+      }
+
+      archiveDb.close();
+
+      const metaStmt = tmpDb.prepare("INSERT OR REPLACE INTO _meta(key, value) VALUES(?, ?)");
+      metaStmt.run('jsonl_fingerprint', fingerprint);
+      metaStmt.run('jsonl_path', archivePath);
+      metaStmt.run('source_kind', 'archive.db');
+      metaStmt.run('built_at', new Date().toISOString());
+      metaStmt.run('records_imported', String(recordsImported));
+      metaStmt.run('error_count', '0');
+
+      tmpDb.prepare(
+        "UPDATE import_runs SET records_imported = ?, errors = 0, finished_at = ?, status = 'completed' WHERE id = ?"
+      ).run(recordsImported, new Date().toISOString(), runId);
+
+      tmpDb.close();
+      try {
+        renameSync(tmpPath, dbPath);
+      } finally {
+        releaseLock();
+      }
+      return { status: 'rebuilt', fingerprint, recordsImported, errors: 0 };
+    } catch (err) {
+      try { archiveDb.close(); } catch { /* ignore */ }
+      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      releaseLock();
       throw err;
     }
   }

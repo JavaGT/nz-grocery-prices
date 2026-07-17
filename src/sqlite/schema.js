@@ -65,9 +65,9 @@ export function applyProjectionMigrations(db) {
   applyMigrations(db, dir);
 }
 
-export function applyAppMigrations(db) {
+export function applyArchiveMigrations(db) {
   const { url } = import.meta;
-  const dir = new URL('./migrations/app/', url).pathname;
+  const dir = new URL('./migrations/archive/', url).pathname;
   applyMigrations(db, dir);
 }
 

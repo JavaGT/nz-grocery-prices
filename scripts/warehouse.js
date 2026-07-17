@@ -2,7 +2,7 @@
 
 import { PriceArchive } from "../src/archive.js";
 import { WarehouseClient } from "../src/adapters/warehouse.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
@@ -45,8 +45,8 @@ function printHelp() {
   warehouse deals [--pages 1] [--size 32] [--json]
   warehouse search <product query> [--pages 1] [--size 32] [--json]
   warehouse feed [--pages all] [--size 32]
-  warehouse archive [--pages all] [--size 32] [--file data/prices.jsonl]
-  warehouse track <product query> [--file data/prices.jsonl]
+  warehouse archive [--pages all] [--size 32] [--file data/archive.db]
+  warehouse track <product query> [--file data/archive.db]
 
 The public catalogue is scoped as The Warehouse Online. Its North/South
 selector controls availability and does not identify an individual store price.`);
@@ -69,8 +69,8 @@ if (command === "help" || command === "--help" || command === "-h") {
     : await client.collectDeals({ maxPages, size });
 
   if (["archive", "track"].includes(command)) {
-    const file = option("--file", "data/prices.jsonl");
-    const archive = new PriceArchive(new JsonlObservationRepository(file));
+    const file = option("--file", "data/archive.db");
+    const archive = new PriceArchive(createObservationRepository(file));
     const added = await archive.record(observations, {
       ...(command === "archive" ? { snapshotScope: "specials" } : {}),
     });

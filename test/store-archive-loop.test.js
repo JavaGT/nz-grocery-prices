@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   archiveEachStore,
+  archiveStoreId,
   exitCodeForStoreResults,
+  makeFreshnessSkip,
   summarizeStoreResults,
 } from "../scripts/lib/store-archive-loop.js";
 
@@ -66,10 +68,65 @@ test("archiveEachStore continues after a single-store failure", async () => {
   const summary = summarizeStoreResults(results);
   assert.equal(summary.stores, 3);
   assert.equal(summary.succeeded, 2);
+  assert.equal(summary.skipped, 0);
   assert.equal(summary.failed, 1);
   assert.equal(summary.fetched, 2);
   assert.equal(summary.added, 2);
   assert.equal(exitCodeForStoreResults(summary), 0);
+});
+
+test("archiveEachStore skips fresh stores without collecting", async () => {
+  const collected = [];
+  const results = await archiveEachStore({
+    stores: [
+      { id: "fresh", name: "Fresh" },
+      { id: "stale", name: "Stale" },
+    ],
+    delayMs: 0,
+    shouldSkip: (store) => (store.id === "fresh" ? "fresh (1.0h ago)" : null),
+    collectForStore: async (store) => {
+      collected.push(store.id);
+      return [{ id: store.id }];
+    },
+    record: async (observations) => observations.length,
+  });
+
+  assert.deepEqual(collected, ["stale"]);
+  assert.equal(results[0].skipped, true);
+  assert.equal(results[0].ok, true);
+  assert.equal(results[1].ok, true);
+  assert.equal(results[1].skipped, undefined);
+
+  const summary = summarizeStoreResults(results);
+  assert.equal(summary.succeeded, 1);
+  assert.equal(summary.skipped, 1);
+  assert.equal(exitCodeForStoreResults(summary), 0);
+});
+
+test("makeFreshnessSkip uses archive store ids and max age", () => {
+  const latest = {
+    "woolworths:1": Date.now() - 60 * 60 * 1000,
+    "paknsave:abc": Date.now() - 20 * 60 * 60 * 1000,
+  };
+  const repository = {
+    latestObservationMsForStore: (storeId) => latest[storeId] ?? null,
+  };
+  const skip = makeFreshnessSkip({
+    repository,
+    retailer: "woolworths",
+    maxAgeMs: 12 * 3_600_000,
+  });
+  assert.match(skip({ id: "1" }), /fresh/);
+  assert.equal(skip({ id: "2" }), null);
+
+  const pns = makeFreshnessSkip({
+    repository,
+    retailer: "paknsave",
+    maxAgeMs: 12 * 3_600_000,
+  });
+  assert.equal(pns({ id: "abc" }), null);
+  assert.equal(archiveStoreId({ id: "9171" }, "woolworths"), "woolworths:9171");
+  assert.equal(archiveStoreId({ id: "freshchoice:qt" }, "freshchoice"), "freshchoice:qt");
 });
 
 test("exitCodeForStoreResults is 1 when every store fails or list is empty", () => {
@@ -80,6 +137,10 @@ test("exitCodeForStoreResults is 1 when every store fails or list is empty", () 
   );
   assert.equal(
     exitCodeForStoreResults({ stores: 2, succeeded: 1, failed: 1 }),
+    0,
+  );
+  assert.equal(
+    exitCodeForStoreResults({ stores: 2, succeeded: 0, skipped: 2, failed: 0 }),
     0,
   );
 });

@@ -1,6 +1,7 @@
 export { PriceArchive } from "./archive.js";
 export { calculateOngoingSales, calculateSales, toAgentFeed } from "./analytics.js";
 export { JsonlObservationRepository, MemoryObservationRepository } from "./repository.js";
+export { createObservationRepository, SqliteArchiveRepository } from "./archive-factory.js";
 export {
   FoodstuffsClient,
   NewWorldClient,

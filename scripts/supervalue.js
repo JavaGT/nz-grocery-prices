@@ -2,10 +2,11 @@
 
 import { PriceArchive } from "../src/archive.js";
 import { SuperValueClient } from "../src/adapters/supervalue.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 import {
   archiveEachStore,
   exitCodeForStoreResults,
+  makeFreshnessSkip,
   summarizeStoreResults,
 } from "./lib/store-archive-loop.js";
 
@@ -58,13 +59,14 @@ function printHelp() {
   supervalue deals [--pages 1] [--json] [--origin URL]
   supervalue search <product query> [--pages 1] [--json] [--origin URL]
   supervalue feed [--pages all] [--origin URL]
-  supervalue archive [--pages all] [--file data/prices.jsonl] [--origin URL]
-  supervalue archive --all-stores [--pages all] [--file data/prices.jsonl] [--delay-ms 1000]
-  supervalue track <product query> [--file data/prices.jsonl] [--origin URL]
+  supervalue archive [--pages all] [--file data/archive.db] [--origin URL]
+  supervalue archive --all-stores [--pages all] [--file data/archive.db] [--delay-ms 1000] [--max-age-hours 12]
+  supervalue track <product query> [--file data/archive.db] [--origin URL]
 
 Default origin is Milton. SUPERVALUE_ORIGIN selects another storefront.
 Only a few SuperValue stores run webshops (~3); archive --all-stores
-collects every one of them.`);
+collects every one of them.
+--max-age-hours skips stores observed more recently (0 = never skip).`);
 }
 
 if (command === "help" || command === "--help" || command === "-h") {
@@ -96,8 +98,13 @@ if (command === "help" || command === "--help" || command === "-h") {
   if (!Number.isFinite(delayMs) || delayMs < 0) {
     throw new TypeError("--delay-ms must be a non-negative number");
   }
-  const file = option("--file", "data/prices.jsonl");
-  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const maxAgeHours = Number(option("--max-age-hours", "12"));
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours < 0) {
+    throw new TypeError("--max-age-hours must be a non-negative number");
+  }
+  const file = option("--file", "data/archive.db");
+  const repository = createObservationRepository(file);
+  const archive = new PriceArchive(repository);
   const stores = await client.listStores();
   if (stores.length === 0) {
     throw new Error("No SuperValue webshops returned by the store chooser");
@@ -106,6 +113,11 @@ if (command === "help" || command === "--help" || command === "-h") {
   const results = await archiveEachStore({
     stores,
     delayMs,
+    shouldSkip: makeFreshnessSkip({
+      repository,
+      retailer: "supervalue",
+      maxAgeMs: maxAgeHours * 3_600_000,
+    }),
     collectForStore: (store) =>
       new SuperValueClient({
         origin: store.origin,
@@ -123,8 +135,10 @@ if (command === "help" || command === "--help" || command === "-h") {
         retailer: "supervalue",
         mode: "all-stores",
         file,
+        maxAgeHours,
         stores: summary.stores,
         succeeded: summary.succeeded,
+        skipped: summary.skipped,
         failed: summary.failed,
         fetched: summary.fetched,
         added: summary.added,
@@ -147,8 +161,8 @@ if (command === "help" || command === "--help" || command === "-h") {
     : await client.collectDeals({ maxPages });
 
   if (["archive", "track"].includes(command)) {
-    const file = option("--file", "data/prices.jsonl");
-    const archive = new PriceArchive(new JsonlObservationRepository(file));
+    const file = option("--file", "data/archive.db");
+    const archive = new PriceArchive(createObservationRepository(file));
     const added = await archive.record(observations, {
       ...(command === "archive" ? { snapshotScope: "specials" } : {}),
     });

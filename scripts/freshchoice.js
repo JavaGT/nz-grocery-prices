@@ -2,10 +2,11 @@
 
 import { PriceArchive } from "../src/archive.js";
 import { FreshChoiceClient } from "../src/adapters/freshchoice.js";
-import { JsonlObservationRepository } from "../src/repository.js";
+import { createObservationRepository } from "../src/archive-factory.js";
 import {
   archiveEachStore,
   exitCodeForStoreResults,
+  makeFreshnessSkip,
   summarizeStoreResults,
 } from "./lib/store-archive-loop.js";
 
@@ -58,12 +59,13 @@ function printHelp() {
   freshchoice deals [--pages 1] [--json] [--origin URL]
   freshchoice search <product query> [--pages 1] [--json] [--origin URL]
   freshchoice feed [--pages all] [--origin URL]
-  freshchoice archive [--pages all] [--file data/prices.jsonl] [--origin URL]
-  freshchoice archive --all-stores [--pages all] [--file data/prices.jsonl] [--delay-ms 1000]
-  freshchoice track <product query> [--file data/prices.jsonl] [--origin URL]
+  freshchoice archive [--pages all] [--file data/archive.db] [--origin URL]
+  freshchoice archive --all-stores [--pages all] [--file data/archive.db] [--delay-ms 1000] [--max-age-hours 12]
+  freshchoice track <product query> [--file data/archive.db] [--origin URL]
 
 Default origin is Queenstown. FRESHCHOICE_ORIGIN selects another storefront.
-Use archive --all-stores to collect every FreshChoice storefront (~76).`);
+Use archive --all-stores to collect every FreshChoice storefront (~76).
+--max-age-hours skips stores observed more recently (0 = never skip).`);
 }
 
 if (command === "help" || command === "--help" || command === "-h") {
@@ -95,8 +97,13 @@ if (command === "help" || command === "--help" || command === "-h") {
   if (!Number.isFinite(delayMs) || delayMs < 0) {
     throw new TypeError("--delay-ms must be a non-negative number");
   }
-  const file = option("--file", "data/prices.jsonl");
-  const archive = new PriceArchive(new JsonlObservationRepository(file));
+  const maxAgeHours = Number(option("--max-age-hours", "12"));
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours < 0) {
+    throw new TypeError("--max-age-hours must be a non-negative number");
+  }
+  const file = option("--file", "data/archive.db");
+  const repository = createObservationRepository(file);
+  const archive = new PriceArchive(repository);
   const stores = await client.listStores();
   if (stores.length === 0) {
     throw new Error("No FreshChoice stores returned by the store list page");
@@ -105,6 +112,11 @@ if (command === "help" || command === "--help" || command === "-h") {
   const results = await archiveEachStore({
     stores,
     delayMs,
+    shouldSkip: makeFreshnessSkip({
+      repository,
+      retailer: "freshchoice",
+      maxAgeMs: maxAgeHours * 3_600_000,
+    }),
     collectForStore: (store) =>
       new FreshChoiceClient({
         origin: store.origin,
@@ -122,8 +134,10 @@ if (command === "help" || command === "--help" || command === "-h") {
         retailer: "freshchoice",
         mode: "all-stores",
         file,
+        maxAgeHours,
         stores: summary.stores,
         succeeded: summary.succeeded,
+        skipped: summary.skipped,
         failed: summary.failed,
         fetched: summary.fetched,
         added: summary.added,
@@ -146,8 +160,8 @@ if (command === "help" || command === "--help" || command === "-h") {
     : await client.collectDeals({ maxPages });
 
   if (["archive", "track"].includes(command)) {
-    const file = option("--file", "data/prices.jsonl");
-    const archive = new PriceArchive(new JsonlObservationRepository(file));
+    const file = option("--file", "data/archive.db");
+    const archive = new PriceArchive(createObservationRepository(file));
     const added = await archive.record(observations, {
       ...(command === "archive" ? { snapshotScope: "specials" } : {}),
     });

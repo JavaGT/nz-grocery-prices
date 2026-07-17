@@ -48,7 +48,7 @@ async function request(path, opts = {}) {
     });
 
     if (!res.ok) {
-      if (res.status === 401) {
+      if (res.status === 401 && !opts.silent401) {
         window.dispatchEvent(new CustomEvent('auth:required'));
       }
       let data = null;
@@ -99,6 +99,9 @@ export const api = {
   register(data) { return request('/api/auth/register', { method: 'POST', body: data }); },
   login(data) { return request('/api/auth/login', { method: 'POST', body: data }); },
   logout() { return request('/api/auth/logout', { method: 'POST' }); },
+  // Session probe: silent401 keeps an anonymous page load from being
+  // routed to the sign-in view by the global auth:required handler.
+  me() { return request('/api/auth/me', { silent401: true }); },
 
   setStorePrefs(data) { return request('/api/preferred-stores', { method: 'POST', body: data }); },
 };

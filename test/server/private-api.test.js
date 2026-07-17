@@ -102,6 +102,36 @@ describe('private API', () => {
       }
     });
 
+    it('me returns the session user and 401 without a session', async () => {
+      const srv = await createTestServer({ records: [] });
+      try {
+        const { baseUrl } = srv;
+
+        const anonymous = await fetchJson(`${baseUrl}/api/auth/me`);
+        assert.equal(anonymous.status, 401, 'anonymous probe should be 401');
+
+        const { sid, user } = await registerAndLogin(baseUrl, 'carol', 'password123');
+        const me = await fetchJson(`${baseUrl}/api/auth/me`, {
+          headers: { cookie: `sid=${sid}` },
+        });
+        assert.equal(me.status, 200);
+        assert.equal(me.body.user.username, 'carol');
+        assert.equal(me.body.user.id, user.id);
+        assert.ok(!me.body.user.password_hash);
+
+        await fetchJson(`${baseUrl}/api/auth/logout`, {
+          method: 'POST',
+          headers: { cookie: `sid=${sid}` },
+        });
+        const after = await fetchJson(`${baseUrl}/api/auth/me`, {
+          headers: { cookie: `sid=${sid}` },
+        });
+        assert.equal(after.status, 401, 'probe should be 401 after logout');
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('register rejects duplicate username', async () => {
       const srv = await createTestServer({ records: [] });
       try {

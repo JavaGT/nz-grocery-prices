@@ -88,6 +88,11 @@ export function createPrivateHandlers({ auth, appDb, clock }) {
     return {};
   }
 
+  async function me(ctx) {
+    const user = await requireUser(ctx);
+    return { user: { id: user.id, username: user.username } };
+  }
+
   async function requireUser(ctx) {
     const sid = ctx.cookies?.sid;
     if (!sid) {
@@ -262,6 +267,7 @@ export function createPrivateHandlers({ auth, appDb, clock }) {
     register,
     login,
     logout,
+    me,
     getWatchList,
     addWatchList,
     deleteWatchList,

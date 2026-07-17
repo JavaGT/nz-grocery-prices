@@ -8,9 +8,14 @@ export function renderSettings(container, api) {
   checkSession();
 
   async function checkSession() {
+    // The sid cookie is HttpOnly, so the session probe endpoint is the
+    // only way the SPA can learn whether it is signed in.
     try {
-      const data = await api.health();
-    } catch {}
+      const data = await api.me();
+      session = data.user;
+    } catch {
+      session = null;
+    }
     render();
   }
 
@@ -21,11 +26,10 @@ export function renderSettings(container, api) {
     const authSection = el('section', { className: 'settings-section' });
     authSection.appendChild(el('h3', {}, 'Account'));
 
-    const stored = document.cookie.includes('sid=');
-    if (stored) {
-      authSection.appendChild(renderAuthStatus(api, () => render()));
+    if (session) {
+      authSection.appendChild(renderAuthStatus(api, session, () => checkSession()));
     } else {
-      authSection.appendChild(renderAuthForm(api, () => render()));
+      authSection.appendChild(renderAuthForm(api, () => checkSession()));
     }
     container.appendChild(authSection);
 
@@ -106,9 +110,9 @@ function renderAuthForm(api, onSuccess) {
   return wrap;
 }
 
-function renderAuthStatus(api, onLogout) {
+function renderAuthStatus(api, session, onLogout) {
   const wrap = el('div', { className: 'auth-status' });
-  wrap.appendChild(el('p', {}, 'Signed in'));
+  wrap.appendChild(el('p', {}, `Signed in as ${session.username}`));
   const logoutBtn = el('button', {
     className: 'btn btn-outline',
     onClick: async () => {

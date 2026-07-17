@@ -166,6 +166,7 @@ function createAppServer() {
   server.post('/api/auth/register', privateHandlers.register);
   server.post('/api/auth/login', privateHandlers.login);
   server.post('/api/auth/logout', privateHandlers.logout);
+  server.get('/api/auth/me', privateHandlers.me);
   server.get('/api/watch-list', privateHandlers.getWatchList);
   server.post('/api/watch-list', privateHandlers.addWatchList);
   server.delete('/api/watch-list/:entryId', privateHandlers.deleteWatchList);

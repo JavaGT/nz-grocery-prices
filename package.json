@@ -10,6 +10,7 @@
     "newworld": "./scripts/newworld.js",
     "woolworths": "./scripts/woolworths.js",
     "freshchoice": "./scripts/freshchoice.js",
+    "supervalue": "./scripts/supervalue.js",
     "warehouse": "./scripts/warehouse.js"
   },
   "types": "./src/index.d.ts",
@@ -29,6 +30,10 @@
     "./freshchoice": {
       "types": "./src/adapters/freshchoice.d.ts",
       "import": "./src/adapters/freshchoice.js"
+    },
+    "./supervalue": {
+      "types": "./src/adapters/supervalue.d.ts",
+      "import": "./src/adapters/supervalue.js"
     },
     "./warehouse": {
       "types": "./src/adapters/warehouse.d.ts",
@@ -52,6 +57,7 @@
     "newworld": "node scripts/newworld.js",
     "woolworths": "node scripts/woolworths.js",
     "freshchoice": "node scripts/freshchoice.js",
+    "supervalue": "node scripts/supervalue.js",
     "warehouse": "node scripts/warehouse.js",
     "archive:local": "sh scripts/archive-daily-local.sh",
     "dashboard": "DASHBOARD_PORT=7070 node dashboard/server.js",
@@ -69,6 +75,7 @@
     "new-world",
     "woolworths",
     "freshchoice",
+    "supervalue",
     "the-warehouse"
   ],
   "license": "MIT"

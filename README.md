@@ -11,7 +11,7 @@ It currently has live collectors for the retailers in this priority order:
 | PAK'nSAVE | Selected physical store | Stores, search, specials, archive |
 | Woolworths NZ | Selected fulfilment store | Specials, archive |
 | New World | Selected physical store | Stores, search, specials, archive |
-| SuperValue | Selected store | Planned: stores, search, specials, archive |
+| SuperValue | Selected store website | Stores, search, specials, archive (~3 webshops) |
 | FreshChoice | Selected store website | Search, specials, archive |
 | The Warehouse | National online catalogue | Search, food/drink specials, archive |
 
@@ -145,6 +145,7 @@ npm run paknsave -- deals "Royal Oak" --pages 1
 npm run newworld -- search "Green Bay" butter --json
 npm run woolworths -- deals --pages 1
 npm run freshchoice -- search butter --pages 1
+npm run supervalue -- search butter --pages 1
 npm run warehouse -- deals --pages 1
 ```
 
@@ -155,6 +156,7 @@ npm run paknsave -- archive "Royal Oak"
 npm run newworld -- archive "Green Bay"
 npm run woolworths -- archive
 npm run freshchoice -- archive
+npm run supervalue -- archive
 npm run warehouse -- archive
 ```
 

@@ -19,6 +19,11 @@ export {
   toFreshChoiceObservation,
 } from "./adapters/freshchoice.js";
 export {
+  SuperValueClient,
+  parseSuperValueStoreLinks,
+  toSuperValueObservation,
+} from "./adapters/supervalue.js";
+export {
   WarehouseClient,
   parseWarehouseProducts,
   toWarehouseObservation,

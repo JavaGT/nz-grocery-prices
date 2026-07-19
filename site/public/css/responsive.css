@@ -1,0 +1,168 @@
+/* --- Tablet & below (≤1024px) --- */
+@media (max-width: 1024px) {
+  :root {
+    --content-max: 100%;
+  }
+
+  .detail-hero {
+    grid-template-columns: 160px 1fr;
+    gap: var(--space-md);
+  }
+
+  .detail-img {
+    width: 160px;
+    height: 160px;
+  }
+}
+
+/* --- Mobile (≤768px) --- */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 0;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebar.open {
+    width: var(--sidebar-width);
+  }
+
+  .hamburger-btn {
+    display: flex;
+  }
+
+  .sidebar.open + .sidebar-overlay {
+    display: block;
+  }
+
+  .sidebar-overlay {
+    display: none;
+  }
+
+  #main-content {
+    margin-left: 0;
+    padding: var(--space-md);
+  }
+
+  .detail-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-img {
+    width: 120px;
+    height: 120px;
+  }
+
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .filter-bar {
+    flex-direction: column;
+  }
+
+  .filter-bar input[type="text"] {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .list-row {
+    grid-template-columns: 48px 1fr auto;
+    gap: 10px;
+    padding: 8px 10px;
+  }
+
+  .list-thumb {
+    width: 48px;
+    height: 48px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .view-toggle {
+    margin-left: 0;
+  }
+
+  .price-current {
+    font-size: 18px;
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
+    gap: 4px 0;
+  }
+
+  .info-grid dt {
+    margin-top: 8px;
+  }
+}
+
+/* --- Small phones (≤400px) --- */
+@media (max-width: 400px) {
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .card-body {
+    padding: 6px 8px 8px;
+  }
+
+  #main-content {
+    padding: 12px;
+  }
+
+  .pagination button {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}
+
+/* --- Print styles --- */
+@media print {
+  .sidebar,
+  .hamburger-btn,
+  .sidebar-overlay,
+  .theme-toggle,
+  .view-toggle,
+  .filter-bar,
+  .pagination,
+  .back-link,
+  .btn {
+    display: none !important;
+  }
+
+  #main-content {
+    margin-left: 0;
+    padding: 0;
+    max-width: 100%;
+  }
+
+  .card {
+    box-shadow: none;
+    break-inside: avoid;
+    border: 1px solid #ddd;
+  }
+
+  .cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 12px;
+  }
+
+  .price-current {
+    font-size: 16px;
+  }
+}

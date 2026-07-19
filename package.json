@@ -64,6 +64,7 @@
     "start": "node site/server.mjs",
     "site": "node site/server.mjs",
     "test:site": "node --test site/test/server.test.mjs",
+    "check:client": "node --check site/public/js/app.js && node --check site/public/js/api.js && node --check site/public/js/lib/*.js && node --check site/public/js/components/*.js && node --check site/public/js/views/*.js",
     "pack:check": "npm pack --dry-run --cache .cache/npm"
   },
   "engines": {

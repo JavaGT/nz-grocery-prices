@@ -1,0 +1,188 @@
+:root {
+  /* Neutral palette */
+  --bg: #f0f2f5;
+  --bg-alt: #e8eaed;
+  --surface: #ffffff;
+  --surface-hover: #f8f9fa;
+  --text: #1a1a2e;
+  --text-muted: #667085;
+  --text-soft: #98a2b3;
+  --border: #e4e7ec;
+  --border-light: #f0f1f3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.10);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+
+  /* Brand */
+  --brand: #2d8a4e;
+  --brand-hover: #236b3d;
+  --brand-tint: #f0fdf4;
+  --brand-on-dark: #4ade80;
+
+  /* Accent */
+  --accent: #c1121f;
+  --accent-tint: #fef2f2;
+
+  /* Sidebar */
+  --sidebar-bg: #1a1a2e;
+  --sidebar-text: rgba(255, 255, 255, 0.7);
+  --sidebar-text-hover: #ffffff;
+  --sidebar-active: rgba(74, 222, 128, 0.1);
+  --sidebar-active-border: #4ade80;
+  --sidebar-divider: rgba(255, 255, 255, 0.1);
+
+  /* Fav */
+  --fav-color: #dc2626;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --sidebar-collapsed: 60px;
+  --content-max: 1240px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-full: 99px;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  /* Transitions */
+  --transition-fast: 0.12s ease;
+  --transition-base: 0.15s ease;
+  --transition-slow: 0.3s ease;
+
+  /* Retailer badge colors */
+  --retailer-paknsave-bg: #fef9c3;
+  --retailer-paknsave-text: #854d0e;
+  --retailer-newworld-bg: #dcfce7;
+  --retailer-newworld-text: #166534;
+  --retailer-woolworths-bg: #dbeafe;
+  --retailer-woolworths-text: #1e40af;
+  --retailer-freshchoice-bg: #f3e8ff;
+  --retailer-freshchoice-text: #6b21a8;
+  --retailer-warehouse-bg: #fce7f3;
+  --retailer-warehouse-text: #9d174d;
+  --retailer-default-bg: #f0f0f0;
+  --retailer-default-text: #555555;
+
+  /* Chart colors */
+  --chart-palette: #2d8a4e, #457b9d, #e9c46a, #e76f51, #6d597a,
+    #2a9d8f, #f4a261, #264653, #bc6c25, #9b5de5;
+  --chart-retailer-paknsave: #2d8a4e;
+  --chart-retailer-newworld: #c1121f;
+  --chart-retailer-woolworths: #007a33;
+  --chart-retailer-freshchoice: #e9c46a;
+  --chart-retailer-warehouse: #e63946;
+  --chart-promo: #e63946;
+  --chart-member: #457b9d;
+
+  /* Skeleton */
+  --skeleton-base: #e5e7eb;
+  --skeleton-shine: #f3f4f6;
+}
+
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --bg-alt: #161822;
+  --surface: #1a1d27;
+  --surface-hover: #222530;
+  --text: #e4e6eb;
+  --text-muted: #8892a4;
+  --text-soft: #5a6378;
+  --border: #2a2e3a;
+  --border-light: #232733;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+  --brand: #4ade80;
+  --brand-hover: #6ee7b0;
+  --brand-tint: rgba(74, 222, 128, 0.1);
+
+  --sidebar-bg: #0d0f16;
+  --sidebar-text: rgba(255, 255, 255, 0.5);
+  --sidebar-text-hover: #e4e6eb;
+  --sidebar-active: rgba(74, 222, 128, 0.12);
+  --sidebar-active-border: #4ade80;
+  --sidebar-divider: rgba(255, 255, 255, 0.05);
+
+  /* Retailer badge colors — darker backgrounds for dark mode */
+  --retailer-paknsave-bg: rgba(254, 249, 195, 0.15);
+  --retailer-paknsave-text: #facc15;
+  --retailer-newworld-bg: rgba(220, 252, 231, 0.15);
+  --retailer-newworld-text: #86efac;
+  --retailer-woolworths-bg: rgba(219, 234, 254, 0.15);
+  --retailer-woolworths-text: #93c5fd;
+  --retailer-freshchoice-bg: rgba(243, 232, 255, 0.15);
+  --retailer-freshchoice-text: #d8b4fe;
+  --retailer-warehouse-bg: rgba(252, 231, 243, 0.15);
+  --retailer-warehouse-text: #f9a8d4;
+  --retailer-default-bg: rgba(255, 255, 255, 0.08);
+  --retailer-default-text: #8892a4;
+
+  --skeleton-base: #2a2e3a;
+  --skeleton-shine: #323747;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117;
+    --bg-alt: #161822;
+    --surface: #1a1d27;
+    --surface-hover: #222530;
+    --text: #e4e6eb;
+    --text-muted: #8892a4;
+    --text-soft: #5a6378;
+    --border: #2a2e3a;
+    --border-light: #232733;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+    --brand: #4ade80;
+    --brand-hover: #6ee7b0;
+    --brand-tint: rgba(74, 222, 128, 0.1);
+
+    --sidebar-bg: #0d0f16;
+    --sidebar-text: rgba(255, 255, 255, 0.5);
+    --sidebar-text-hover: #e4e6eb;
+    --sidebar-active: rgba(74, 222, 128, 0.12);
+    --sidebar-active-border: #4ade80;
+    --sidebar-divider: rgba(255, 255, 255, 0.05);
+
+    --retailer-paknsave-bg: rgba(254, 249, 195, 0.15);
+    --retailer-paknsave-text: #facc15;
+    --retailer-newworld-bg: rgba(220, 252, 231, 0.15);
+    --retailer-newworld-text: #86efac;
+    --retailer-woolworths-bg: rgba(219, 234, 254, 0.15);
+    --retailer-woolworths-text: #93c5fd;
+    --retailer-freshchoice-bg: rgba(243, 232, 255, 0.15);
+    --retailer-freshchoice-text: #d8b4fe;
+    --retailer-warehouse-bg: rgba(252, 231, 243, 0.15);
+    --retailer-warehouse-text: #f9a8d4;
+    --retailer-default-bg: rgba(255, 255, 255, 0.08);
+    --retailer-default-text: #8892a4;
+
+    --skeleton-base: #2a2e3a;
+    --skeleton-shine: #323747;
+  }
+}

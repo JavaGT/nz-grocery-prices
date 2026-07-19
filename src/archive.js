@@ -58,6 +58,15 @@ export class PriceArchive {
     }
     const generatedAt = query.at ?? new Date().toISOString();
     const normalizedQuery = { ...query, at: generatedAt };
+    // Pre-materialized deals table — data is already in the flat response shape.
+    if (typeof this.repository.deals === "function") {
+      const [sales, ongoingSales] = await Promise.all([
+        this.repository.deals(normalizedQuery),
+        this.repository.advertisedSpecials(normalizedQuery),
+      ]);
+      return { generatedAt, currency: "NZD", sales: sales || [], ongoingSales: ongoingSales || [] };
+    }
+    // Fallback: request-time calculateSales + toAgentFeed (JSONL archives).
     const ongoingSales = this.repository.advertisedSpecials(normalizedQuery);
     const sales = calculateSales(this.repository.multiRevisionObservations(), normalizedQuery);
     const feed = toAgentFeed(sales, generatedAt, []);

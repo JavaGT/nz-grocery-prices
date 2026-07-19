@@ -5,6 +5,17 @@ import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { applyArchiveMigrations, ensureMigrationTable } from './schema.js';
+import { calculateSales } from '../analytics.js';
+
+const DEAL_FRESH_DAYS = 7;
+const DEAL_MIN_DROP = 10;
+const DEAL_LIMIT = 200;
+const DEAL_BASELINE_DAYS = 90;
+const DEAL_MIN_SAMPLES = 2;
+// How many advertised specials to materialize per rebuild. A generous margin
+// over the served page size (~300) so read-time promotion-active filtering and
+// the fresh cutoff still leave a full feed.
+const SPECIALS_MATERIALIZE_LIMIT = 2000;
 
 const RETAILER_NAMES = {
   paknsave: "PAK'nSAVE",
@@ -741,7 +752,157 @@ export class SqliteArchiveRepository {
       try { this.#db.exec('ROLLBACK'); } catch { /* ignore */ }
       throw err;
     }
+    // Rebuild the materialized deal feeds after listings so all read models stay
+    // in sync. Best-effort: a failure here does not roll back listings.
+    try { this.rebuildDeals(); } catch (err) { console.warn('rebuildDeals failed:', err?.message); }
+    try { this.rebuildSpecials(); } catch (err) { console.warn('rebuildSpecials failed:', err?.message); }
     return rows.length;
+  }
+
+  /**
+   * Rebuild the materialized advertised-specials table from the authoritative
+   * tables. Stores the top candidates by discount (regardless of current
+   * promotion activity — that is re-checked at read time), so advertisedSpecials()
+   * serves the deal feed as a bounded indexed top-N read. Called from
+   * rebuildListings() after each collection batch.
+   */
+  rebuildSpecials(query = {}) {
+    const now = Date.now();
+    const specials = this.#advertisedSpecialsLive({
+      // Materialize a wide, generous candidate set; the real fresh cutoff and
+      // page size are applied at read time in advertisedSpecials().
+      freshWithinDays: query.freshWithinDays ?? 3650,
+      limit: query.limit ?? SPECIALS_MATERIALIZE_LIMIT,
+      at: query.at ?? new Date(now).toISOString(),
+      skipActiveCheck: true,
+    });
+    this.#db.exec('BEGIN IMMEDIATE');
+    try {
+      this.#db.exec('DELETE FROM specials');
+      const insert = this.#db.prepare(`
+        INSERT OR REPLACE INTO specials(
+          product_id, store_id, retailer, current_cents, regular_cents,
+          save_percent, promotion_data, observed_at, computed_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const s of specials) {
+        insert.run(
+          s.productId,
+          s.storeId,
+          s.retailer,
+          s.currentCents,
+          s.regularCents,
+          s.savePercent ?? null,
+          s.promotion ? JSON.stringify(s.promotion) : null,
+          Date.parse(s.observedAt),
+          now,
+        );
+      }
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      try { this.#db.exec('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    }
+    return specials.length;
+  }
+
+  /**
+   * Rebuild the materialized deals table from the authoritative tables.
+   * Runs the same multi-revision observations query as the old request-time
+   * path, feeds it through calculateSales, and stores results in the deals
+   * table. Called from rebuildListings() which runs after each collection
+   * batch. The 7-day fresh cutoff is applied at read time (deals()), not
+   * here, so deals don't go stale between collection runs.
+   */
+  rebuildDeals(query = {}) {
+    const observations = this.multiRevisionObservations();
+    if (observations.length === 0) return 0;
+    const sales = calculateSales(observations, {
+      freshWithinDays: query.freshWithinDays ?? DEAL_FRESH_DAYS,
+      baselineDays: query.baselineDays ?? DEAL_BASELINE_DAYS,
+      minSamples: query.minSamples ?? DEAL_MIN_SAMPLES,
+      at: query.at ?? new Date().toISOString(),
+    });
+    const now = Date.now();
+    this.#db.exec('BEGIN IMMEDIATE');
+    try {
+      this.#db.exec('DELETE FROM deals');
+      const insert = this.#db.prepare(`
+        INSERT INTO deals(
+          product_id, store_id, retailer,
+          current_cents, price_kind,
+          drop_percent, is_all_time_low,
+          baseline_avg_cents, baseline_samples,
+          observed_at, promotion_data, computed_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const sale of sales) {
+        insert.run(
+          sale.product.id,
+          sale.store.id,
+          sale.store.retailer,
+          sale.current.cents,
+          sale.current.kind,
+          sale.dropPercent,
+          sale.isAllTimeLow ? 1 : 0,
+          sale.baseline.averageCents,
+          sale.baseline.sampleCount,
+          Date.parse(sale.current.observedAt),
+          sale.promotion ? JSON.stringify(sale.promotion) : null,
+          now,
+        );
+      }
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      try { this.#db.exec('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    }
+    return sales.length;
+  }
+
+  /**
+   * Read history-backed deals from the materialized table, applying the
+   * fresh-within-days cutoff at read time so deals expire naturally.
+   * Joins to product_listings for display fields.
+   */
+  deals({ freshWithinDays = DEAL_FRESH_DAYS, minDropPercent = DEAL_MIN_DROP, limit = DEAL_LIMIT } = {}) {
+    const freshCutoff = Date.now() - freshWithinDays * DEAL_DAY_MS;
+    const cap = Math.max(1, Math.min(Number(limit) || DEAL_LIMIT, 1000));
+    const rows = this.#db.prepare(`
+      SELECT
+        d.product_id, d.store_id, d.retailer,
+        d.current_cents, d.price_kind,
+        d.drop_percent, d.is_all_time_low,
+        d.baseline_avg_cents, d.baseline_samples,
+        d.observed_at, d.promotion_data,
+        pl.name AS product_name, pl.brand, pl.image_url,
+        pc.store_name
+      FROM deals d
+      LEFT JOIN product_listings pl ON pl.product_id = d.product_id AND pl.retailer = d.retailer
+      LEFT JOIN price_contexts pc ON pc.retailer_id = d.retailer AND pc.store_id = d.store_id
+      WHERE d.drop_percent >= ?
+        AND d.observed_at >= ?
+      ORDER BY d.drop_percent DESC
+      LIMIT ?
+    `).all(minDropPercent, freshCutoff, cap);
+
+    return rows.map((row) => ({
+      productId: row.product_id,
+      productName: row.product_name,
+      brand: row.brand || undefined,
+      storeId: row.store_id,
+      storeName: row.store_name,
+      retailer: row.retailer,
+      currentCents: Number(row.current_cents),
+      priceKind: row.price_kind,
+      baselineAverageCents: row.baseline_avg_cents != null ? Number(row.baseline_avg_cents) : undefined,
+      baselineSampleCount: row.baseline_samples != null ? Number(row.baseline_samples) : undefined,
+      dropPercent: row.drop_percent,
+      isAllTimeLow: Boolean(row.is_all_time_low),
+      observedAt: new Date(Number(row.observed_at)).toISOString(),
+      promotion: row.promotion_data ? JSON.parse(row.promotion_data) : undefined,
+      imageUrl: row.image_url || undefined,
+    }));
   }
 
   /** Aggregate stats for the site's /stats view (indexed counts, no full scan). */
@@ -786,6 +947,36 @@ export class SqliteArchiveRepository {
   }
 
   /**
+   * The first `need` products of the unfiltered browse order: newest-first within
+   * each retailer, round-robined across retailers in retailer-id order. Matches
+   * the old `ORDER BY rr, retailer` window exactly, but only reads `need` rows
+   * per retailer through idx_pl_retailer_seen instead of sorting every listing.
+   */
+  #browseInterleaved(need) {
+    const retailers = this.#db
+      .prepare('SELECT DISTINCT retailer FROM product_listings ORDER BY retailer')
+      .all()
+      .map((row) => row.retailer);
+    const perRetailer = this.#db.prepare(
+      'SELECT * FROM product_listings WHERE retailer = ? ORDER BY last_seen DESC, product_id LIMIT ?',
+    );
+    const queues = retailers.map((retailer) => perRetailer.all(retailer, need));
+    const out = [];
+    for (let rank = 0; out.length < need; rank += 1) {
+      let progress = false;
+      for (const queue of queues) {
+        if (rank < queue.length) {
+          out.push(queue[rank]);
+          progress = true;
+          if (out.length >= need) break;
+        }
+      }
+      if (!progress) break;
+    }
+    return out;
+  }
+
+  /**
    * A page of products for the browse view, served from the flat read model.
    * Round-robins retailers newest-first (matching interleaveByRetailer) unless a
    * retailer filter is set, in which case it's newest-first within that retailer.
@@ -805,17 +996,27 @@ export class SqliteArchiveRepository {
 
     const lim = Math.min(Math.max(Number(limit) || 42, 1), 500);
     const off = Math.max(Number(offset) || 0, 0);
-    const order = r ? 'ORDER BY last_seen DESC, product_id' : 'ORDER BY rr, retailer';
-    const rows = this.#db.prepare(`
-      WITH filtered AS (SELECT * FROM product_listings ${whereSql}),
-      ranked AS (
-        SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY retailer ORDER BY last_seen DESC, product_id
-        ) AS rr
-        FROM filtered
-      )
-      SELECT * FROM ranked ${order} LIMIT ? OFFSET ?
-    `).all(...filterParams, lim, off);
+
+    let rows;
+    if (!r && !q) {
+      // Unfiltered browse: interleave newest-first across retailers. Fetch only
+      // the (offset+limit) newest per retailer via idx_pl_retailer_seen and merge
+      // in JS, instead of a ROW_NUMBER window over all ~150k listings (a temp
+      // b-tree sort of the whole table on every cold request).
+      rows = this.#browseInterleaved(off + lim).slice(off, off + lim);
+    } else {
+      const order = r ? 'ORDER BY last_seen DESC, product_id' : 'ORDER BY rr, retailer';
+      rows = this.#db.prepare(`
+        WITH filtered AS (SELECT * FROM product_listings ${whereSql}),
+        ranked AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY retailer ORDER BY last_seen DESC, product_id
+          ) AS rr
+          FROM filtered
+        )
+        SELECT * FROM ranked ${order} LIMIT ? OFFSET ?
+      `).all(...filterParams, lim, off);
+    }
 
     const products = rows.map((row) => ({
       id: row.product_id,
@@ -834,15 +1035,82 @@ export class SqliteArchiveRepository {
   }
 
   /**
-   * Currently-advertised specials, computed and bounded in SQL (top N by
-   * discount) so the deal feed never materialises the whole archive. Returns
-   * entries already in toAgentFeed's ongoingSales shape. Members-only prices
-   * are treated as public here (site default policy).
+   * Currently-advertised specials for the deal feed.
+   *
+   * Reads the materialized `specials` table (rebuilt per collection) when it is
+   * populated: a bounded, indexed top-N scan instead of starting from the ~1M
+   * active_special_offers rows and sorting ~800k computed discounts in a temp
+   * b-tree on every cold request. The materialized rows are the top candidates
+   * by discount; promotion activity (start/end vs `at`) is still re-checked here
+   * at read time, so a promo that lapses between rebuilds drops out immediately.
+   * Falls back to the live SQL query for archives whose specials table has not
+   * been built yet.
    */
-  advertisedSpecials({ freshWithinDays = 7, limit = 300, at } = {}) {
+  advertisedSpecials(query = {}) {
+    const { freshWithinDays = 7, limit = 300, at } = query;
     const atMs = at ? Date.parse(at) : Date.now();
     const freshCutoff = atMs - freshWithinDays * DEAL_DAY_MS;
     const cap = Math.max(1, Math.min(Number(limit) || 300, 1000));
+
+    const materialized = Number(
+      this.#db.prepare('SELECT COUNT(*) AS n FROM specials').get().n,
+    );
+    if (materialized === 0) return this.#advertisedSpecialsLive(query);
+
+    // Pull a margin above the cap so read-time promotion-active filtering still
+    // leaves a full page; the materialized set is already sorted by discount.
+    const rows = this.#db.prepare(`
+      SELECT
+        s.product_id, s.store_id, s.retailer, s.current_cents, s.regular_cents,
+        s.save_percent, s.promotion_data, s.observed_at,
+        pl.name, pl.brand, pl.gtin, pl.image_url, pc.store_name
+      FROM specials s
+      LEFT JOIN product_listings pl
+        ON pl.product_id = s.product_id AND pl.retailer = s.retailer
+      LEFT JOIN price_contexts pc
+        ON pc.retailer_id = s.retailer AND pc.store_id = s.store_id
+      WHERE s.observed_at >= ?
+      ORDER BY s.save_percent DESC
+      LIMIT ?
+    `).all(freshCutoff, cap * 4);
+
+    const out = [];
+    for (const row of rows) {
+      let promotion;
+      try { promotion = row.promotion_data ? JSON.parse(row.promotion_data) : undefined; } catch { /* skip */ }
+      if (!promotion || !promotionActive(promotion, atMs)) continue;
+      out.push({
+        productId: row.product_id,
+        productName: row.name,
+        brand: row.brand || undefined,
+        gtin: row.gtin || undefined,
+        storeId: row.store_id,
+        storeName: row.store_name,
+        retailer: row.retailer,
+        currentCents: Number(row.current_cents),
+        regularCents: Number(row.regular_cents),
+        priceKind: 'promo',
+        savePercent: row.save_percent ?? undefined,
+        observedAt: new Date(Number(row.observed_at)).toISOString(),
+        promotion,
+        imageUrl: row.image_url || undefined,
+      });
+      if (out.length >= cap) break;
+    }
+    return out;
+  }
+
+  /**
+   * Live top-N advertised specials, computed and sorted in SQL. Correct but
+   * unbounded in scan cost (starts from active_special_offers), so it is the
+   * fallback for un-materialized archives and the source for rebuildSpecials().
+   * `skipActiveCheck` keeps time-relative promotions in the result so the
+   * materialized set can re-check activity at read time.
+   */
+  #advertisedSpecialsLive({ freshWithinDays = 7, limit = 300, at, skipActiveCheck = false } = {}) {
+    const atMs = at ? Date.parse(at) : Date.now();
+    const freshCutoff = atMs - freshWithinDays * DEAL_DAY_MS;
+    const cap = Math.max(1, Math.min(Number(limit) || 300, 5000));
     const rows = this.#db.prepare(`
       SELECT
         oi.product_id, pc.retailer_id AS retailer, pc.store_id, pc.store_name,
@@ -869,7 +1137,8 @@ export class SqliteArchiveRepository {
     for (const row of rows) {
       let promotion;
       try { promotion = row.promotion_data ? JSON.parse(row.promotion_data) : undefined; } catch { /* skip */ }
-      if (!promotion || !promotionActive(promotion, atMs)) continue;
+      if (!promotion) continue;
+      if (!skipActiveCheck && !promotionActive(promotion, atMs)) continue;
       const current = effectiveCents({
         regularCents: row.reg,
         promoCents: row.promo ?? undefined,

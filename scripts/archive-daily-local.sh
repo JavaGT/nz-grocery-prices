@@ -182,6 +182,17 @@ run_archive warehouse "$npm_command" run warehouse -- archive --file "$archive_f
 
 health_finish
 
+# Refresh the derived read models (deals + advertised specials) so the site
+# serves the deal feed and browse pages as bounded indexed reads. append()
+# keeps product_listings current incrementally, but the deals/specials feeds are
+# only rebuilt here, once per collection. Best-effort: a failure must not fail
+# the whole run (collection already succeeded and is durable).
+if is_sqlite_archive "$archive_file" && [ -f "$archive_file" ]; then
+  if ! node "$repo_root/scripts/rebuild-read-model.js" "$archive_file"; then
+    printf '%s\n' "read-model rebuild failed (site will fall back to live queries): $archive_file" >&2
+  fi
+fi
+
 # Checkpoint WAL so readers see a compact main file (site keeps working either way).
 if is_sqlite_archive "$archive_file" && [ -f "$archive_file" ]; then
   node -e '

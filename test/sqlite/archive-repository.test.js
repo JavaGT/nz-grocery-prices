@@ -113,6 +113,68 @@ describe('SqliteArchiveRepository', () => {
     }
   });
 
+  it('advertisedSpecials serves the materialized specials table after rebuild', async () => {
+    const { repo } = open();
+    try {
+      const promotion = { type: 'SPECIAL', startsAt: '2026-07-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' };
+      await repo.append([
+        obs({ productId: 'paknsave:p1', regularCents: 500, promoCents: 300, promotion }),
+        obs({ productId: 'paknsave:p2', storeId: 'paknsave:s1', regularCents: 400, promoCents: 380, promotion }),
+      ], { snapshotScope: 'specials' });
+
+      // Before rebuild the specials table is empty → falls back to the live query.
+      const live = repo.advertisedSpecials({ at: '2026-07-17T13:00:00.000Z' });
+      assert.ok(live.length >= 1, 'live fallback returns specials');
+
+      const materialized = repo.rebuildSpecials({ at: '2026-07-17T13:00:00.000Z' });
+      assert.ok(materialized >= 2, `materialized top-N specials, got ${materialized}`);
+
+      const served = repo.advertisedSpecials({ at: '2026-07-17T13:00:00.000Z' });
+      // Biggest discount first (p1: 40% beats p2: 5%).
+      assert.equal(served[0].productId, 'paknsave:p1');
+      assert.equal(served[0].currentCents, 300);
+      assert.equal(served[0].regularCents, 500);
+      assert.ok(served[0].promotion, 'promotion carried through');
+    } finally {
+      repo.close();
+    }
+  });
+
+  it('lapsed promotions drop out of the materialized feed at read time', async () => {
+    const { repo } = open();
+    try {
+      await repo.append([
+        obs({ productId: 'paknsave:p1', regularCents: 500, promoCents: 300,
+          promotion: { type: 'SPECIAL', endsAt: '2026-07-15T00:00:00.000Z' } }),
+      ], { snapshotScope: 'specials' });
+      repo.rebuildSpecials({ at: '2026-07-17T13:00:00.000Z' });
+
+      // Read after the promo has ended → filtered out even though materialized.
+      const served = repo.advertisedSpecials({ at: '2026-07-20T00:00:00.000Z' });
+      assert.equal(served.length, 0, 'expired promotion is re-checked at read time');
+    } finally {
+      repo.close();
+    }
+  });
+
+  it('unfiltered productListings interleaves retailers newest-first', async () => {
+    const { repo } = open();
+    try {
+      await repo.append([
+        obs({ productId: 'paknsave:a', storeId: 'paknsave:s1', retailer: 'paknsave', observedAt: '2026-07-17T12:00:00.000Z' }),
+        obs({ productId: 'paknsave:b', storeId: 'paknsave:s1', retailer: 'paknsave', observedAt: '2026-07-17T11:00:00.000Z' }),
+        obs({ productId: 'woolworths:c', storeId: 'woolworths:s1', retailer: 'woolworths', observedAt: '2026-07-16T10:00:00.000Z' }),
+      ], { snapshotScope: 'specials' });
+
+      const page = repo.productListings({ limit: 10 });
+      assert.equal(page.total, 3);
+      // First two rows come from different retailers (round-robin, not one chain).
+      assert.notEqual(page.products[0].retailer, page.products[1].retailer);
+    } finally {
+      repo.close();
+    }
+  });
+
   it('importJsonl streams v2 records without whole-file load', async () => {
     const dir = tmpDir();
     dirs.push(dir);

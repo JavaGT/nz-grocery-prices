@@ -15,20 +15,26 @@ const defaultArchiveFile = (() => {
 const publicDir = new URL('./public', import.meta.url).pathname;
 const FEED_OPTIONS = { minDropPercent: 10, baselineDays: 90, freshWithinDays: 7, minSamples: 2 };
 
-/** Serve public assets; map bare `/` to index.html (Workbench static requires a file path). */
+/** Cache index.html in memory — read once at startup, never re-read from disk. */
+const indexHtml = (() => {
+  const indexPath = resolve(publicDir, 'index.html');
+  if (!existsSync(indexPath)) return null;
+  const content = readFileSync(indexPath);
+  return { content, length: Buffer.byteLength(content) };
+})();
+
+/** Serve public assets; map bare `/` to cached index.html. */
 function servePublicSite(dir) {
   const files = serveStatic(dir, { prefix: '' });
-  const indexPath = resolve(dir, 'index.html');
   return (req, res, next) => {
     const pathOnly = String(req.url || '/').split('?')[0];
     if (pathOnly === '/' || pathOnly === '') {
-      if (!existsSync(indexPath)) return next ? next() : res.status(404).end();
-      const content = readFileSync(indexPath);
+      if (!indexHtml) return next ? next() : res.status(404).end();
       res.writeHead(200, {
         'content-type': 'text/html; charset=utf-8',
-        'content-length': Buffer.byteLength(content),
+        'content-length': indexHtml.length,
       });
-      return res.end(content);
+      return res.end(indexHtml.content);
     }
     return files(req, res, next);
   };
@@ -329,6 +335,7 @@ function publicRoutes({ archive }) {
 
   api.get('/stores', allowAnonymous(), async (_req, res) => {
     if (archive.fastReads) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
       res.json({ stores: await archive.storeList() });
       return;
     }
@@ -336,11 +343,13 @@ function publicRoutes({ archive }) {
     for (const observation of await history()) {
       if (observation.store?.id) stores.set(observation.store.id, observation.store);
     }
+    res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({ stores: [...stores.values()] });
   });
 
   api.get('/stats', allowAnonymous(), async (_req, res) => {
     if (archive.fastReads) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
       res.json(await archive.summary());
       return;
     }
@@ -362,6 +371,7 @@ function publicRoutes({ archive }) {
         if (!latest || at > latest) latest = at;
       }
     }
+    res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({
       totalObservations: observations.length,
       totalProducts: products.size,
@@ -397,6 +407,7 @@ function publicRoutes({ archive }) {
     const DEAL_LIMIT = 200;
     const historyBacked = (feed.sales || []).map(shapeHistoryBacked).map(withImage).slice(0, DEAL_LIMIT);
     const advertised = (feed.ongoingSales || []).map(shapeAdvertised).map(withImage).slice(0, DEAL_LIMIT);
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     res.json({
       generatedAt: feed.generatedAt || new Date().toISOString(),
       currency: feed.currency || 'NZD',
@@ -450,6 +461,9 @@ if (import.meta.main) {
   if (!existsSync(archiveFile)) console.warn(`Price archive not found yet: ${archiveFile}`);
   const port = Number(process.env.PORT) || 7070;
   const app = createGroceryPricesApp({ archiveFile });
+  // Warm caches before accepting requests — with materialized deals these
+  // are fast indexed queries, so no timeout needed.
+  if (app.warmCache) await app.warmCache().catch((err) => console.warn('cache warm failed:', err?.message));
   app.listen(port, {
     rateLimit: {
       ip: { windowMs: 60_000, max: 120 },
@@ -458,6 +472,4 @@ if (import.meta.main) {
     onListening: () => console.log(`Grocery prices → http://localhost:${port}`),
   });
   await app.ready;
-  // Warm the deal/summary caches now so the first request isn't a cold scan.
-  app.warmCache().catch((err) => console.warn('cache warm failed:', err?.message));
 }

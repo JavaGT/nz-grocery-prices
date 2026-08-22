@@ -1,12 +1,11 @@
 # CORE-4 — Analytics hardening
 
-> **Status: COMPLETE (2026-08-23).** Commits `5123bed` + `adf6093`.
-> selectEffectivePrice (promo windows enforced, inclusive boundaries),
-> group-sorting fix, buildPriceSeries export, PriceArchive clock injection,
-> golden behavior-change fixtures. Gate 38/38; full suite green except
-> CORE-2's in-flight tests. **Doc debt:** clock injection + buildPriceSeries
-> notes to be folded into docs/agent/* by the CORE-2 lane's M6 (it owns that
-> path during this wave).
+> **Status: COMPLETE + REVIEWED (2026-08-23).** Commits `5123bed`, `adf6093`,
+> review round `6c4b2dc`. Hostile review (GPT 5.6 Luna) → all findings fixed:
+> `at` now REQUIRED in analytics functions (determinism contract enforced),
+> invalid observedAt skipped at group entry, invalid query.at throws,
+> handler-level /api/deals golden proves stale-promo baselines at regular
+> cents, offset-form ISO boundary tests added. Gate 85/85.
 Deterministic analytics with centralized price semantics and an exhaustive
 edge-case suite.
 

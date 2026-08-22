@@ -1,6 +1,25 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fingerprint } from "./archive-records.js";
+import { validateObservation } from "./domain/observation.js";
+
+/**
+ * Append-boundary validation: every observation entering a repository must
+ * satisfy the canonical domain rules. Throws TypeError naming the index of
+ * the first invalid observation and all of its problems. Adapters keep
+ * returning `undefined` for incomplete rows — this check is for what actually
+ * reaches the repository.
+ */
+function assertValidObservations(observations) {
+  for (const [index, observation] of observations.entries()) {
+    const problems = validateObservation(observation);
+    if (problems.length > 0) {
+      throw new TypeError(
+        `Invalid observation at index ${index}: ${problems.join("; ")}`,
+      );
+    }
+  }
+}
 
 function observationKey(observation) {
   return [
@@ -48,6 +67,7 @@ export class MemoryObservationRepository {
   #observations = [];
 
   async append(observations) {
+    assertValidObservations(observations);
     let added = 0;
 
     for (const observation of observations) {
@@ -319,6 +339,7 @@ export class JsonlObservationRepository {
   }
 
   async append(observations, options = {}) {
+    assertValidObservations(observations);
     await this.#load();
     const additions = this.#ingest(observations, options);
     if (additions.length > 0) {

@@ -119,6 +119,22 @@ function decodeRecord(line) {
 }
 
 /**
+ * Classifies one successfully-parsed archive line WITHOUT applying it:
+ * `{ status: "v2", record }` for a valid v2 record, `{ status: "legacy",
+ * record }` for a legacy v1 whole-observation, or `{ status: "invalid",
+ * problems }` for anything else. Shared by the repository loader and the
+ * repair CLI so both apply identical record-validity semantics. The v1
+ * predicate is checked first — v1 records carry no version field, so the
+ * envelope check alone would mislabel them.
+ */
+export function classifyParsedRecord(record) {
+  if (isV1Record(record)) return { status: "legacy", record };
+  const problems = validateRecordEnvelope(record);
+  if (problems.length === 0) return { status: "v2", record };
+  return { status: "invalid", problems };
+}
+
+/**
  * True for legacy v1 observations: the unversioned whole-observation shape
  * (product + store + price + source, no version field).
  */

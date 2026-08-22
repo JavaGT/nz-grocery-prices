@@ -1,12 +1,11 @@
 # CORE-1 — Domain model & validation
 
-> **Status (2026-08-23):** Phase 1 COMPLETE — committed `d1e4bfb`.
-> `src/domain/observation.js` + tests landed. Fingerprint module initially
-> created at `src/domain/fingerprint.js`; per plan v3 [GROK-5] its content
-> moves to `src/archive-records.js` in CORE-2 M1 (single canonical home).
-> Remaining: append-boundary validation (folded into CORE-2 M2) + adapter
-> error-context wrapping (dropped per plan v3 [GROK-9] — adapters keep
-> skip-on-incomplete; validation lives at repository.append only).
+> **Status: COMPLETE (2026-08-23).** Phase 1 committed `d1e4bfb`
+> (`src/domain/observation.js` + 31 tests). Append-boundary validation landed
+> as CORE-2 M2 (`e16a39f`). Adapter-level throwing dropped by design per plan
+> v3 [GROK-9] — adapters keep skip-on-incomplete; validation lives at
+> `repository.append`. Fingerprint relocated to `src/archive-records.js`
+> (CORE-2 M1, `bd8ae37`) per [GROK-5] single-canonical-home rule.
 
 ## Summary
 Create `src/domain/` as the single canonical home for the `PriceObservation`

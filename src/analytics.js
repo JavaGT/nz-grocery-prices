@@ -1,12 +1,37 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function effectivePrice(observation, policy) {
+/**
+ * Single source of truth for effective-price semantics (module-private; see
+ * buildPriceSeries for the exported surface built on top of it).
+ *
+ * Candidates: regular always; promo when defined; member when
+ * pricePolicy === "member" and defined. Lowest cents wins; ties resolve in
+ * regular > promo > member priority order (reduce only replaces on a
+ * strictly lower price, so earlier candidates win ties).
+ *
+ * Promotion windows: when the observation carries a promotion object with
+ * startsAt/endsAt, promo cents only count as active if the window includes
+ * `at` (boundaries inclusive on both ends). Without a promotion object — or
+ * without window fields — promo cents are treated as always active, which
+ * preserves legacy behavior for data collected before windows existed.
+ *
+ * Callers anchor evaluation deliberately: baseline/history points evaluate
+ * at their own observedAt, ongoing sales at query.at. When `at` is omitted
+ * windows cannot exclude anything (legacy fallback).
+ */
+function selectEffectivePrice(observation, { pricePolicy = "public", at } = {}) {
+  const atMs = at === undefined ? undefined : Date.parse(at);
+  const promoAllowed =
+    atMs === undefined ||
+    !observation.promotion ||
+    promotionIsActive(observation.promotion, atMs);
+
   const candidates = [
     { cents: observation.price.regularCents, kind: "regular" },
-    ...(observation.price.promoCents === undefined
+    ...(observation.price.promoCents === undefined || !promoAllowed
       ? []
       : [{ cents: observation.price.promoCents, kind: "promo" }]),
-    ...(policy !== "member" || observation.price.memberCents === undefined
+    ...(pricePolicy !== "member" || observation.price.memberCents === undefined
       ? []
       : [{ cents: observation.price.memberCents, kind: "member" }])
   ];
@@ -16,6 +41,7 @@ function effectivePrice(observation, policy) {
   );
 }
 
+/** Groups observations by offer (productId + storeId), preserving keys. */
 function groupObservations(observations) {
   const groups = new Map();
 
@@ -26,7 +52,16 @@ function groupObservations(observations) {
     groups.set(key, group);
   }
 
-  return groups.values();
+  return groups;
+}
+
+/**
+ * Ascending observedAt sort applied inside analytics: input order is never
+ * trusted. Array.prototype.sort is stable, so observations sharing a
+ * timestamp keep their input order as the tie-break.
+ */
+function byObservedAt(left, right) {
+  return Date.parse(left.observedAt) - Date.parse(right.observedAt);
 }
 
 function roundPercent(value) {
@@ -54,11 +89,12 @@ export function calculateSales(observations, query = {}) {
   const productIds = query.productIds ? new Set(query.productIds) : undefined;
   const sales = [];
 
-  for (const group of groupObservations(observations)) {
+  for (const group of groupObservations(observations).values()) {
     const relevant = group.filter((observation) =>
       !productIds || productIds.has(observation.product.id)
     );
     if (relevant.length < 2) continue;
+    relevant.sort(byObservedAt);
 
     const currentObservation = relevant.at(-1);
     const currentAtMs = Date.parse(currentObservation.observedAt);
@@ -71,12 +107,20 @@ export function calculateSales(observations, query = {}) {
     );
     if (baseline.length < minSamples) continue;
 
-    const current = effectivePrice(currentObservation, pricePolicy);
+    // Every observation — current and historical — evaluates promotion
+    // activity at its own observedAt, so stale promotional cents never
+    // pollute baselines (see test fixture: GROK-8 behavior fix).
+    const current = selectEffectivePrice(currentObservation, {
+      pricePolicy,
+      at: currentObservation.observedAt
+    });
     const baselinePrices = baseline.map(
-      (observation) => effectivePrice(observation, pricePolicy).cents
+      (observation) =>
+        selectEffectivePrice(observation, { pricePolicy, at: observation.observedAt }).cents
     );
     const allPreviousPrices = previous.map(
-      (observation) => effectivePrice(observation, pricePolicy).cents
+      (observation) =>
+        selectEffectivePrice(observation, { pricePolicy, at: observation.observedAt }).cents
     );
     const average = baselinePrices.reduce((sum, price) => sum + price, 0) / baselinePrices.length;
     const dropPercent = ((average - current.cents) / average) * 100;
@@ -115,13 +159,21 @@ export function calculateOngoingSales(observations, query = {}) {
   const freshWithinDays = query.freshWithinDays ?? 7;
   const pricePolicy = query.pricePolicy ?? "public";
   const productIds = query.productIds ? new Set(query.productIds) : undefined;
-  const latest = new Map();
 
+  const candidates = [];
   for (const observation of observations) {
     if (Date.parse(observation.observedAt) > atMs) continue;
     if (query.retailer && observation.store.retailer !== query.retailer) continue;
     if (query.storeId && observation.store.id !== query.storeId) continue;
     if (productIds && !productIds.has(observation.product.id)) continue;
+    candidates.push(observation);
+  }
+
+  // Latest observation per offer wins regardless of input order; the stable
+  // sort keeps input order among equal timestamps, preserving the previous
+  // last-write-wins outcome for pre-sorted input.
+  const latest = new Map();
+  for (const observation of [...candidates].sort(byObservedAt)) {
     latest.set(`${observation.product.id}\u0000${observation.store.id}`, observation);
   }
 
@@ -137,7 +189,9 @@ export function calculateOngoingSales(observations, query = {}) {
         (pricePolicy === "member" && observation.price.memberCents !== undefined))
     )
     .map((observation) => {
-      const current = effectivePrice(observation, pricePolicy);
+      // Ongoing sales evaluate promotion activity at query.at, not at the
+      // observation time: a promo live "now" is sellable now.
+      const current = selectEffectivePrice(observation, { pricePolicy, at });
       const regularCents = observation.price.regularCents;
       const savePercent = regularCents > current.cents
         ? roundPercent(((regularCents - current.cents) / regularCents) * 100)
@@ -152,6 +206,37 @@ export function calculateOngoingSales(observations, query = {}) {
       };
     })
     .sort((left, right) => (right.savePercent ?? 0) - (left.savePercent ?? 0));
+}
+
+/**
+ * Builds per-offer price histories: one series per productId+storeId pair,
+ * points sorted ascending by observedAt, each priced by evaluating promotion
+ * activity at that point's own observedAt. Series are sorted by productId
+ * then storeId; empty input yields [].
+ */
+export function buildPriceSeries(observations, { pricePolicy = "public" } = {}) {
+  const series = [...groupObservations(observations).entries()]
+    .map(([key, group]) => {
+      const [productId, storeId] = key.split("\u0000");
+      const points = [...group].sort(byObservedAt).map((observation) => {
+        const price = selectEffectivePrice(observation, {
+          pricePolicy,
+          at: observation.observedAt
+        });
+        return { observedAt: observation.observedAt, cents: price.cents, kind: price.kind };
+      });
+      return { productId, storeId, points };
+    });
+
+  return series.sort((left, right) => {
+    if (left.productId !== right.productId) {
+      return left.productId < right.productId ? -1 : 1;
+    }
+    if (left.storeId !== right.storeId) {
+      return left.storeId < right.storeId ? -1 : 1;
+    }
+    return 0;
+  });
 }
 
 export function toAgentFeed(sales, generatedAt, ongoingSales = []) {

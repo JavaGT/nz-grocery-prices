@@ -1,32 +1,31 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-// Recreate the analytics functions inline to test the logic without importing
-// (the module can also be imported directly, but this validates behavior from scratch)
-
-function effectivePrice(observation, policy) {
-  const candidates = [
-    { cents: observation.price.regularCents, kind: "regular" },
-    ...(observation.price.promoCents === undefined
-      ? []
-      : [{ cents: observation.price.promoCents, kind: "promo" }]),
-    ...(policy !== "member" || observation.price.memberCents === undefined
-      ? []
-      : [{ cents: observation.price.memberCents, kind: "member" }])
-  ];
-  return candidates.reduce((lowest, candidate) =>
-    candidate.cents < lowest.cents ? candidate : lowest
-  );
-}
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function now() {
-  return new Date().toISOString();
+// Fixed anchor so window/boundary tests are fully deterministic.
+const BASE_MS = Date.parse("2026-08-20T12:00:00.000Z");
+
+/** ISO timestamp offset from the fixed base by `offsetMs` milliseconds. */
+function iso(offsetMs) {
+  return new Date(BASE_MS + offsetMs).toISOString();
 }
 
+/** Minimal observation at a fixed absolute time (analytics needs no source). */
+function obsAt(observedAtOffsetMs, overrides = {}) {
+  return {
+    product: { id: "p:1", name: "P", brand: "B", categories: [], images: [] },
+    store: { id: "s:1", retailer: "testretailer", name: "S" },
+    price: { regularCents: 1000 },
+    observedAt: iso(observedAtOffsetMs),
+    isOnSpecial: true,
+    ...overrides,
+  };
+}
+
+/** Observation relative to the fixed BASE_MS anchor; daysAgo may be fractional. */
 function makeObs(overrides = {}) {
-  const nowMs = Date.now();
+  const observedAtMs = BASE_MS - (overrides.daysAgo || 0) * DAY_MS;
   return {
     product: {
       id: "test:123",
@@ -48,19 +47,29 @@ function makeObs(overrides = {}) {
       memberCents: undefined,
       ...overrides.price
     },
-    observedAt: new Date(nowMs - (overrides.daysAgo || 0) * DAY_MS).toISOString(),
-    observedAtMs: nowMs - (overrides.daysAgo || 0) * DAY_MS,
+    observedAt: new Date(observedAtMs).toISOString(),
     isOnSpecial: overrides.isOnSpecial ?? true,
-    promotion: overrides.promotion ?? {
-      type: "SPECIAL",
-      savePercent: 20,
-      saveCents: 200
-    },
+    promotion: overrides.promotion ?? undefined,
     ...overrides
   };
 }
 
-import { calculateSales, calculateOngoingSales, toAgentFeed } from "../src/analytics.js";
+/** Promotion window spanning [startOffsetMs, endOffsetMs] around BASE_MS. */
+function windowAround(startOffsetMs, endOffsetMs) {
+  return {
+    type: "SPECIAL",
+    savePercent: 25,
+    startsAt: iso(startOffsetMs),
+    endsAt: iso(endOffsetMs),
+  };
+}
+
+import {
+  buildPriceSeries,
+  calculateOngoingSales,
+  calculateSales,
+  toAgentFeed,
+} from "../src/analytics.js";
 
 describe("calculateSales", () => {
   it("returns empty array for single observation (need >1)", () => {
@@ -118,7 +127,11 @@ describe("calculateSales", () => {
 describe("calculateOngoingSales", () => {
   it("returns promotion observations with active promos", () => {
     const obs = [
-      makeObs({ daysAgo: 1, price: { regularCents: 1000, promoCents: 700 } }),
+      makeObs({
+        daysAgo: 1,
+        price: { regularCents: 1000, promoCents: 700 },
+        promotion: { type: "SPECIAL", savePercent: 30 },
+      }),
     ];
     const sales = calculateOngoingSales(obs);
     assert.equal(sales.length, 1);
@@ -169,5 +182,280 @@ describe("toAgentFeed", () => {
     assert.equal(feed.ongoingSales.length, 1);
     assert.equal(feed.ongoingSales[0].productName, "P2");
     assert.equal(feed.ongoingSales[0].savePercent, 30);
+  });
+});
+
+describe("calculateSales — ordering and windows", () => {
+  it("detects the sale when input arrives reverse-chronologically", () => {
+    // Previously the last array element was treated as "current"; unsorted
+    // input made analytics compare against the wrong end of the history.
+    const obs = [
+      makeObs({ daysAgo: 1, price: { regularCents: 800 } }),
+      makeObs({ daysAgo: 20, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 25, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 30, price: { regularCents: 1000 } }),
+    ];
+    const sales = calculateSales(obs, { minDropPercent: 5, baselineDays: 60, minSamples: 2 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].current.cents, 800);
+    assert.equal(sales[0].baseline.sampleCount, 3);
+  });
+
+  it("treats duplicate-timestamp observations as insertion-order stable", () => {
+    // Equal timestamps keep input order (stable sort): the later-inserted
+    // 900c observation is "current", the earlier 1000c one joins the baseline.
+    const stamp = iso(-2 * DAY_MS);
+    const obs = [
+      makeObs({ daysAgo: 10, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 10, price: { regularCents: 1000 } }),
+      { ...makeObs({ price: { regularCents: 1000 } }), observedAt: stamp },
+      { ...makeObs({ price: { regularCents: 900 } }), observedAt: stamp },
+    ];
+    const sales = calculateSales(obs, { minSamples: 2 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].current.cents, 900);
+    assert.deepEqual(sales[0].baseline.averageCents, 1000);
+  });
+
+  /**
+   * [GROK-8] Behavior-change golden fixture. A product whose promotional
+   * pricing ENDED long before the recent baseline samples: every baseline
+   * observation still carries promoCents=400 plus the expired window, and
+   * the current observation is a plain 800c regular price.
+   *
+   * OLD semantics (windows ignored): baselines averaged 400c, so the real
+   * 20% drop read as -100% → NO deal surfaced at all.
+   * NEW semantics (per-point evaluation): expired promo cents are ignored,
+   * baselines average 1000c → a genuine 20% drop is reported.
+   */
+  it("baselines at REGULAR cents once a promotion window has expired [GROK-8]", () => {
+    const expiredPromoWindow = {
+      type: "SPECIAL",
+      savePercent: 60,
+      startsAt: iso(-45 * DAY_MS),
+      endsAt: iso(-40 * DAY_MS), // ended 10+ days before any baseline sample
+    };
+    const obs = [
+      makeObs({
+        daysAgo: 30,
+        price: { regularCents: 1000, promoCents: 400 },
+        promotion: expiredPromoWindow,
+      }),
+      makeObs({
+        daysAgo: 25,
+        price: { regularCents: 1000, promoCents: 400 },
+        promotion: expiredPromoWindow,
+      }),
+      makeObs({ daysAgo: 1, price: { regularCents: 800 } }), // honest new price
+    ];
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].baseline.averageCents, 1000); // NOT 400 (old bug)
+    assert.equal(sales[0].baseline.sampleCount, 2);
+    assert.equal(sales[0].current.cents, 800);
+    assert.equal(sales[0].dropPercent, 20); // previously -100 → sale invisible
+  });
+
+  it("counts promo cents for baseline points inside their own window", () => {
+    const obs = [
+      makeObs({
+        daysAgo: 10,
+        price: { regularCents: 1000, promoCents: 600 },
+        promotion: windowAround(-10.5 * DAY_MS, -9.5 * DAY_MS), // covers the point
+      }),
+      makeObs({ daysAgo: 7, price: { regularCents: 1200 } }),
+      makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
+      makeObs({
+        daysAgo: 0,
+        price: { regularCents: 1000, promoCents: 700 },
+        promotion: windowAround(-DAY_MS, DAY_MS),
+      }),
+    ];
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, minSamples: 3 });
+    // Baseline avg = (600 + 1200 + 1000) / 3 ≈ 933; current 700 → ~25% drop.
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].baseline.averageCents, 933);
+    assert.equal(sales[0].current.cents, 700);
+    assert.equal(sales[0].current.kind, "promo");
+  });
+
+  it("member cents are excluded under the default public policy", () => {
+    const obs = [
+      makeObs({ daysAgo: 10, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 0, price: { regularCents: 1000, memberCents: 500 } }),
+    ];
+    const sales = calculateSales(obs, { minDropPercent: 5, minSamples: 2 });
+    assert.equal(sales.length, 0); // member price invisible to public policy
+  });
+
+  it("member cents apply under the member policy", () => {
+    const obs = [
+      makeObs({ daysAgo: 10, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 0, price: { regularCents: 1000, memberCents: 500 } }),
+    ];
+    const sales = calculateSales(obs, { pricePolicy: "member", minDropPercent: 5, minSamples: 2 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].current.cents, 500);
+    assert.equal(sales[0].current.kind, "member");
+  });
+
+  it("does not report an all-time low on a tie with the previous low", () => {
+    const obs = [
+      makeObs({ daysAgo: 10, price: { regularCents: 900 } }),
+      makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 0, price: { regularCents: 900 } }),
+    ];
+    const sales = calculateSales(obs, { minDropPercent: 0 });
+    assert.equal(sales.length, 1); // still a sale via ATL inclusion…
+    assert.equal(sales[0].isAllTimeLow, false); // …but equal low is NOT an ATL
+  });
+
+  it("returns [] for empty input and single samples below minSamples", () => {
+    assert.deepEqual(calculateSales([]), []);
+    assert.deepEqual(
+      calculateSales([makeObs({ daysAgo: 0 })], { minSamples: 2 }),
+      []
+    );
+  });
+});
+
+describe("buildPriceSeries", () => {
+  it("returns [] for empty input", () => {
+    assert.deepEqual(buildPriceSeries([]), []);
+  });
+
+  it("splits one product across stores into separate sorted series", () => {
+    const series = buildPriceSeries([
+      obsAt(0, { store: { id: "s:2", retailer: "r", name: "S2" }, price: { regularCents: 900 } }),
+      obsAt(-DAY_MS, { price: { regularCents: 1000 } }),
+      obsAt(0, { price: { regularCents: 800 } }),
+      obsAt(-DAY_MS, { store: { id: "s:2", retailer: "r", name: "S2" }, price: { regularCents: 950 } }),
+    ]);
+    assert.equal(series.length, 2);
+    const [store1, store2] = series;
+    assert.equal(store1.productId, "p:1");
+    assert.equal(store1.storeId, "s:1");
+    assert.deepEqual(store1.points.map((p) => p.cents), [1000, 800]);
+    assert.equal(store2.storeId, "s:2");
+    assert.deepEqual(store2.points.map((p) => p.cents), [950, 900]);
+    assert.ok(store1.points[0].observedAt < store1.points[1].observedAt);
+  });
+
+  it("sorts output series by productId then storeId regardless of input order", () => {
+    const otherProduct = { id: "a:1", name: "A", brand: "B", categories: [], images: [] };
+    const series = buildPriceSeries([
+      obsAt(0, { product: otherProduct, store: { id: "z:1", retailer: "r", name: "Z" } }),
+      obsAt(0),
+    ]);
+    assert.deepEqual(
+      series.map((s) => `${s.productId}@${s.storeId}`),
+      ["a:1@z:1", "p:1@s:1"]
+    );
+  });
+
+  it("applies promotion windows inclusive of both boundaries per point", () => {
+    const promoPrice = { regularCents: 1000, promoCents: 500 };
+    const series = buildPriceSeries([
+      // Exactly endsAt: still active → promo.
+      obsAt(DAY_MS, {
+        price: promoPrice,
+        promotion: windowAround(-DAY_MS, DAY_MS),
+      }),
+      // endsAt + 1ms: expired → falls back to regular.
+      obsAt(DAY_MS + 1, { price: promoPrice, promotion: windowAround(-DAY_MS, DAY_MS) }),
+      // Exactly startsAt: active → promo.
+      obsAt(-DAY_MS, { price: promoPrice, promotion: windowAround(-DAY_MS, DAY_MS) }),
+      // startsAt - 1ms: not yet active → regular.
+      obsAt(-DAY_MS - 1, { price: promoPrice, promotion: windowAround(-DAY_MS, DAY_MS) }),
+      // No window fields: legacy always-active promo.
+      obsAt(2 * DAY_MS, { price: promoPrice, promotion: { type: "SPECIAL" } }),
+    ]);
+    assert.deepEqual(
+      series[0].points.map((p) => [p.kind, p.cents]),
+      [
+        ["regular", 1000], // startsAt - 1ms: not yet active
+        ["promo", 500],    // exactly startsAt: inclusive
+        ["promo", 500],    // exactly endsAt: inclusive
+        ["regular", 1000], // endsAt + 1ms: expired
+        ["promo", 500],    // no window fields: legacy always-active promo
+      ]
+    );
+  });
+
+  it("unsorted input produces identical output to pre-sorted input", () => {
+    const make = () => [
+      obsAt(2 * DAY_MS, { price: { regularCents: 700 } }),
+      obsAt(-DAY_MS, { price: { regularCents: 1000 } }),
+      obsAt(0, { price: { regularCents: 900 } }),
+      obsAt(DAY_MS, { price: { regularCents: 800 } }),
+    ];
+    const shuffled = [...make()].reverse();
+    assert.deepEqual(buildPriceSeries(shuffled), buildPriceSeries(make()));
+  });
+
+  it("honors the member price policy in series points", () => {
+    const series = buildPriceSeries(
+      [obsAt(0, { price: { regularCents: 1000, memberCents: 600 } })],
+      { pricePolicy: "member" }
+    );
+    assert.deepEqual(series[0].points, [{
+      observedAt: iso(0),
+      cents: 600,
+      kind: "member",
+    }]);
+  });
+});
+
+describe("calculateOngoingSales — windows and edge cases", () => {
+  it("includes a promo exactly at endsAt and excludes it after end date+1ms", () => {
+    const active = [makeObs({
+      daysAgo: 1,
+      price: { regularCents: 1000, promoCents: 700 },
+      promotion: windowAround(-2 * DAY_MS, 0),
+    })];
+    const atEnd = calculateOngoingSales(active, { at: iso(0) });
+    assert.equal(atEnd.length, 1);
+
+    const justAfter = calculateOngoingSales(active, { at: iso(1) }); // endsAt+1ms
+    assert.equal(justAfter.length, 0);
+  });
+
+  it("uses only the latest observation per offer under unsorted input", () => {
+    const obs = [
+      makeObs({
+        daysAgo: 3,
+        price: { regularCents: 1000, promoCents: 400 },
+        promotion: { type: "SPECIAL" },
+      }),
+      makeObs({
+        daysAgo: 1,
+        price: { regularCents: 1000, promoCents: 800 },
+        promotion: { type: "SPECIAL" },
+      }),
+    ];
+    const shuffled = [...obs].reverse();
+    for (const input of [obs, shuffled]) {
+      const sales = calculateOngoingSales(input);
+      assert.equal(sales.length, 1);
+      assert.equal(sales[0].current.cents, 800); // newest observation wins
+    }
+  });
+
+  it("returns [] for empty input", () => {
+    assert.deepEqual(calculateOngoingSales([]), []);
+  });
+
+  it("ignores future-dated observations beyond query.at", () => {
+    const obs = [
+      makeObs({
+        daysAgo: -10, // 10 days in the future relative to BASE_MS
+        price: { regularCents: 1000, promoCents: 700 },
+        promotion: { type: "SPECIAL" },
+      }),
+    ];
+    const sales = calculateOngoingSales(obs, { at: iso(0) });
+    assert.equal(sales.length, 0);
   });
 });

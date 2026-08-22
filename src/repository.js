@@ -1,6 +1,6 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fingerprint } from "./archive-records.js";
+import { encodeRecord, fingerprint } from "./archive-records.js";
 import { validateObservation } from "./domain/observation.js";
 
 /**
@@ -109,70 +109,255 @@ export class MemoryObservationRepository {
  * Change-only archive format (v2): product and store revisions are content
  * addressed, offer revisions hold prices, and daily listing snapshots hold
  * only added/removed offer IDs. This makes unchanged daily collections tiny.
+ *
+ * Writer protocol (all mutations):
+ *   acquire `<archive>.lock` (mkdir-based, cross-process) → re-stat the file
+ *   and reload if it changed on disk → plan additions PURELY against a
+ *   draft index → persist (append: open('a') + write + fh.sync(); rewrite:
+ *   temp file + fh.sync() + atomic rename + parent-dir fsync) → only then
+ *   apply the additions to in-memory state. In-process callers queue behind
+ *   one promise chain.
+ *
+ * Durability honesty: fh.sync() is fsync(2). On APFS that is not
+ * F_FULLFSYNC — this buys crash-atomicity and torn-tail recovery, NOT
+ * guaranteed power-loss durability.
  */
 export class JsonlObservationRepository {
+  // Mutable archive index. Records are never mutated after creation, so the
+  // planner can safely share them with a draft copy of this structure.
+  #index = {
+    records: [],
+    productRevisions: new Map(),
+    storeRevisions: new Map(),
+    offerRevisions: new Map(),
+    snapshots: new Map(),
+    latestProduct: new Map(),
+    latestStore: new Map(),
+    latestOffer: new Map(),
+    activeListings: new Map(),
+  };
   #loaded = false;
-  #records = [];
-  #productRevisions = new Map();
-  #storeRevisions = new Map();
-  #offerRevisions = new Map();
-  #snapshots = new Map();
-  #latestProduct = new Map();
-  #latestStore = new Map();
-  #latestOffer = new Map();
-  #activeListings = new Map();
-
-  #hasRevision(type, id, hash) {
-    const revisions = type === "product"
-      ? this.#productRevisions.get(id)
-      : this.#storeRevisions.get(id);
-    return revisions?.some((revision) => revision.hash === hash) ?? false;
-  }
+  #lockPath;
+  // Stat signature captured when the file was loaded; a mismatch under the
+  // lock means another writer touched the file and we must reload.
+  #fileSignature = null;
+  // Whether the loaded file's final byte was "\n"; guards against gluing a
+  // recovered unterminated tail to the next append.
+  #endsWithNewline = true;
+  // Serializes mutations in this process behind one promise chain.
+  #queue = Promise.resolve();
 
   constructor(filePath = "data/prices.jsonl") {
     this.filePath = resolve(filePath);
+    this.#lockPath = `${this.filePath}.lock`;
   }
 
-  #push(record) {
-    this.#records.push(record);
+  #hasRevision(type, id, hash, index = this.#index) {
+    const revisions = type === "product"
+      ? index.productRevisions.get(id)
+      : index.storeRevisions.get(id);
+    return revisions?.some((revision) => revision.hash === hash) ?? false;
+  }
+
+  /** Applies one record to `index` (the live state or a planning draft). */
+  #applyRecord(index, record) {
+    index.records.push(record);
 
     if (record.type === "product") {
-      const revisions = this.#productRevisions.get(record.productId) ?? [];
+      const revisions = index.productRevisions.get(record.productId) ?? [];
       revisions.push(record);
-      this.#productRevisions.set(record.productId, revisions);
-      this.#latestProduct.set(record.productId, record);
+      index.productRevisions.set(record.productId, revisions);
+      index.latestProduct.set(record.productId, record);
       return;
     }
     if (record.type === "store") {
-      const revisions = this.#storeRevisions.get(record.storeId) ?? [];
+      const revisions = index.storeRevisions.get(record.storeId) ?? [];
       revisions.push(record);
-      this.#storeRevisions.set(record.storeId, revisions);
-      this.#latestStore.set(record.storeId, record);
+      index.storeRevisions.set(record.storeId, revisions);
+      index.latestStore.set(record.storeId, record);
       return;
     }
     if (record.type === "offer") {
-      const revisions = this.#offerRevisions.get(record.offerId) ?? [];
+      const revisions = index.offerRevisions.get(record.offerId) ?? [];
       revisions.push(record);
-      this.#offerRevisions.set(record.offerId, revisions);
-      this.#latestOffer.set(record.offerId, record);
+      index.offerRevisions.set(record.offerId, revisions);
+      index.latestOffer.set(record.offerId, record);
       return;
     }
     if (record.type === "snapshot") {
       const id = listingId(record.scope, record.storeId);
-      const snapshots = this.#snapshots.get(id) ?? [];
+      const snapshots = index.snapshots.get(id) ?? [];
       snapshots.push(record);
-      this.#snapshots.set(id, snapshots);
-      const active = this.#activeListings.get(id) ?? new Set();
+      index.snapshots.set(id, snapshots);
+      const active = index.activeListings.get(id) ?? new Set();
       for (const idToAdd of record.added) active.add(idToAdd);
       for (const idToRemove of record.removed) active.delete(idToRemove);
-      this.#activeListings.set(id, active);
+      index.activeListings.set(id, active);
     }
   }
 
-  #productRecord(observation) {
+  /** Shallow structural copy of the index; record objects are shared. */
+  #draftIndex() {
+    const copyAll = (map) =>
+      new Map([...map].map(([key, value]) => [key, [...value]]));
+    return {
+      records: [...this.#index.records],
+      productRevisions: copyAll(this.#index.productRevisions),
+      storeRevisions: copyAll(this.#index.storeRevisions),
+      offerRevisions: copyAll(this.#index.offerRevisions),
+      snapshots: copyAll(this.#index.snapshots),
+      latestProduct: new Map(this.#index.latestProduct),
+      latestStore: new Map(this.#index.latestStore),
+      latestOffer: new Map(this.#index.latestOffer),
+      activeListings: new Map(
+        [...this.#index.activeListings].map(([key, set]) => [key, new Set(set)]),
+      ),
+    };
+  }
+
+  // ---- locking ----
+
+  /**
+   * Cross-process exclusive lock: mkdir is atomic, so creating the lock
+   * directory succeeds for exactly one writer. scripts/
+   * archive-daily-local.sh takes the same lock while publishing.
+   */
+  async #acquireLock() {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    try {
+      await mkdir(this.#lockPath);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(
+          `Archive is locked by another writer (${this.#lockPath}). If no writer is running, remove the lock directory.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
+  async #releaseLock() {
+    // A failed unlock must not mask the operation's own outcome; a stale
+    // lock directory is safe to remove manually.
+    await rmdir(this.#lockPath).catch(() => {});
+  }
+
+  /** Runs `operation` holding the lock, serialized behind the queue. */
+  async #withLock(operation) {
+    const run = this.#queue.then(async () => {
+      await this.#acquireLock();
+      try {
+        return await operation();
+      } finally {
+        await this.#releaseLock();
+      }
+    });
+    this.#queue = run.catch(() => {});
+    return run;
+  }
+
+  // ---- durability ----
+
+  /**
+   * fsync the parent directory so a newly created file's directory entry
+   * survives a crash. See the class comment for the APFS caveat.
+   */
+  async #fsyncParentDir() {
+    const handle = await open(dirname(this.filePath), "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async #currentSignature() {
+    try {
+      const stats = await stat(this.filePath);
+      return { mtimeMs: stats.mtimeMs, size: stats.size, ino: stats.ino };
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  #signatureChanged(current) {
+    if (current === null || this.#fileSignature === null) {
+      return current !== this.#fileSignature;
+    }
+    return (
+      current.ino !== this.#fileSignature.ino ||
+      current.size !== this.#fileSignature.size ||
+      current.mtimeMs !== this.#fileSignature.mtimeMs
+    );
+  }
+
+  /** Discards every bit of in-memory archive state. */
+  #resetState() {
+    this.#index = {
+      records: [],
+      productRevisions: new Map(),
+      storeRevisions: new Map(),
+      offerRevisions: new Map(),
+      snapshots: new Map(),
+      latestProduct: new Map(),
+      latestStore: new Map(),
+      latestOffer: new Map(),
+      activeListings: new Map(),
+    };
+    this.#loaded = false;
+    this.#fileSignature = null;
+    this.#endsWithNewline = true;
+  }
+
+  /** Under the lock: reload from disk if the file changed since we loaded. */
+  async #reloadIfChanged() {
+    const signature = await this.#currentSignature();
+    if (!this.#signatureChanged(signature)) return;
+    this.#resetState();
+    await this.#load();
+  }
+
+  // ---- loading ----
+
+  async #load() {
+    if (this.#loaded) return;
+    let contents = "";
+    try {
+      contents = await readFile(this.filePath, "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    this.#endsWithNewline = contents === "" || contents.endsWith("\n");
+
+    for (const [index, line] of contents.split("\n").entries()) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.version === 2 && record.type) {
+          this.#applyRecord(this.#index, record);
+        } else if (record.product && record.store && record.price && record.source) {
+          // Legacy observations are accepted and projected into v2 in memory.
+          const additions = this.#planAppend([record]);
+          for (const addition of additions) this.#applyRecord(this.#index, addition);
+        } else {
+          throw new TypeError("Unknown archive record");
+        }
+      } catch (error) {
+        throw new Error(`Invalid JSONL at ${this.filePath}:${index + 1}`, { cause: error });
+      }
+    }
+    this.#fileSignature = await this.#currentSignature();
+    this.#loaded = true;
+  }
+
+  // ---- pure planning ----
+
+  #planProductRecord(index, observation) {
     const hash = fingerprint(observation.product);
-    const previous = this.#latestProduct.get(observation.product.id);
-    if (previous?.hash === hash || this.#hasRevision("product", observation.product.id, hash)) {
+    const previous = index.latestProduct.get(observation.product.id);
+    if (previous?.hash === hash || this.#hasRevision("product", observation.product.id, hash, index)) {
       return undefined;
     }
     return {
@@ -185,10 +370,10 @@ export class JsonlObservationRepository {
     };
   }
 
-  #storeRecord(observation) {
+  #planStoreRecord(index, observation) {
     const hash = fingerprint(observation.store);
-    const previous = this.#latestStore.get(observation.store.id);
-    if (previous?.hash === hash || this.#hasRevision("store", observation.store.id, hash)) {
+    const previous = index.latestStore.get(observation.store.id);
+    if (previous?.hash === hash || this.#hasRevision("store", observation.store.id, hash, index)) {
       return undefined;
     }
     return {
@@ -201,7 +386,7 @@ export class JsonlObservationRepository {
     };
   }
 
-  #offerRecord(observation) {
+  #planOfferRecord(index, observation) {
     const id = offerId(observation);
     const data = {
       price: structuredClone(observation.price),
@@ -209,7 +394,7 @@ export class JsonlObservationRepository {
       source: structuredClone(observation.source),
     };
     const hash = fingerprint(data);
-    const previous = this.#latestOffer.get(id);
+    const previous = index.latestOffer.get(id);
     if (previous?.hash === hash) return undefined;
     return {
       version: 2,
@@ -223,14 +408,14 @@ export class JsonlObservationRepository {
     };
   }
 
-  #snapshotRecord(scope, storeId, observedAt, currentOfferIds) {
+  #planSnapshotRecord(index, scope, storeId, observedAt, currentOfferIds) {
     const id = listingId(scope, storeId);
-    const previous = this.#activeListings.get(id) ?? new Set();
+    const previous = index.activeListings.get(id) ?? new Set();
     const added = [...currentOfferIds].filter((value) => !previous.has(value)).sort();
     const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
     const offers = [...currentOfferIds]
       .sort()
-      .map((id) => [id, this.#latestOffer.get(id)?.hash]);
+      .map((id) => [id, index.latestOffer.get(id)?.hash]);
     return {
       version: 2,
       type: "snapshot",
@@ -244,24 +429,30 @@ export class JsonlObservationRepository {
     };
   }
 
-  #ingest(observations, options = {}) {
+  /**
+   * PURE: computes the records `observations` would add, against a draft
+   * copy of the index. Never touches live state, so a persist failure
+   * leaves memory untouched and a retry re-plans identically.
+   */
+  #planAppend(observations, options = {}) {
+    const draft = this.#draftIndex();
     const additions = [];
     const listings = new Map();
 
     for (const observation of observations) {
-      const product = this.#productRecord(observation);
+      const product = this.#planProductRecord(draft, observation);
       if (product) {
-        this.#push(product);
+        this.#applyRecord(draft, product);
         additions.push(product);
       }
-      const store = this.#storeRecord(observation);
+      const store = this.#planStoreRecord(draft, observation);
       if (store) {
-        this.#push(store);
+        this.#applyRecord(draft, store);
         additions.push(store);
       }
-      const offer = this.#offerRecord(observation);
+      const offer = this.#planOfferRecord(draft, observation);
       if (offer) {
-        this.#push(offer);
+        this.#applyRecord(draft, offer);
         additions.push(offer);
       }
 
@@ -276,85 +467,78 @@ export class JsonlObservationRepository {
     }
 
     for (const [storeId, listing] of listings) {
-      const snapshot = this.#snapshotRecord(
+      const snapshot = this.#planSnapshotRecord(
+        draft,
         options.snapshotScope,
         storeId,
         listing.observedAt,
         listing.offerIds,
       );
-      this.#push(snapshot);
       additions.push(snapshot);
     }
     return additions;
   }
 
-  async #load() {
-    if (this.#loaded) return;
-    let contents = "";
+  // ---- mutation (writer protocol) ----
+
+  /**
+   * Persists `additions` to the archive: open-append → write → fh.sync().
+   * Prepends a newline separator when the file's tail lacked one so a
+   * recovered unterminated record cannot glue to the batch. fsyncs the
+   * parent directory only when this call created the file.
+   */
+  async #persistAdditions(additions) {
+    const existed = this.#fileSignature !== null;
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const separator = this.#endsWithNewline ? "" : "\n";
+    const payload =
+      separator + additions.map((record) => encodeRecord(record)).join("\n") + "\n";
+    const handle = await open(this.filePath, "a");
     try {
-      contents = await readFile(this.filePath, "utf8");
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      await handle.write(payload, null, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
-
-    for (const [index, line] of contents.split("\n").entries()) {
-      if (!line.trim()) continue;
-      try {
-        const record = JSON.parse(line);
-        if (record.version === 2 && record.type) {
-          this.#push(record);
-        } else if (record.product && record.store && record.price && record.source) {
-          // Legacy observations are accepted and projected into v2 in memory.
-          this.#ingest([record]);
-        } else {
-          throw new TypeError("Unknown archive record");
-        }
-      } catch (error) {
-        throw new Error(`Invalid JSONL at ${this.filePath}:${index + 1}`, { cause: error });
-      }
-    }
-    this.#loaded = true;
+    if (!existed) await this.#fsyncParentDir();
   }
 
-  #revisionAt(revisions, at) {
-    for (let index = revisions.length - 1; index >= 0; index -= 1) {
-      if (eventTime(revisions[index]) <= at) return revisions[index];
-    }
-    return revisions[0];
-  }
-
-  #listingState(scope, storeId, at) {
-    const snapshots = this.#snapshots.get(listingId(scope, storeId)) ?? [];
-    const active = new Set();
-    let lastSeenAt;
-    let known = false;
-    for (const snapshot of snapshots) {
-      if (eventTime(snapshot) > at) break;
-      known = true;
-      for (const id of snapshot.added) active.add(id);
-      for (const id of snapshot.removed) active.delete(id);
-      lastSeenAt = snapshot.observedAt;
-    }
-    return { active, lastSeenAt, known };
-  }
-
-  async append(observations, options = {}) {
-    assertValidObservations(observations);
-    await this.#load();
-    const additions = this.#ingest(observations, options);
+  async #appendLocked(observations, options) {
+    await this.#reloadIfChanged();
+    const additions = this.#planAppend(observations, options);
     if (additions.length > 0) {
-      await mkdir(dirname(this.filePath), { recursive: true });
-      await appendFile(this.filePath, additions.map((record) => JSON.stringify(record)).join("\n") + "\n");
+      await this.#persistAdditions(additions);
+      for (const record of additions) this.#applyRecord(this.#index, record);
+      this.#fileSignature = await this.#currentSignature();
+      this.#endsWithNewline = true;
     }
+    // Memory now matches the persisted file; mark loaded so queries never
+    // re-read and re-apply the records we just applied (the duplication bug).
+    this.#loaded = true;
     return additions.length;
   }
 
-  async compact() {
-    await this.#load();
+  /**
+   * Validates, then (holding the lock) plans purely, persists durably, and
+   * only then updates in-memory state. Returns the number of records added.
+   */
+  async append(observations, options = {}) {
+    assertValidObservations(observations);
+    return this.#withLock(() => this.#appendLocked(observations, options));
+  }
+
+  /**
+   * Deduplicates repeated revisions/snapshots and atomically replaces the
+   * archive via sibling-temp → fh.sync() → rename → parent-dir fsync. The
+   * live path is never written in place, so readers of the old inode finish
+   * safely and a crash leaves either the old or the new complete file.
+   */
+  async #compactLocked() {
+    await this.#reloadIfChanged();
     const productRevisions = new Set();
     const storeRevisions = new Set();
     const snapshots = new Set();
-    const compacted = this.#records.filter((record) => {
+    const compacted = this.#index.records.filter((record) => {
       if (record.type === "product") {
         const key = `${record.productId}\u0000${record.hash}`;
         if (productRevisions.has(key)) return false;
@@ -372,18 +556,66 @@ export class JsonlObservationRepository {
       }
       return true;
     });
-    this.#records = compacted;
+
+    const content =
+      compacted.map((record) => encodeRecord(record)).join("\n") +
+      (compacted.length ? "\n" : "");
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(
-      this.filePath,
-      this.#records.map((record) => JSON.stringify(record)).join("\n") + (this.#records.length ? "\n" : ""),
-    );
-    return { records: this.#records.length, file: this.filePath };
+    const tempPath = `${this.filePath}.compact-${process.pid}-${Date.now()}.tmp`;
+    try {
+      const handle = await open(tempPath, "w");
+      try {
+        await handle.write(content, null, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(tempPath, this.filePath);
+    } catch (error) {
+      await rm(tempPath, { force: true });
+      throw error;
+    }
+    await this.#fsyncParentDir();
+
+    // Rebuild in-memory state from the compacted record set.
+    this.#resetState();
+    for (const record of compacted) this.#applyRecord(this.#index, record);
+    this.#fileSignature = await this.#currentSignature();
+    this.#loaded = true;
+    return { records: this.#index.records.length, file: this.filePath };
+  }
+
+  compact() {
+    return this.#withLock(() => this.#compactLocked());
+  }
+
+  // ---- queries ----
+
+  #revisionAt(revisions, at) {
+    for (let index = revisions.length - 1; index >= 0; index -= 1) {
+      if (eventTime(revisions[index]) <= at) return revisions[index];
+    }
+    return revisions[0];
+  }
+
+  #listingState(scope, storeId, at) {
+    const snapshots = this.#index.snapshots.get(listingId(scope, storeId)) ?? [];
+    const active = new Set();
+    let lastSeenAt;
+    let known = false;
+    for (const snapshot of snapshots) {
+      if (eventTime(snapshot) > at) break;
+      known = true;
+      for (const id of snapshot.added) active.add(id);
+      for (const id of snapshot.removed) active.delete(id);
+      lastSeenAt = snapshot.observedAt;
+    }
+    return { active, lastSeenAt, known };
   }
 
   async productHistory(productId) {
     await this.#load();
-    return (this.#productRevisions.get(productId) ?? []).map((record) => ({
+    return (this.#index.productRevisions.get(productId) ?? []).map((record) => ({
       hash: record.hash,
       observedAt: record.observedAt,
       product: structuredClone(record.data),
@@ -404,7 +636,7 @@ export class JsonlObservationRepository {
     };
     const observations = [];
 
-    for (const revisions of this.#offerRevisions.values()) {
+    for (const revisions of this.#index.offerRevisions.values()) {
       for (const offer of revisions) {
         const timestamp = eventTime(offer);
         if (timestamp < from || timestamp > to) continue;
@@ -412,8 +644,8 @@ export class JsonlObservationRepository {
         const displayAt = listing.active.has(offer.offerId) && listing.lastSeenAt
           ? Date.parse(listing.lastSeenAt)
           : timestamp;
-        const product = this.#revisionAt(this.#productRevisions.get(offer.productId) ?? [], displayAt);
-        const store = this.#revisionAt(this.#storeRevisions.get(offer.storeId) ?? [], displayAt);
+        const product = this.#revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
+        const store = this.#revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
         if (!product || !store) continue;
         if (query.productId && offer.productId !== query.productId) continue;
         if (query.storeId && offer.storeId !== query.storeId) continue;

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { stable, fingerprint } from "../../src/domain/fingerprint.js";
+import { stable, fingerprint } from "../../src/archive-records.js";
 
 describe("stable", () => {
   it("sorts object keys lexicographically", () => {

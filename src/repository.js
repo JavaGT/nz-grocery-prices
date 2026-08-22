@@ -1,23 +1,6 @@
-import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-
-function stable(value) {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, child]) => child !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, stable(child)]),
-    );
-  }
-  return value;
-}
-
-function fingerprint(value) {
-  return createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
-}
+import { fingerprint } from "./archive-records.js";
 
 function observationKey(observation) {
   return [

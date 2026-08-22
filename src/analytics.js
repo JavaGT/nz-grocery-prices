@@ -64,6 +64,27 @@ function byObservedAt(left, right) {
   return Date.parse(left.observedAt) - Date.parse(right.observedAt);
 }
 
+/**
+ * Parses a required ISO instant, rejecting garbage up front. Without this,
+ * an invalid `at` becomes NaN and silently disables every time filter.
+ */
+function parseRequiredAt(functionName, at) {
+  if (typeof at !== "string" || Number.isNaN(Date.parse(at))) {
+    throw new TypeError(`${functionName} requires an explicit at (ISO string), got ${JSON.stringify(at) ?? "undefined"}`);
+  }
+  return Date.parse(at);
+}
+
+/**
+ * Payload validation deliberately does not run at load [GROK-4], so rows with
+ * unparseable timestamps reach analytics. A NaN comparator sorts arbitrarily
+ * and could crown garbage as "latest", so skip such observations instead of
+ * crashing.
+ */
+function hasParseableObservedAt(observation) {
+  return !Number.isNaN(Date.parse(observation.observedAt));
+}
+
 function roundPercent(value) {
   return Math.round(value * 100) / 100;
 }
@@ -78,8 +99,10 @@ function promotionIsActive(promotion, atMs) {
 }
 
 export function calculateSales(observations, query = {}) {
-  const at = query.at ?? new Date().toISOString();
-  const atMs = Date.parse(at);
+  // Deterministic contract: `at` is required. Wall-clock lives only in
+  // PriceArchive's injected clock.
+  const atMs = parseRequiredAt("calculateSales", query.at);
+  const at = query.at;
   const freshWithinDays = query.freshWithinDays ?? 7;
   const baselineDays = query.baselineDays ?? 90;
   const minSamples = query.minSamples ?? 2;
@@ -90,9 +113,11 @@ export function calculateSales(observations, query = {}) {
   const sales = [];
 
   for (const group of groupObservations(observations).values()) {
-    const relevant = group.filter((observation) =>
-      !productIds || productIds.has(observation.product.id)
-    );
+    const relevant = group
+      .filter(hasParseableObservedAt)
+      .filter((observation) =>
+        !productIds || productIds.has(observation.product.id)
+      );
     if (relevant.length < 2) continue;
     relevant.sort(byObservedAt);
 
@@ -154,14 +179,17 @@ export function calculateSales(observations, query = {}) {
 }
 
 export function calculateOngoingSales(observations, query = {}) {
-  const at = query.at ?? new Date().toISOString();
-  const atMs = Date.parse(at);
+  // Deterministic contract: `at` is required. Wall-clock lives only in
+  // PriceArchive's injected clock.
+  const atMs = parseRequiredAt("calculateOngoingSales", query.at);
+  const at = query.at;
   const freshWithinDays = query.freshWithinDays ?? 7;
   const pricePolicy = query.pricePolicy ?? "public";
   const productIds = query.productIds ? new Set(query.productIds) : undefined;
 
   const candidates = [];
   for (const observation of observations) {
+    if (!hasParseableObservedAt(observation)) continue;
     if (Date.parse(observation.observedAt) > atMs) continue;
     if (query.retailer && observation.store.retailer !== query.retailer) continue;
     if (query.storeId && observation.store.id !== query.storeId) continue;
@@ -212,19 +240,23 @@ export function calculateOngoingSales(observations, query = {}) {
  * Builds per-offer price histories: one series per productId+storeId pair,
  * points sorted ascending by observedAt, each priced by evaluating promotion
  * activity at that point's own observedAt. Series are sorted by productId
- * then storeId; empty input yields [].
+ * then storeId; empty input yields []. Observations with unparseable
+ * observedAt are skipped (load is lenient; see hasParseableObservedAt).
  */
 export function buildPriceSeries(observations, { pricePolicy = "public" } = {}) {
   const series = [...groupObservations(observations).entries()]
     .map(([key, group]) => {
       const [productId, storeId] = key.split("\u0000");
-      const points = [...group].sort(byObservedAt).map((observation) => {
-        const price = selectEffectivePrice(observation, {
-          pricePolicy,
-          at: observation.observedAt
+      const points = group
+        .filter(hasParseableObservedAt)
+        .sort(byObservedAt)
+        .map((observation) => {
+          const price = selectEffectivePrice(observation, {
+            pricePolicy,
+            at: observation.observedAt
+          });
+          return { observedAt: observation.observedAt, cents: price.cents, kind: price.kind };
         });
-        return { observedAt: observation.observedAt, cents: price.cents, kind: price.kind };
-      });
       return { productId, storeId, points };
     });
 

@@ -519,6 +519,56 @@ describe('public API server', () => {
       }
     });
 
+    it('baselines expired-promo samples at REGULAR cents [GROK-8 semantic fix]', async () => {
+      // Golden-style proof of the CORE-4 promotion-window fix at the
+      // /api/deals boundary. All three baseline samples carry stale
+      // promoCents (400 vs 1000 regular) under a promotion that ENDED weeks
+      // before they were collected; the current price is an honest 900c.
+      //
+      // Pre-fix semantics ignored promotion windows: baselines averaged
+      // 400c, making the real price INCREASE read as a huge fake "drop"
+      // computed against a dead promo — the deal surfaced with nonsense
+      // numbers or was hidden entirely once minDropPercent filtering applied.
+      // Post-fix semantics evaluate each sample's promotion activity at its
+      // own observedAt: expired promo cents are ignored, baselines average
+      // 1000c (regular), and the genuine 10% drop is reported.
+      const records = [
+        productRec('paknsave:golden', { data: { name: 'Golden Product' } }),
+        storeRec('paknsave:royaloak'),
+        ...[30, 25, 20].map((days) =>
+          offerRec('paknsave:golden', 'paknsave:royaloak',
+            { regularCents: 1000, promoCents: 400 },
+            {
+              observedAt: daysAgo(days),
+              promotion: {
+                type: 'Super Saver',
+                savePercent: 60,
+                startsAt: daysAgo(50),
+                endsAt: daysAgo(45), // ended before every baseline sample
+              },
+            })),
+        offerRec('paknsave:golden', 'paknsave:royaloak',
+          { regularCents: 900 }, { observedAt: daysAgo(1) }),
+      ];
+      const srv = await createTestServer({ records });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/deals`);
+        assert.equal(status, 200);
+        const deal = body.historyBacked.find(d => d.product.id === 'paknsave:golden');
+        assert.ok(deal, 'stale-promo product must surface as a history-backed deal');
+        assert.equal(deal.signal.referenceCents, 1000, 'baseline at REGULAR cents, NOT the dead 400c promo');
+        assert.equal(deal.signal.currentCents, 900);
+        assert.equal(deal.signal.dropPercent, 10);
+        assert.equal(deal.cents.regular, 1000);
+        // 900c really is the lowest effective price on record (baselines are
+        // 1000c regular once dead promos are ignored), so all_time_low —
+        // NOT history_drop — is the correct classification here.
+        assert.equal(deal.signal.kind, 'all_time_low');
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('filters by retailer', async () => {
       const records = [
         productRec('paknsave:milk', { data: { name: 'Milk' } }),

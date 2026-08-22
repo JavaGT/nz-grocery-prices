@@ -72,9 +72,37 @@ import {
 } from "../src/analytics.js";
 
 describe("calculateSales", () => {
+  it("throws TypeError when at is missing (deterministic contract)", () => {
+    assert.throws(
+      () => calculateSales([makeObs({ daysAgo: 0 })]),
+      /calculateSales requires an explicit at/
+    );
+  });
+
+  it("throws TypeError for a non-parseable at", () => {
+    assert.throws(
+      () => calculateSales([makeObs({ daysAgo: 0 })], { at: "not-a-date" }),
+      TypeError
+    );
+  });
+
+  it("skips observations with unparseable observedAt instead of crashing", () => {
+    // Load is lenient [GROK-4]; garbage timestamps must not win the sort
+    // (NaN comparator) or poison the series.
+    const obs = [
+      makeObs({ daysAgo: 12, price: { regularCents: 1000 } }),
+      makeObs({ daysAgo: 8, price: { regularCents: 1000 } }),
+      { ...makeObs(), observedAt: "garbage" },
+      makeObs({ daysAgo: 0, price: { regularCents: 800 } }),
+    ];
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].current.cents, 800);
+  });
+
   it("returns empty array for single observation (need >1)", () => {
     const obs = [makeObs({ daysAgo: 0 })];
-    const sales = calculateSales(obs);
+    const sales = calculateSales(obs, { at: iso(0) });
     assert.equal(sales.length, 0);
   });
 
@@ -86,7 +114,7 @@ describe("calculateSales", () => {
       makeObs({ daysAgo: 20, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 1, price: { regularCents: 800 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 5, baselineDays: 60, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, baselineDays: 60, minSamples: 2 });
     assert.equal(sales.length, 1);
     assert(sales[0].dropPercent > 0);
     assert.equal(sales[0].current.cents, 800);
@@ -98,7 +126,7 @@ describe("calculateSales", () => {
       makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 995 } }), // 0.5% drop
     ];
-    const sales = calculateSales(obs, { minDropPercent: 5, minSamples: 2, includeAllTimeLows: false });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, minSamples: 2, includeAllTimeLows: false });
     assert.equal(sales.length, 0);
   });
 
@@ -107,7 +135,7 @@ describe("calculateSales", () => {
       makeObs({ daysAgo: 10, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 990 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 10, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 10, minSamples: 2 });
     // 1% drop, below 10% threshold, not an all-time low (1000 > 990)
     assert.equal(sales.length, 0);
   });
@@ -118,13 +146,27 @@ describe("calculateSales", () => {
       makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 1000, promoCents: 750 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 5, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, minSamples: 2 });
     assert.equal(sales.length, 1);
     assert.equal(sales[0].current.cents, 750);
   });
 });
 
 describe("calculateOngoingSales", () => {
+  it("throws TypeError when at is missing", () => {
+    assert.throws(
+      () => calculateOngoingSales([makeObs({ daysAgo: 1 })]),
+      /calculateOngoingSales requires an explicit at/
+    );
+  });
+
+  it("throws TypeError for a non-parseable at", () => {
+    assert.throws(
+      () => calculateOngoingSales([], { at: 42 }),
+      /requires an explicit at/
+    );
+  });
+
   it("returns promotion observations with active promos", () => {
     const obs = [
       makeObs({
@@ -133,7 +175,7 @@ describe("calculateOngoingSales", () => {
         promotion: { type: "SPECIAL", savePercent: 30 },
       }),
     ];
-    const sales = calculateOngoingSales(obs);
+    const sales = calculateOngoingSales(obs, { at: iso(0) });
     assert.equal(sales.length, 1);
     assert.equal(sales[0].current.cents, 700);
   });
@@ -142,7 +184,7 @@ describe("calculateOngoingSales", () => {
     const obs = [
       makeObs({ daysAgo: 1, price: { regularCents: 1000 } }), // no promoCents
     ];
-    const sales = calculateOngoingSales(obs);
+    const sales = calculateOngoingSales(obs, { at: iso(0) });
     assert.equal(sales.length, 0);
   });
 
@@ -150,7 +192,7 @@ describe("calculateOngoingSales", () => {
     const obs = [
       makeObs({ daysAgo: 30, price: { regularCents: 1000, promoCents: 700 } }),
     ];
-    const sales = calculateOngoingSales(obs, { freshWithinDays: 7 });
+    const sales = calculateOngoingSales(obs, { at: iso(0), freshWithinDays: 7 });
     assert.equal(sales.length, 0);
   });
 });
@@ -195,7 +237,7 @@ describe("calculateSales — ordering and windows", () => {
       makeObs({ daysAgo: 25, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 30, price: { regularCents: 1000 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 5, baselineDays: 60, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, baselineDays: 60, minSamples: 2 });
     assert.equal(sales.length, 1);
     assert.equal(sales[0].current.cents, 800);
     assert.equal(sales[0].baseline.sampleCount, 3);
@@ -211,7 +253,7 @@ describe("calculateSales — ordering and windows", () => {
       { ...makeObs({ price: { regularCents: 1000 } }), observedAt: stamp },
       { ...makeObs({ price: { regularCents: 900 } }), observedAt: stamp },
     ];
-    const sales = calculateSales(obs, { minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minSamples: 2 });
     assert.equal(sales.length, 1);
     assert.equal(sales[0].current.cents, 900);
     assert.deepEqual(sales[0].baseline.averageCents, 1000);
@@ -285,7 +327,7 @@ describe("calculateSales — ordering and windows", () => {
       makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 1000, memberCents: 500 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 5, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 5, minSamples: 2 });
     assert.equal(sales.length, 0); // member price invisible to public policy
   });
 
@@ -295,7 +337,7 @@ describe("calculateSales — ordering and windows", () => {
       makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 1000, memberCents: 500 } }),
     ];
-    const sales = calculateSales(obs, { pricePolicy: "member", minDropPercent: 5, minSamples: 2 });
+    const sales = calculateSales(obs, { at: iso(0), pricePolicy: "member", minDropPercent: 5, minSamples: 2 });
     assert.equal(sales.length, 1);
     assert.equal(sales[0].current.cents, 500);
     assert.equal(sales[0].current.kind, "member");
@@ -307,15 +349,15 @@ describe("calculateSales — ordering and windows", () => {
       makeObs({ daysAgo: 5, price: { regularCents: 1000 } }),
       makeObs({ daysAgo: 0, price: { regularCents: 900 } }),
     ];
-    const sales = calculateSales(obs, { minDropPercent: 0 });
+    const sales = calculateSales(obs, { at: iso(0), minDropPercent: 0 });
     assert.equal(sales.length, 1); // still a sale via ATL inclusion…
     assert.equal(sales[0].isAllTimeLow, false); // …but equal low is NOT an ATL
   });
 
   it("returns [] for empty input and single samples below minSamples", () => {
-    assert.deepEqual(calculateSales([]), []);
+    assert.deepEqual(calculateSales([], { at: iso(0) }), []);
     assert.deepEqual(
-      calculateSales([makeObs({ daysAgo: 0 })], { minSamples: 2 }),
+      calculateSales([makeObs({ daysAgo: 0 })], { at: iso(0), minSamples: 2 }),
       []
     );
   });
@@ -406,6 +448,34 @@ describe("buildPriceSeries", () => {
       kind: "member",
     }]);
   });
+
+  it("compares offset-form ISO windows numerically (non-Z timestamps)", () => {
+    // NZ offset (+12:00) instants must parse to absolute times, not be
+    // string-compared: "2026-08-20T23:59:59+12:00" === 2026-08-20T11:59:59Z.
+    const startsAt = "2026-08-20T10:00:00.000+12:00"; // = 2026-08-19T22:00:00Z
+    const endsAt = "2026-08-21T22:00:00.000+12:00";   // = 2026-08-21T10:00:00Z
+    const promoPrice = { regularCents: 1000, promoCents: 500 };
+    const window = { type: "SPECIAL", savePercent: 50, startsAt, endsAt };
+    // BASE_MS is 2026-08-20T12:00:00Z; offsets below are relative to it.
+    const startMsZ = Date.parse(startsAt);
+    const endMsZ = Date.parse(endsAt);
+    const rel = (ms) => ms - BASE_MS;
+    const series = buildPriceSeries([
+      obsAt(rel(startMsZ), { price: promoPrice, promotion: window }),      // exactly startsAt
+      obsAt(rel(endMsZ), { price: promoPrice, promotion: window }),        // exactly endsAt
+      obsAt(rel(endMsZ + 1), { price: promoPrice, promotion: window }),    // endsAt + 1ms
+      obsAt(rel(startMsZ - 1), { price: promoPrice, promotion: window }),  // startsAt - 1ms
+    ]);
+    assert.deepEqual(
+      series[0].points.map((p) => [p.kind, p.cents]),
+      [
+        ["regular", 1000], // startsAt - 1ms
+        ["promo", 500],    // exactly startsAt: inclusive via numeric comparison
+        ["promo", 500],    // exactly endsAt: inclusive via numeric comparison
+        ["regular", 1000], // endsAt + 1ms
+      ]
+    );
+  });
 });
 
 describe("calculateOngoingSales — windows and edge cases", () => {
@@ -437,14 +507,14 @@ describe("calculateOngoingSales — windows and edge cases", () => {
     ];
     const shuffled = [...obs].reverse();
     for (const input of [obs, shuffled]) {
-      const sales = calculateOngoingSales(input);
+      const sales = calculateOngoingSales(input, { at: iso(0) });
       assert.equal(sales.length, 1);
       assert.equal(sales[0].current.cents, 800); // newest observation wins
     }
   });
 
   it("returns [] for empty input", () => {
-    assert.deepEqual(calculateOngoingSales([]), []);
+    assert.deepEqual(calculateOngoingSales([], { at: iso(0) }), []);
   });
 
   it("ignores future-dated observations beyond query.at", () => {

@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTestServer, productRec, storeRec, offerRec } from './server-helpers.js';
+import { createTestServer, productRec, storeRec, offerRec, daysAgo } from './server-helpers.js';
 
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
@@ -490,18 +490,18 @@ describe('public API server', () => {
         storeRec('paknsave:royaloak', { data: { name: "PAK'nSAVE Royal Oak" } }),
         // 4 observations for milk — baseline (3) + current lower price
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 599 },
-          { observedAt: '2026-06-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(60) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 589 },
-          { observedAt: '2026-06-15T12:00:00.000Z' }),
+          { observedAt: daysAgo(45) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 579 },
-          { observedAt: '2026-07-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(30) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 499 },
-          { observedAt: '2026-07-15T10:00:00.000Z' }),
+          { observedAt: daysAgo(1) }),
         // Bread with promotion data for advertised deal
         offerRec('paknsave:bread', 'paknsave:royaloak',
           { regularCents: 450, promoCents: 350 },
-          { observedAt: '2026-07-15T10:00:00.000Z',
-            promotion: { type: 'Super Saver', savePercent: 22, startsAt: '2026-07-14T00:00:00.000Z' } }),
+          { observedAt: daysAgo(1),
+            promotion: { type: 'Super Saver', savePercent: 22, startsAt: daysAgo(2) } }),
       ];
       const srv = await createTestServer({ records });
       try {
@@ -527,21 +527,21 @@ describe('public API server', () => {
         storeRec('newworld:auckland', { data: { name: 'Auckland' } }),
         // 4 observations per product for history-backed deals
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 599 },
-          { observedAt: '2026-06-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(60) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 589 },
-          { observedAt: '2026-06-15T12:00:00.000Z' }),
+          { observedAt: daysAgo(45) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 579 },
-          { observedAt: '2026-07-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(30) }),
         offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 499 },
-          { observedAt: '2026-07-15T10:00:00.000Z' }),
+          { observedAt: daysAgo(1) }),
         offerRec('newworld:milk', 'newworld:auckland', { regularCents: 699 },
-          { observedAt: '2026-06-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(60) }),
         offerRec('newworld:milk', 'newworld:auckland', { regularCents: 679 },
-          { observedAt: '2026-06-15T12:00:00.000Z' }),
+          { observedAt: daysAgo(45) }),
         offerRec('newworld:milk', 'newworld:auckland', { regularCents: 659 },
-          { observedAt: '2026-07-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(30) }),
         offerRec('newworld:milk', 'newworld:auckland', { regularCents: 599 },
-          { observedAt: '2026-07-15T10:00:00.000Z' }),
+          { observedAt: daysAgo(1) }),
       ];
       const srv = await createTestServer({ records });
       try {
@@ -561,12 +561,12 @@ describe('public API server', () => {
         // Promo == regular — NOT a deal
         offerRec('paknsave:equal', 'paknsave:royaloak',
           { regularCents: 500, promoCents: 500 },
-          { observedAt: '2026-07-15T10:00:00.000Z',
+          { observedAt: daysAgo(1),
             promotion: { type: 'NEW_PRICE' } }),
         // Promo < regular — IS a deal
         offerRec('paknsave:lower', 'paknsave:royaloak',
           { regularCents: 500, promoCents: 400 },
-          { observedAt: '2026-07-15T10:00:00.000Z',
+          { observedAt: daysAgo(1),
             promotion: { type: 'Super Saver', savePercent: 20 } }),
       ];
       const srv = await createTestServer({ records });
@@ -610,15 +610,15 @@ describe('public API server', () => {
         records.push(productRec(`paknsave:${name}`, { data: { name } }));
         records.push(storeRec('paknsave:royaloak'));
         // 4 observations for history-backed eligibility
-        for (const price of [599, 589, 579, 499]) {
+        for (const [price, dayOffset] of [[599, 60], [589, 45], [579, 30], [499, 1]]) {
           records.push(offerRec(`paknsave:${name}`, 'paknsave:royaloak',
             { regularCents: price },
-            { observedAt: `2026-0${6 + Math.floor(Math.random() * 2)}-0${1 + Math.floor(Math.random() * 5)}T12:00:00.000Z` }));
+            { observedAt: daysAgo(dayOffset) }));
         }
         // Also an advertised deal observation
         records.push(offerRec(`paknsave:${name}`, 'paknsave:royaloak',
           { regularCents: 500, promoCents: 400 },
-          { observedAt: '2026-07-15T10:00:00.000Z',
+          { observedAt: daysAgo(1),
             promotion: { type: 'Super Saver', savePercent: 20 } }));
       }
       const srv = await createTestServer({ records });
@@ -642,14 +642,14 @@ describe('public API server', () => {
         storeRec('paknsave:royaloak'),
         // 4 observations: last is lower = history-backed eligible
         offerRec('paknsave:dual', 'paknsave:royaloak', { regularCents: 599 },
-          { observedAt: '2026-06-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(60) }),
         offerRec('paknsave:dual', 'paknsave:royaloak', { regularCents: 589 },
-          { observedAt: '2026-06-15T12:00:00.000Z' }),
+          { observedAt: daysAgo(45) }),
         offerRec('paknsave:dual', 'paknsave:royaloak', { regularCents: 579 },
-          { observedAt: '2026-07-01T12:00:00.000Z' }),
+          { observedAt: daysAgo(30) }),
         // Lowest price — makes it history-backed
         offerRec('paknsave:dual', 'paknsave:royaloak', { regularCents: 499, promoCents: 499 },
-          { observedAt: '2026-07-15T10:00:00.000Z',
+          { observedAt: daysAgo(1),
             promotion: { type: 'Super Saver', savePercent: 0 } }),
       ];
       const srv = await createTestServer({ records });

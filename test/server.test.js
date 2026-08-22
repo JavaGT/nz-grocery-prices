@@ -42,29 +42,33 @@ function waitForPort(port, timeoutMs = 8000) {
   });
 }
 
+// ISO timestamp n days before now, so fixtures stay inside the dashboard's
+// 7-day freshness window whenever the suite runs.
+const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
 const records = [
   { version: 2, type: "product", productId: "paknsave:milk-1l",
-    hash: "a".repeat(64), observedAt: "2026-07-01T10:00:00.000Z",
+    hash: "a".repeat(64), observedAt: daysAgo(30),
     data: { id: "paknsave:milk-1l", name: "Anchor Blue Milk 1L", brand: "Anchor",
       categories: ["Dairy"], size: "1L", image_url: null, source_id: null, gtin: "94171006" } },
   { version: 2, type: "store", storeId: "paknsave:royaloak",
-    hash: "b".repeat(64), observedAt: "2026-07-01T10:00:00.000Z",
+    hash: "b".repeat(64), observedAt: daysAgo(30),
     data: { id: "paknsave:royaloak", name: "PAK'nSAVE Royal Oak", retailer: "paknsave",
       address: "Royal Oak, Auckland", region: "Auckland" } },
   { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
     productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
-    hash: "c".repeat(64), observedAt: "2026-07-15T12:00:00.000Z",
+    hash: "c".repeat(64), observedAt: daysAgo(1),
     data: { price: { regularCents: 350, promoCents: 280, memberCents: null },
       source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" },
-      promotion: { type: "SPECIAL", savePercent: 20, startsAt: "2026-07-14T00:00:00.000Z" } } },
+      promotion: { type: "SPECIAL", savePercent: 20, startsAt: daysAgo(2) } } },
   { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
     productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
-    hash: "d".repeat(64), observedAt: "2026-07-01T12:00:00.000Z",
+    hash: "d".repeat(64), observedAt: daysAgo(30),
     data: { price: { regularCents: 350, promoCents: null, memberCents: null },
       source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" } } },
   { version: 2, type: "offer", offerId: "paknsave:milk-1l\u0000paknsave:royaloak",
     productId: "paknsave:milk-1l", storeId: "paknsave:royaloak",
-    hash: "e".repeat(64), observedAt: "2026-06-15T12:00:00.000Z",
+    hash: "e".repeat(64), observedAt: daysAgo(45),
     data: { price: { regularCents: 360, promoCents: null, memberCents: null },
       source: { retailerProductId: "milk-1l", adapter: "test", url: "https://example.com/p" } } },
 ];
@@ -123,7 +127,9 @@ describe("Dashboard server API (self-contained)", () => {
   });
 
   it("GET /api/feed returns feed with ongoingSales and sales", async () => {
-    const res = await fetch(`${BASE}/api/feed?minDropPercent=5&at=2026-07-16T00:00:00.000Z`);
+    // Note: the dashboard's /api/feed always evaluates against "now" (it does
+    // not accept an `at` param), so fixtures must be fresh relative to now.
+    const res = await fetch(`${BASE}/api/feed?minDropPercent=5`);
     assert.equal(res.status, 200);
     const feed = await res.json();
     assert("generatedAt" in feed);
@@ -140,10 +146,9 @@ describe("Dashboard server API (self-contained)", () => {
   });
 
   it("GET /api/feed respects limit parameter", async () => {
-    const at = "2026-07-16T00:00:00.000Z";
-    const full = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=5&at=${at}`)).json();
+    const full = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=5`)).json();
     assert(full.ongoingSales.length <= 5);
-    const huge = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=9999&at=${at}`)).json();
+    const huge = await (await fetch(`${BASE}/api/feed?minDropPercent=5&limit=9999`)).json();
     assert(huge.ongoingSales.length <= 9999);
   });
 

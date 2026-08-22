@@ -15,6 +15,12 @@ export function hash(s) {
   return String(_counter).padStart(64, '0');
 }
 
+// ISO timestamp n days before now, so fixtures stay inside the analytics
+// freshness windows (freshWithinDays 7, baselineDays 90) whenever the suite runs.
+export function daysAgo(n) {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export function tmpDir() {
   const d = mkdtempSync(join(tmpdir(), 'prices-srv-'));
   return {
@@ -35,7 +41,7 @@ export function productRec(productId, overrides = {}) {
     version: 2, type: 'product',
     productId,
     hash: hash(productId),
-    observedAt: overrides.observedAt || '2026-07-15T10:00:00.000Z',
+    observedAt: overrides.observedAt || daysAgo(2),
     data: {
       name: 'Test Product', brand: 'Test Brand', categories: ['Groceries'],
       size: null, image_url: null, source_id: null, gtin: null,
@@ -50,7 +56,7 @@ export function storeRec(storeId, overrides = {}) {
     version: 2, type: 'store',
     storeId,
     hash: hash(storeId),
-    observedAt: overrides.observedAt || '2026-07-15T10:00:00.000Z',
+    observedAt: overrides.observedAt || daysAgo(2),
     data: {
       id: storeId, name: 'Test Store', retailer,
       address: null, region: null, ...overrides.data,
@@ -64,7 +70,7 @@ export function offerRec(productId, storeId, priceData = {}, extra = {}) {
     version: 2, type: 'offer',
     offerId: offerKey, productId, storeId,
     hash: hash(offerKey),
-    observedAt: extra.observedAt || '2026-07-15T12:00:00.000Z',
+    observedAt: extra.observedAt || daysAgo(1),
     data: {
       price: { regularCents: 1000, promoCents: null, memberCents: null, ...priceData },
       source: { retailerProductId: productId.split(':').pop(), adapter: 'test', url: 'https://example.com/p', ...extra.source },

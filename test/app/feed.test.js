@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTestServer, productRec, storeRec, offerRec } from '../server/server-helpers.js';
+import { createTestServer, productRec, storeRec, offerRec, daysAgo } from '../server/server-helpers.js';
 
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
@@ -32,6 +32,8 @@ async function registerAndLogin(baseUrl, username, password) {
 }
 
 function buildDealsFixture() {
+  // Timestamps are relative to now so deals stay inside the 7-day freshness
+  // window (and 90-day baseline) regardless of when the suite runs.
   return [
     productRec('paknsave:milk', { data: { name: 'Milk 1L', categories: ['Dairy'] } }),
     productRec('paknsave:bread', { data: { name: 'White Bread', categories: ['Bakery'] } }),
@@ -40,32 +42,32 @@ function buildDealsFixture() {
     storeRec('paknsave:chartwell', { data: { name: "PAK'nSAVE Chartwell" } }),
     // Milk at royal oak — history-backed drop (watch-list product, preferred store)
     offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 599 },
-      { observedAt: '2026-06-01T12:00:00.000Z' }),
+      { observedAt: daysAgo(60) }),
     offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 589 },
-      { observedAt: '2026-06-15T12:00:00.000Z' }),
+      { observedAt: daysAgo(45) }),
     offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 579 },
-      { observedAt: '2026-07-01T12:00:00.000Z' }),
+      { observedAt: daysAgo(30) }),
     offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 499 },
-      { observedAt: '2026-07-15T10:00:00.000Z' }),
+      { observedAt: daysAgo(1) }),
     // Milk at chartwell — history-backed drop (watch-list product, non-preferred store)
     offerRec('paknsave:milk', 'paknsave:chartwell', { regularCents: 599 },
-      { observedAt: '2026-06-01T12:00:00.000Z' }),
+      { observedAt: daysAgo(60) }),
     offerRec('paknsave:milk', 'paknsave:chartwell', { regularCents: 589 },
-      { observedAt: '2026-06-15T12:00:00.000Z' }),
+      { observedAt: daysAgo(45) }),
     offerRec('paknsave:milk', 'paknsave:chartwell', { regularCents: 579 },
-      { observedAt: '2026-07-01T12:00:00.000Z' }),
+      { observedAt: daysAgo(30) }),
     offerRec('paknsave:milk', 'paknsave:chartwell', { regularCents: 509 },
-      { observedAt: '2026-07-15T10:00:00.000Z' }),
+      { observedAt: daysAgo(1) }),
     // Bread at royal oak — advertised deal (not on watch list)
     offerRec('paknsave:bread', 'paknsave:royaloak',
       { regularCents: 450, promoCents: 350 },
-      { observedAt: '2026-07-15T10:00:00.000Z',
-        promotion: { type: 'Super Saver', savePercent: 22, startsAt: '2026-07-14T00:00:00.000Z' } }),
+      { observedAt: daysAgo(1),
+        promotion: { type: 'Super Saver', savePercent: 22, startsAt: daysAgo(2) } }),
     // Butter at chartwell — advertised deal (not on watch list)
     offerRec('paknsave:butter', 'paknsave:chartwell',
       { regularCents: 800, promoCents: 600 },
-      { observedAt: '2026-07-15T10:00:00.000Z',
-        promotion: { type: 'Super Saver', savePercent: 25, startsAt: '2026-07-14T00:00:00.000Z' } }),
+      { observedAt: daysAgo(1),
+        promotion: { type: 'Super Saver', savePercent: 25, startsAt: daysAgo(2) } }),
   ];
 }
 

@@ -114,3 +114,107 @@ describe("PriceArchive", () => {
     assert.equal(all.length, 7);
   });
 });
+
+describe("PriceArchive clock injection", () => {
+  // Fixed history: three $10 samples then a recent $5 observation 3 days old.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const BASE_MS = Date.parse("2026-08-20T00:00:00.000Z");
+
+  async function makeArchive(clock) {
+    const repo = new MemoryObservationRepository();
+    await repo.append([
+      obs({ productId: "prod:c", observedAt: new Date(BASE_MS - 30 * DAY_MS).toISOString() }),
+      obs({ productId: "prod:c", observedAt: new Date(BASE_MS - 20 * DAY_MS).toISOString() }),
+      obs({ productId: "prod:c", observedAt: new Date(BASE_MS - 10 * DAY_MS).toISOString() }),
+      obs({
+        productId: "prod:c",
+        regularCents: 500,
+        observedAt: new Date(BASE_MS - 3 * DAY_MS).toISOString(),
+      }),
+    ]);
+    return new PriceArchive(repo, { clock });
+  }
+
+  it("fake clock drives findSales freshness without real time", async () => {
+    // Clock pinned to BASE: the 3-day-old drop is fresh → sale reported.
+    const pinned = await makeArchive(() => new Date(BASE_MS));
+    const sales = await pinned.findSales({ minSamples: 2, baselineDays: 60 });
+    assert.equal(sales.length, 1);
+    assert.equal(sales[0].current.cents, 500);
+    assert.equal(sales[0].dropPercent, 50);
+
+    // Same data, clock advanced past the freshness window: nothing is fresh.
+    const advanced = await makeArchive(() => new Date(BASE_MS + 11 * DAY_MS));
+    assert.deepEqual(await advanced.findSales({ minSamples: 2, baselineDays: 60 }), []);
+  });
+
+  it("query.at still overrides the injected clock", async () => {
+    const advanced = await makeArchive(() => new Date(BASE_MS + 11 * DAY_MS));
+    const sales = await advanced.findSales({
+      at: new Date(BASE_MS).toISOString(),
+      minSamples: 2,
+      baselineDays: 60,
+    });
+    assert.equal(sales.length, 1);
+  });
+
+  it("agentFeed stamps generatedAt from the clock", async () => {
+    const pinned = await makeArchive(() => new Date(BASE_MS));
+    const feed = await pinned.agentFeed({ minSamples: 2, baselineDays: 60 });
+    assert.equal(feed.generatedAt, new Date(BASE_MS).toISOString());
+  });
+});
+
+describe("PriceArchive behavior-change fixture [GROK-8]", () => {
+  /**
+   * Golden-style proof of the promotion-window fix, end to end through
+   * PriceArchive.findSales. An offer carried promo cents (400 vs 1000
+   * regular) under a promotion that ENDED ~25 days before "now"; its two
+   * baseline samples still carry those stale promoCents. The current price
+   * is an honest 900c regular.
+   *
+   * OLD semantics (windows ignored): baselines averaged 400c → dropPercent
+   * was a nonsensical negative (-125), previousLow 400c → NOT an all-time
+   * low → with any sane minDropPercent this query returned [].
+   * NEW semantics: stale promo cents are excluded per-point, baselines
+   * average 1000c → dropPercent 10 AND isAllTimeLow true → the deal appears.
+   */
+  it("stale promo cents no longer poison baselines or hide all-time lows", async () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const baseMs = Date.parse("2026-08-20T00:00:00.000Z");
+    const ago = (days) => new Date(baseMs - days * DAY_MS).toISOString();
+    const endedPromotion = {
+      type: "SPECIAL",
+      savePercent: 60,
+      startsAt: ago(46),
+      endsAt: ago(45),
+    };
+    const repo = new MemoryObservationRepository();
+    await repo.append([
+      obs({
+        productId: "prod:g",
+        regularCents: 1000,
+        promoCents: 400,
+        observedAt: ago(30),
+        promotion: endedPromotion,
+      }),
+      obs({
+        productId: "prod:g",
+        regularCents: 1000,
+        promoCents: 400,
+        observedAt: ago(28),
+        promotion: endedPromotion,
+      }),
+      obs({ productId: "prod:g", regularCents: 900, observedAt: ago(2) }),
+    ]);
+    const archive = new PriceArchive(repo, { clock: () => new Date(baseMs) });
+
+    const sales = await archive.findSales({ minSamples: 2, baselineDays: 90, minDropPercent: 5 });
+    assert.equal(sales.length, 1); // previously 0 — deal was invisible
+    assert.equal(sales[0].baseline.averageCents, 1000); // NOT 400 (old bug)
+    assert.equal(sales[0].current.cents, 900);
+    assert.equal(sales[0].previousLowCents, 1000); // NOT 400 (old bug)
+    assert.equal(sales[0].isAllTimeLow, true); // previously false
+    assert.equal(sales[0].dropPercent, 10); // previously -125
+  });
+});

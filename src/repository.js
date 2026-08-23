@@ -73,12 +73,15 @@ async function readArchiveLines(filePath) {
 
 /**
  * Decodes and classifies one archive line — the single tolerance policy
- * shared by the repository loader and scripts/repair-archive.js.
+ * shared by the repository loader, scripts/repair-archive.js, and the v1
+ * migrator.
  *
  * Returns one of:
  *   { status: "v2", record, defect? } — envelope-valid v2 record; `defect`
  *     is set when the stored hash ≠ recomputed fingerprint (never fatal).
- *   { status: "legacy", record }      — v1 whole-observation.
+ *   { status: "legacy", record }      — v1 whole-observation. The loader
+ *     REFUSES these post-CORE-6 (run scripts/migrate-v1-archive.js); repair
+ *     keeps them byte-for-byte and the migrator converts them.
  *   { status: "torn" }                — undecodable UNTERMINATED final
  *     bytes; caller decides recovery vs quarantine.
  *
@@ -363,29 +366,11 @@ export class JsonlObservationRepository {
    *
    * - Newline-terminated line failing decode \u2192 hard error naming
    *   filePath:lineNumber (even when it is the last line).
-   * - Unterminated final bytes: decodes to a valid/legacy record \u2192
+   * - Unterminated final bytes: decodes to a valid v2 record \u2192
    *   recover it (a crash happened between write and newline); anything
    *   else \u2192 set #tornTail and skip the fragment.
-   * - Stored hashes are verified against recomputed fingerprints with
-   *   mismatches collected into #loadDefects rather than aborting \u2014
-   *   data still queries, getLoadDefects() surfaces the damage.
-   * - Snapshot offersHash is deliberately NOT recomputed on load:
-   *   deriving it requires replaying listing state across all prior
-   *   snapshots, which is costly and fragile against mid-archive
-   *   corruption. Dedup treats it as stored.
-   *
-   * Line reading/classification lives in readArchiveLines +
-   * decodeArchiveLine (module scope) so scripts/repair-archive.js reuses
-   * identical semantics instead of duplicating them.
-   */
-  /**
-   * Load protocol: stream line-by-line so torn tails are detectable.
-   *
-   * - Newline-terminated line failing decode \u2192 hard error naming
-   *   filePath:lineNumber (even when it is the last line).
-   * - Unterminated final bytes: decodes to a valid/legacy record \u2192
-   *   recover it (a crash happened between write and newline); anything
-   *   else \u2192 set #tornTail and skip the fragment.
+   * - A decoded LEGACY v1 record is a hard error naming file:line with
+   *   the migrator command (CORE-6 cutover) — never silently projected.
    * - Stored hashes are verified against recomputed fingerprints with
    *   mismatches collected into #loadDefects rather than aborting \u2014
    *   data still queries, getLoadDefects() surfaces the damage.
@@ -439,10 +424,13 @@ export class JsonlObservationRepository {
         break;
       }
       if (outcome.status === "legacy") {
-        // Legacy observations are accepted and projected into v2 in memory.
-        const additions = this.#index.planAppend([outcome.record]);
-        this.#index.applyAdditions(additions);
-        continue;
+        // Legacy v1 whole-observations are no longer projected (CORE-6
+        // cutover): the one-shot migrator is their only handler, so the
+        // normal repository can never silently reinterpret an old line.
+        throw new Error(
+          `Legacy v1 archive record at ${this.filePath}:${lineNumber}; ` +
+            `run node scripts/migrate-v1-archive.js --file ${this.filePath} first`,
+        );
       }
       if (outcome.defect) this.#loadDefects.push(outcome.defect);
       this.#index.apply(outcome.record);

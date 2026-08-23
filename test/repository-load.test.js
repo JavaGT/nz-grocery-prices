@@ -31,6 +31,17 @@ function cleanProductLine(productId, name) {
 
 const validV2ProductLine = cleanProductLine("prod:0", "Seed");
 
+/** Legacy v1 whole-observation line (unversioned product/store/price/source). */
+function v1Line() {
+  return JSON.stringify({
+    product: { id: "prod:legacy", name: "Legacy Milk" },
+    store: { id: "store:1", retailer: "testretailer" },
+    price: { regularCents: 349 },
+    source: { retailerProductId: "111" },
+    observedAt: "2026-08-23T00:00:00.000Z",
+  });
+}
+
 // Envelope-valid v2 product record with a WRONG hash (bit-rot / hand-edit)
 // to exercise defect collection without failing the envelope check.
 const wrongHashLine =
@@ -206,8 +217,7 @@ describe("load protocol (CORE-2 M4)", () => {
     assert.equal((await reopened.query()).length, 1);
   });
 
-  it("a failed load resets state — the same instance recovers after the file is fixed", async () => {
-    const offerData = {
+  it("a failed load resets state — the same instance recovers after the file is fixed", async () => {    const offerData = {
       price: { regularCents: 349 },
       source: { retailerProductId: "111" },
     };
@@ -244,5 +254,72 @@ describe("load protocol (CORE-2 M4)", () => {
     // must not appear twice (a half-applied index would duplicate it).
     assert.equal((await repository.productHistory("prod:1")).length, 1);
     assert.equal(repository.getLoadDefects().length, 0);
+  });
+
+  // ---- legacy v1 refusal (CORE-6 cutover) ----
+
+  it("refuses a legacy v1 line naming file:line and the migrator command", async () => {
+    await writeFile(filePath, validV2ProductLine + "\n" + v1Line() + "\n");
+    const repository = new JsonlObservationRepository(filePath);
+    await assert.rejects(
+      () => repository.query(),
+      (error) =>
+        /archive\.jsonl:2/.test(error.message) &&
+        /run node scripts\/migrate-v1-archive\.js --file /.test(error.message),
+    );
+  });
+
+  it("same instance recovers once the v1 line is migrated away", async () => {
+    await writeFile(filePath, v1Line() + "\n");
+    const repository = new JsonlObservationRepository(filePath);
+    await assert.rejects(() => repository.query(), /migrate-v1-archive/);
+
+    // Simulate the migrator having rewritten the file: same instance must
+    // load cleanly (the failed load reset all state).
+    await writeFile(filePath, validV2ProductLine + "\n");
+    assert.equal((await repository.productHistory("prod:0")).length, 1);
+  });
+
+  it("a fresh instance also refuses a v1 archive (refusal is derived at load)", async () => {
+    await writeFile(filePath, v1Line() + "\n");
+    // First instance observes the refusal…
+    const first = new JsonlObservationRepository(filePath);
+    await assert.rejects(() => first.query(), /migrate-v1-archive/);
+    // …and an entirely fresh instance must not silently succeed either.
+    const second = new JsonlObservationRepository(filePath);
+    await assert.rejects(() => second.query(), /migrate-v1-archive/);
+  });
+
+  it("compact() refuses a v1-tainted archive with the same actionable error", async () => {
+    await writeFile(filePath, validV2ProductLine + "\n" + v1Line() + "\n");
+    const repository = new JsonlObservationRepository(filePath);
+    await assert.rejects(
+      () => repository.compact(),
+      (error) =>
+        /Legacy v1 archive record at /.test(error.message) &&
+        /migrate-v1-archive\.js/.test(error.message),
+    );
+    // The refusal happened before any rewrite: the file is byte-identical.
+    const contents = await readFile(filePath, "utf8");
+    assert.equal(contents.split("\n").length, 3, "both original lines still present");
+  });
+
+  it("v1 refusal does not mask torn-tail or defect behavior", async () => {
+    // Torn tail still blocks appends on an otherwise-v2 archive.
+    await writeFile(filePath, validV2ProductLine + "\n{");
+    const torn = new JsonlObservationRepository(filePath);
+    await assert.rejects(() => torn.append([obs()]), /torn/);
+
+    // Hash defects are still collected as non-fatal on a v2 archive.
+    await writeFile(filePath, validV2ProductLine + "\n" + wrongHashLine + "\n");
+    const defect = new JsonlObservationRepository(filePath);
+    await defect.productHistory("prod:0");
+    assert.equal(defect.getLoadDefects().length, 1);
+
+    // An unterminated v1 tail is a LEGACY refusal, not a torn tail —
+    // the line decodes, so the migrator error is the honest answer.
+    await writeFile(filePath, validV2ProductLine + "\n" + v1Line()); // no \n
+    const legacyTail = new JsonlObservationRepository(filePath);
+    await assert.rejects(() => legacyTail.query(), /migrate-v1-archive/);
   });
 });

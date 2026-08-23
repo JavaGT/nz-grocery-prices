@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readFile, readdir, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, mkdir, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -123,6 +123,32 @@ describe("repair CLI (CORE-2 M5)", () => {
 
     // No temp leftovers.
     assert.equal(entries.some((entry) => entry.includes(".repair-")), false);
+  });
+
+  it("refuses to run while another writer holds the archive lock, then succeeds once it is released", async () => {
+    const productData = { id: "prod:lock", name: "Locked" };
+    await writeFile(filePath, JSON.stringify({
+      version: 2, type: "product", productId: "prod:lock",
+      hash: productRevisionHash(productData),
+      observedAt: "2026-08-01T00:00:00.000Z", data: productData,
+    }) + "\n");
+
+    // Hold the lock externally, exactly as a live writer would.
+    await mkdir(`${filePath}.lock`);
+    await assert.rejects(
+      () => run("node", [cli, "--file", filePath]),
+      (error) => error.code === 1 && /locked by another writer/.test(error.stderr),
+    );
+    // Refusal happened before the scan/rewrite: file untouched.
+    assert.match(await readFile(filePath, "utf8"), /prod:lock/);
+
+    // Lock released → repair succeeds and the lock is gone afterwards.
+    await rmdir(`${filePath}.lock`);
+    const result = await run("node", [cli, "--file", filePath]);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.kept, 1);
+    const entries = await readdir(directory);
+    assert.equal(entries.some((entry) => entry.endsWith(".lock")), false);
   });
 
   it("recovers an unterminated-but-valid tail record during repair", async () => {

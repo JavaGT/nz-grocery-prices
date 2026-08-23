@@ -875,3 +875,36 @@ export class JsonlObservationRepository {
     return filterObservations(observations, query);
   }
 }
+
+/**
+ * Runs `operation` while holding the cross-process archive lock for
+ * `filePath` — the same `<archive>.lock` directory (mkdir-acquire /
+ * rmdir-release) the writer protocol uses above, so external tools
+ * (scripts/repair-archive.js) are mutually exclusive with appends,
+ * compaction, and publisher renames.
+ *
+ * The lock is deliberately fail-fast: a held lock throws immediately.
+ * Callers MUST (re-)read the archive INSIDE the operation — anything
+ * scanned before acquiring the lock can be stale by the time it is held.
+ */
+export async function withArchiveLock(filePath, operation) {
+  const target = resolve(filePath);
+  const lockPath = `${target}.lock`;
+  await mkdir(dirname(target), { recursive: true });
+  try {
+    await mkdir(lockPath);
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      throw new Error(
+        `Archive is locked by another writer (${lockPath}). If no writer is running, remove the lock directory.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  try {
+    return await operation();
+  } finally {
+    await rmdir(lockPath).catch(() => {});
+  }
+}

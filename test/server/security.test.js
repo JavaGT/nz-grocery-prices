@@ -37,7 +37,9 @@ async function registerAndLogin(baseUrl, username, password) {
 describe('security audit regression', () => {
   describe('rate limiting', () => {
     it('rejects rapid register attempts with 429', async () => {
-      const srv = await createTestServer({ records: [] });
+      // Pinned clock: wall-clock windows reset when a run crosses a minute
+      // boundary, which made this test flaky. All requests share one window.
+      const srv = await createTestServer({ records: [], clock: () => 1_755_000_000_000 });
       try {
         const { baseUrl } = srv;
         for (let i = 0; i < 6; i++) {
@@ -60,7 +62,7 @@ describe('security audit regression', () => {
     });
 
     it('rejects rapid login attempts with 429', async () => {
-      const srv = await createTestServer({ records: [] });
+      const srv = await createTestServer({ records: [], clock: () => 1_755_000_000_000 });
       try {
         const { baseUrl } = srv;
         await fetchJson(`${baseUrl}/api/auth/register`, {

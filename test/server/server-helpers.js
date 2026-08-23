@@ -107,6 +107,7 @@ export async function createTestServer({
   appDbInit = null,
   authOptions = {},
   skipProjDb = false,
+  clock = Date.now,
 } = {}) {
   const dir = tmpDir();
 
@@ -131,10 +132,10 @@ export async function createTestServer({
     }
     const auth = new Auth(appDb, { sessionDurationMs: 86400000, ...authOptions });
 
-    const server = new Server({ projDb, appDb, auth });
-    const now = Date.now();
-    const handlers = createPublicHandlers({ getDb, appDb, auth, clock: Date.now, startedAt: now, queryDbObservations: defaultQueryDbObservations });
-    const privateHandlers = createPrivateHandlers({ auth, appDb, clock: Date.now });
+    const server = new Server({ projDb, appDb, auth, clock });
+    const now = clock();
+    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations });
+    const privateHandlers = createPrivateHandlers({ auth, appDb, clock });
 
     server.get('/api/health', handlers.health);
     server.get('/api/products', handlers.listProducts);

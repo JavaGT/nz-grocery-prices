@@ -1,5 +1,9 @@
 # CORE-6 — Legacy cutover
 
+> **Status: IN PROGRESS (2026-08-23).** CORE-3 is complete and reviewed;
+> this lane owns the staged v1 migrator, projection/repository refusal,
+> dashboard deletion, and canonical documentation cutover.
+
 ## Summary
 Remove legacy paths per owner direction ("no hangups on legacy"): delete the
 deprecated dashboard, remove v1 record support from the hot load path behind a

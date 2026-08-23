@@ -28,6 +28,7 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 | `dashboard/` | `node --test test/server.test.js` |
 | `src/archive.js`, `src/analytics.js` | `node --test test/archive.test.js test/analytics.test.js` |
 | `src/repository.js` writer/load/repair | `node --test test/repository-writer.test.js test/repository-load.test.js test/repository-repair.test.js` |
+| `src/archive-index.js` | `node --test test/archive-index.test.js test/repository-writer.test.js test/repository-load.test.js` |
 
 ## Test seams (where a new test plugs in)
 

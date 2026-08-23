@@ -33,6 +33,7 @@ collectors and the legacy dashboard).
 src/adapters/          retailer API clients + pure transforms
 src/domain/            observation validation (parseObservation / validateObservation)
 src/archive-records.js canonical v2 record encoding + content hashing (locale-pinned sort)
+src/archive-index.js   in-memory archive index, planning, materialization, stats
 src/repository.js      JsonlObservationRepository — lock, durable append, atomic compact, tail-tolerant load
 src/analytics.js       calculateSales / calculateOngoingSales / buildPriceSeries / toAgentFeed
 src/sqlite/            projection + app DB, migration runner

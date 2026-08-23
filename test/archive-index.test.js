@@ -287,21 +287,16 @@ describe("ArchiveIndex unit behavior", () => {
     assert.deepEqual(index.planAppend([observation]), []);
   });
 
-  it("deduplicates an offer revision even when a newer revision was applied first", () => {
+  it("deduplicates revisions at their effective time and preserves reverts", () => {
     const index = new ArchiveIndex();
-    const first = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-12T00:00:00.000Z", regularCents: 100 });
-    const older = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-10T00:00:00.000Z", regularCents: 200 });
+    const first = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-10T00:00:00.000Z", regularCents: 100 });
+    const newer = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-12T00:00:00.000Z", regularCents: 200 });
     index.applyAdditions(index.planAppend([first]));
-    index.applyAdditions(index.planAppend([older]));
-    assert.deepEqual(index.planAppend([older]), []);
-  });
-
-  it("hasRevision tracks applied product/store content hashes", () => {
-    const index = new ArchiveIndex();
-    assert.equal(index.hasRevision("product", "p1", "hash-p1-a"), false);
-    index.apply(productRecord("p1", "A", "2026-08-10T00:00:00.000Z"));
-    assert.equal(index.hasRevision("product", "p1", "hash-p1-A"), true);
-    assert.equal(index.hasRevision("store", "p1", "hash-p1-A"), false);
+    index.applyAdditions(index.planAppend([newer]));
+    const revert = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-14T00:00:00.000Z", regularCents: 100 });
+    assert.equal(index.planAppend([revert]).filter((record) => record.type === "offer").length, 1);
+    index.applyAdditions(index.planAppend([revert]));
+    assert.deepEqual(index.planAppend([revert]), []);
   });
 
   it("ORDERING INVARIANT [SOL-7/GROK-7]: revision-at follows chronology with stable ties", () => {

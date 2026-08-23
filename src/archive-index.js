@@ -106,7 +106,6 @@ export class ArchiveIndex {
     snapshots: new Map(),
     offerIdsByProduct: new Map(),
     offerIdsByStore: new Map(),
-    latestProduct: new Map(),
     latestStore: new Map(),
   };
 
@@ -130,16 +129,8 @@ export class ArchiveIndex {
       snapshots: new Map(),
       offerIdsByProduct: new Map(),
       offerIdsByStore: new Map(),
-      latestProduct: new Map(),
       latestStore: new Map(),
     };
-  }
-
-  #hasRevision(type, id, hash, index = this.#index) {
-    const revisions = type === "product"
-      ? index.productRevisions.get(id)
-      : index.storeRevisions.get(id);
-    return revisions?.some((revision) => revision.hash === hash) ?? false;
   }
 
   #validateRecord(record) {
@@ -175,13 +166,6 @@ export class ArchiveIndex {
   }
 
   /**
-   * Whether a product/store revision with exactly this content hash has
-   * already been applied (archive dedup identity).
-   */
-  hasRevision(type, id, hash) {
-    return this.#hasRevision(type, id, hash);
-  }
-
   /** Applies one record to `index` (the live state or a planning draft). */
   #applyRecord(index, record) {
     index.records.push(record);
@@ -190,7 +174,6 @@ export class ArchiveIndex {
       const revisions = index.productRevisions.get(record.productId) ?? [];
       insertChronologically(revisions, record);
       index.productRevisions.set(record.productId, revisions);
-      index.latestProduct.set(record.productId, revisions.at(-1));
       return;
     }
     if (record.type === "store") {
@@ -248,7 +231,6 @@ export class ArchiveIndex {
       offerIdsByStore: new Map(
         [...this.#index.offerIdsByStore].map(([key, value]) => [key, new Set(value)]),
       ),
-      latestProduct: new Map(this.#index.latestProduct),
       latestStore: new Map(this.#index.latestStore),
     };
   }
@@ -259,9 +241,7 @@ export class ArchiveIndex {
     const hash = fingerprint(observation.product);
     const observedAt = Date.parse(observation.observedAt);
     const revisions = index.productRevisions.get(observation.product.id) ?? [];
-    if (revisions.some((revision) =>
-      revision.hash === hash && eventTime(revision) <= observedAt
-    )) {
+    if (revisionAt(revisions, observedAt)?.hash === hash) {
       return undefined;
     }
     return {
@@ -278,9 +258,7 @@ export class ArchiveIndex {
     const hash = fingerprint(observation.store);
     const observedAt = Date.parse(observation.observedAt);
     const revisions = index.storeRevisions.get(observation.store.id) ?? [];
-    if (revisions.some((revision) =>
-      revision.hash === hash && eventTime(revision) <= observedAt
-    )) {
+    if (revisionAt(revisions, observedAt)?.hash === hash) {
       return undefined;
     }
     return {
@@ -303,9 +281,7 @@ export class ArchiveIndex {
     const hash = fingerprint(data);
     const observedAt = Date.parse(observation.observedAt);
     const revisions = index.offerRevisions.get(id) ?? [];
-    if (revisions.some((revision) =>
-      revision.hash === hash && eventTime(revision) <= observedAt
-    )) return undefined;
+    if (revisionAt(revisions, observedAt)?.hash === hash) return undefined;
     return {
       version: 2,
       type: "offer",

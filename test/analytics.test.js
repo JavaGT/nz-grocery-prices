@@ -216,12 +216,19 @@ describe("toAgentFeed", () => {
       savePercent: 30,
       promotion: { type: "SPECIAL", savePercent: 30 }
     }];
-    const feed = toAgentFeed(sales, new Date().toISOString(), ongoing);
+    const feed = toAgentFeed(sales, "2026-08-24T00:00:00.000Z", ongoing);
     assert.equal(feed.currency, "NZD");
+    assert.equal(feed.generatedAt, "2026-08-24T00:00:00.000Z");
     assert.equal(feed.sales.length, 1);
+    // Legacy dashboard /api/feed item contract (CORE-6): the intentional
+    // equivalent pins the same per-item fields consumers relied on.
+    assert.equal(feed.sales[0].productId, "t:1");
+    assert.equal(feed.sales[0].retailer, "test");
+    assert.equal(typeof feed.sales[0].currentCents, "number");
     assert.equal(feed.sales[0].productName, "P1");
     assert.equal(feed.sales[0].dropPercent, 20);
     assert.equal(feed.ongoingSales.length, 1);
+    assert.equal(feed.ongoingSales[0].productId, "t:2");
     assert.equal(feed.ongoingSales[0].productName, "P2");
     assert.equal(feed.ongoingSales[0].savePercent, 30);
   });

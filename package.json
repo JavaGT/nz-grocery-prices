@@ -55,7 +55,6 @@
     "freshchoice": "node scripts/freshchoice.js",
     "warehouse": "node scripts/warehouse.js",
     "archive:local": "sh scripts/archive-daily-local.sh",
-    "dashboard": "DASHBOARD_PORT=7070 node dashboard/server.js",
     "start": "node src/app/server.js",
     "pack:check": "npm pack --dry-run --cache .cache/npm"
   },

@@ -21,6 +21,9 @@
 > with the revision effective at the observation time, preserving later
 > reverts while removing the obsolete hash-only `hasRevision` API and
 > `latestProduct` cache. Current suite: **596/596**.
+> `0b4c633` adds compact regression coverage for temporal anchors/reverts and
+> product/store revert type assertions. Final CORE-3 status: **complete,
+> hostile-reviewed, 597/597**.
 
 ## Summary
 Extract in-memory indexing + observation materialization out of

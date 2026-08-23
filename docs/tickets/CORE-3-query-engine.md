@@ -1,14 +1,19 @@
 # CORE-3 — Indexed query engine
 
-> **Status: REVIEW FIXES IN PROGRESS (2026-08-23).** Commits
+> **Status: COMPLETE + REVIEWED (2026-08-23).** Commits
 > `c0a6df7` (ArchiveIndex extraction) and `8fd3fc7` (parity fixture, stats,
 > performance smoke). `src/repository.js` shrank 1017 → 707 lines. The
 > deterministic pre/post harness proved byte-identical results across 12
 > queries covering revisions, snapshots, retailer changes, out-of-order
 > records, equal timestamps, and product history. Full suite: 592/592.
-> Luna's hostile review found two blockers: revisions and snapshots still
-> depended on insertion order. Those are being fixed now, together with
-> candidate indexes, independent baseline parity, and apply-boundary checks.
+> `56254ff` and `11b4f5d` close the hostile-review blockers: chronological
+> revisions/snapshots, offer-hash dedup across non-latest revisions, candidate
+> intersection, apply validation/atomicity, and mutation isolation.
+> `fe836d3` closes the final concerns: late snapshotScope batches are rejected
+> before persistence (later deltas cannot be rewritten safely), mixed-time
+> batches use their latest timestamp, snapshot hashes use historical offer
+> revisions, and historical queries do not fall back to future metadata.
+> Full suite: **597/597**.
 
 ## Summary
 Extract in-memory indexing + observation materialization out of

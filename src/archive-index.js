@@ -76,8 +76,11 @@ function listingStateAt(snapshots, at = Number.POSITIVE_INFINITY) {
   return { active, lastSeenAt, known };
 }
 
-function replaySnapshots(snapshots) {
-  return listingStateAt(snapshots).active;
+function revisionAt(revisions, at) {
+  for (let index = revisions.length - 1; index >= 0; index -= 1) {
+    if (eventTime(revisions[index]) <= at) return revisions[index];
+  }
+  return undefined;
 }
 
 /**
@@ -106,12 +109,16 @@ export class ArchiveIndex {
     latestProduct: new Map(),
     latestStore: new Map(),
     latestOffer: new Map(),
-    activeListings: new Map(),
   };
 
   /** Every applied record, in application order. Treat as immutable. */
   getRecords() {
     return structuredClone(this.#index.records);
+  }
+
+  /** Internal repository access; callers must not mutate returned records. */
+  getRecordReferences() {
+    return this.#index.records;
   }
 
   /** Discards all indexed state. */
@@ -127,7 +134,6 @@ export class ArchiveIndex {
       latestProduct: new Map(),
       latestStore: new Map(),
       latestOffer: new Map(),
-      activeListings: new Map(),
     };
   }
 
@@ -214,7 +220,6 @@ export class ArchiveIndex {
       const snapshots = index.snapshots.get(id) ?? [];
       insertChronologically(snapshots, record);
       index.snapshots.set(id, snapshots);
-      index.activeListings.set(id, replaySnapshots(snapshots));
     }
   }
 
@@ -249,9 +254,6 @@ export class ArchiveIndex {
       latestProduct: new Map(this.#index.latestProduct),
       latestStore: new Map(this.#index.latestStore),
       latestOffer: new Map(this.#index.latestOffer),
-      activeListings: new Map(
-        [...this.#index.activeListings].map(([key, set]) => [key, new Set(set)]),
-      ),
     };
   }
 
@@ -318,7 +320,10 @@ export class ArchiveIndex {
     const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
     const offers = [...currentOfferIds]
       .sort()
-      .map((id) => [id, index.latestOffer.get(id)?.hash]);
+      .map((id) => [
+        id,
+        revisionAt(index.offerRevisions.get(id) ?? [], Date.parse(observedAt))?.hash,
+      ]);
     return {
       version: 2,
       type: "snapshot",
@@ -366,12 +371,23 @@ export class ArchiveIndex {
           observedAt: observation.observedAt,
           offerIds: new Set(),
         };
+        if (Date.parse(observation.observedAt) > Date.parse(current.observedAt)) {
+          current.observedAt = observation.observedAt;
+        }
         current.offerIds.add(offerId(observation));
         listings.set(observation.store.id, current);
       }
     }
 
     for (const [storeId, listing] of listings) {
+      const existing = draft.snapshots.get(listingId(options.snapshotScope, storeId)) ?? [];
+      const latest = existing.at(-1);
+      if (latest && Date.parse(listing.observedAt) < eventTime(latest)) {
+        throw new Error(
+          `Snapshot for ${storeId} is older than the latest archived snapshot; ` +
+          "append snapshots chronologically or rebuild the archive",
+        );
+      }
       const snapshot = this.#planSnapshotRecord(
         draft,
         options.snapshotScope,
@@ -385,13 +401,6 @@ export class ArchiveIndex {
   }
 
   // ---- queries ----
-
-  #revisionAt(revisions, at) {
-    for (let index = revisions.length - 1; index >= 0; index -= 1) {
-      if (eventTime(revisions[index]) <= at) return revisions[index];
-    }
-    return revisions[0];
-  }
 
   #listingState(scope, storeId, at) {
     const snapshots = this.#index.snapshots.get(listingId(scope, storeId)) ?? [];
@@ -453,8 +462,8 @@ export class ArchiveIndex {
         const displayAt = listing.active.has(offer.offerId) && listing.lastSeenAt
           ? Date.parse(listing.lastSeenAt)
           : timestamp;
-        const product = this.#revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
-        const store = this.#revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
+        const product = revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
+        const store = revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
         if (!product || !store) continue;
         if (query.productId && offer.productId !== query.productId) continue;
         if (query.storeId && offer.storeId !== query.storeId) continue;

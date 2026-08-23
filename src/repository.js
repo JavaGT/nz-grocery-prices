@@ -546,7 +546,7 @@ export class JsonlObservationRepository {
     const productRevisions = new Set();
     const storeRevisions = new Set();
     const snapshots = new Set();
-    const compacted = this.#index.getRecords().filter((record) => {
+    const compacted = this.#index.getRecordReferences().filter((record) => {
       if (record.type === "product") {
         const key = `${record.productId}\u0000${record.hash}`;
         if (productRevisions.has(key)) return false;

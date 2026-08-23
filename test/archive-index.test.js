@@ -108,9 +108,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("query({}) materializes every offer with display-time revisions", async () => {
     assert.deepEqual(await repository.query({}), [
-      // Out-of-order Aug-9 offer: store unknown to any listing (no listing
-      // fields), display revisions at its own observedAt.
-      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
+      // Offers before their first product/store revision are not materialized.
       // Listed offers render at lastSeenAt (2026-08-13): latest product name
       // AND the CHANGED retailer/suburb — current semantics.
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
@@ -128,7 +126,6 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("query({productId}) filters post-materialization", async () => {
     assert.deepEqual(await repository.query({ productId: "p1" }), [
-      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 399, at: "2026-08-11T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
     ]);
@@ -149,7 +146,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
       expect({ id: "p2", name: "Product p2", store: "s-nw-alb", retailer: "newworld", cents: 550, at: "2026-08-10T01:00:00.000Z", known: true, src: "nw-2" }),
     ]);
     assert.equal((await repository.query({ retailer: "woolworths" })).length, 4);
-    assert.equal((await repository.query({ retailer: "paknsave" })).length, 4);
+    assert.equal((await repository.query({ retailer: "paknsave" })).length, 3);
   });
 
   it("query({from,to}) filters inclusively and pins asOf at `to`", async () => {
@@ -165,7 +162,6 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("asOf midday Aug-12 renders pre-change names, retailers, and listings", async () => {
     assert.deepEqual(await repository.query({ to: "2026-08-12T12:00:00.000Z" }), [
-      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
       expect({ id: "p1", name: "Product p1", store: "s-nw-alb", retailer: "newworld", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-11T01:00:00.000Z", src: "nw-1" }),
       expect({ id: "p2", name: "Product p2", store: "s-nw-alb", retailer: "newworld", cents: 550, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-11T01:00:00.000Z", src: "nw-2" }),
       expect({ id: "p2", name: "Product p2", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 450, at: "2026-08-10T01:30:00.000Z", seen: "2026-08-11T01:30:00.000Z", src: "pns-2" }),
@@ -327,7 +323,7 @@ describe("ArchiveIndex unit behavior", () => {
     });
   });
 
-  it("plans a late snapshot against the chronological prior listing state", () => {
+  it("rejects late snapshot planning instead of corrupting later deltas", () => {
     const index = new ArchiveIndex();
     const make = (productId, observedAt) => obs({
       productId,
@@ -340,9 +336,10 @@ describe("ArchiveIndex unit behavior", () => {
 
     index.applyAdditions(index.planAppend([make("p1", "2026-08-09T00:00:00.000Z")], { snapshotScope: "specials" }));
     index.applyAdditions(index.planAppend([make("p2", "2026-08-12T00:00:00.000Z")], { snapshotScope: "specials" }));
-    const late = index.planAppend([make("p3", "2026-08-10T00:00:00.000Z")], { snapshotScope: "specials" });
-    const snapshot = late.find((record) => record.type === "snapshot");
-    assert.deepEqual(snapshot.removed, ["p1\u0000s1"]);
+    assert.throws(
+      () => index.planAppend([make("p3", "2026-08-10T00:00:00.000Z")], { snapshotScope: "specials" }),
+      /append snapshots chronologically/,
+    );
   });
 
   it("listingState reconstruction handles add/remove cycles across days", async () => {

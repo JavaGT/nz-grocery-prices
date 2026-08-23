@@ -70,7 +70,7 @@ describe("load protocol (CORE-2 M4)", () => {
     // treating them as corrupt.
     const validV2SnapshotLine =
       '{"version":2,"type":"snapshot","scope":"specials","storeId":"store:0",' +
-      '"observedAt":"2026-08-02T00:00:00.000Z","offerCount":1,' +
+      '"observedAt":"2026-08-04T00:00:00.000Z","offerCount":1,' +
       '"offersHash":"' + "a".repeat(64) + '",' +
       '"added":["prod:s\\u0000store:0"],"removed":[]}\n';
     await writeFile(filePath, validV2SnapshotLine);

@@ -181,7 +181,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
     assert.deepEqual(await repository.query({ productId: "p1", retailer: "woolworths" }).then((rows) => rows.length), 2);
   });
 
-  it("productHistory lists revisions in insertion order with pinned hashes", async () => {
+  it("productHistory lists revisions chronologically with pinned hashes", async () => {
     assert.deepEqual(await repository.productHistory("p1"), [
       {
         hash: "bd0cfeec4d1da705985565d87b03ff6424310e4190c2c144cbf2def7b5ad9102",
@@ -291,7 +291,7 @@ describe("ArchiveIndex unit behavior", () => {
     assert.equal(index.hasRevision("store", "p1", "hash-p1-A"), false);
   });
 
-  it("ORDERING INVARIANT [SOL-7/GROK-7]: revision-at follows INSERTION order, not chronology", () => {
+  it("ORDERING INVARIANT [SOL-7/GROK-7]: revision-at follows chronology with stable ties", () => {
     const index = new ArchiveIndex();
     index.apply(productRecord("p1", "P1", "2026-08-09T00:00:00.000Z"));
     index.apply({ version: 2, type: "store", storeId: "s1", hash: "h-a", observedAt: "2026-08-10T00:00:00.000Z", data: { id: "s1", retailer: "first" } });
@@ -302,11 +302,11 @@ describe("ArchiveIndex unit behavior", () => {
     return index.query().then(async (rows) => {
       assert.equal(rows[0].store.retailer, "second");
 
-      // Out-of-order append with the EARLIEST timestamp lands LAST: insertion
-      // order (not chronology) decides, preserving pre-extraction behavior.
+      // An older revision arriving later must not override the newer
+      // chronologically applicable revision.
       index.apply({ version: 2, type: "store", storeId: "s1", hash: "h-c", observedAt: "2026-08-09T00:00:00.000Z", data: { id: "s1", retailer: "earliest-but-last" } });
       const after = await index.query();
-      assert.equal(after[0].store.retailer, "earliest-but-last");
+      assert.equal(after[0].store.retailer, "second");
 
       // Equal timestamps tie-break by insertion sequence: the later-applied
       // of two same-ms revisions wins.
@@ -349,6 +349,38 @@ describe("ArchiveIndex unit behavior", () => {
     assert.deepEqual(early[1].isOnSpecial, false);
   });
 
+  it("replays out-of-order snapshots chronologically", async () => {
+    const index = new ArchiveIndex();
+    index.apply(productRecord("p1", "P1", "2026-08-09T00:00:00.000Z"));
+    index.apply({ version: 2, type: "store", storeId: "s1", hash: "h-s1", observedAt: "2026-08-01T00:00:00.000Z", data: { id: "s1", retailer: "r" } });
+    index.apply(offerRecord("o1", "p1", "s1", "2026-08-09T00:00:00.000Z", 100));
+    index.apply(snapshotRecord("specials", "s1", "2026-08-12T00:00:00.000Z", [], ["o1"]));
+    index.apply(snapshotRecord("specials", "s1", "2026-08-10T00:00:00.000Z", ["o1"], []));
+
+    const [row] = await index.query({ to: "2026-08-13T00:00:00.000Z" });
+    assert.equal(row.isOnSpecial, false);
+  });
+
+  it("rejects malformed records and protects applied records from mutation", () => {
+    const index = new ArchiveIndex();
+    assert.throws(
+      () => index.apply({ version: 2, type: "unknown", observedAt: "2026-08-10T00:00:00.000Z" }),
+      /record type must be one of/,
+    );
+    assert.throws(
+      () => index.apply(productRecord("bad", "Bad", "not-a-date")),
+      /observedAt must be a valid ISO timestamp/,
+    );
+
+    const record = productRecord("p1", "Original", "2026-08-10T00:00:00.000Z");
+    index.apply(record);
+    record.data.name = "Mutated";
+    const records = index.getRecords();
+    records.pop();
+    assert.equal(index.getRecords().length, 1);
+    assert.equal(index.getRecords()[0].data.name, "Original");
+  });
+
   it("stats() starts empty and clears() resets everything", async () => {
     const index = new ArchiveIndex();
     assert.deepEqual(index.stats(), {
@@ -365,8 +397,8 @@ describe("ArchiveIndex unit behavior", () => {
   });
 });
 
-describe("performance smoke (generous gate)", () => {
-  it("plans ~20k offers in batches and answers a point query in <200ms", async () => {
+describe("performance smoke", () => {
+  it("plans ~20k offers in batches and answers a point query in <50ms", async () => {
     const index = new ArchiveIndex();
     const stores = Array.from({ length: 10 }, (_, i) => `store-${i}`);
     const products = Array.from({ length: 2000 }, (_, i) => `prod-${i}`);
@@ -402,6 +434,6 @@ describe("performance smoke (generous gate)", () => {
     const elapsedMs = performance.now() - start;
 
     assert.equal(rows.length, 10);
-    assert.ok(elapsedMs < 200, `point query took ${elapsedMs.toFixed(1)}ms (gate: <200ms)`);
+    assert.ok(elapsedMs < 50, `point query took ${elapsedMs.toFixed(1)}ms (gate: <50ms)`);
   });
 });

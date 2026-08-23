@@ -1,4 +1,4 @@
-import { fingerprint } from "./archive-records.js";
+import { fingerprint, validateRecordEnvelope } from "./archive-records.js";
 
 /**
  * Dedup identity of an observation within a batch/repository (memory-only
@@ -53,20 +53,29 @@ function eventTime(record) {
   return Date.parse(record.observedAt);
 }
 
+function insertChronologically(records, record) {
+  const timestamp = eventTime(record);
+  let index = records.length;
+  while (index > 0 && eventTime(records[index - 1]) > timestamp) index -= 1;
+  records.splice(index, 0, record);
+}
+
+function replaySnapshots(snapshots) {
+  const active = new Set();
+  for (const snapshot of snapshots) {
+    for (const offerIdValue of snapshot.added) active.add(offerIdValue);
+    for (const offerIdValue of snapshot.removed) active.delete(offerIdValue);
+  }
+  return active;
+}
+
 /**
  * In-memory projection of the archive: content-addressed product/store/offer
  * revisions, daily listing snapshots, and observation materialization.
  *
- * ORDERING INVARIANT [SOL-7/GROK-7]: per-entity revision arrays (and every
- * other map here) hold records in INSERTION order, i.e. file order at load
- * and append order afterwards. Revision-at lookups (#revisionAt,
- * #listingState) walk that order backwards and return the latest record
- * whose observedAt is ≤ the display time, falling back to the earliest —
- * they do NOT require chronological order, so out-of-order appends and
- * equal-timestamp ties (insertion sequence decides) behave identically to
- * the pre-extraction implementation. This was a deliberate parity decision
- * for the CORE-3 extraction; sorting revisions chronologically at load AND
- * apply remains a follow-up and must not change mid-extraction.
+ * ORDERING INVARIANT [SOL-7/GROK-7]: per-entity revision and snapshot arrays
+ * are chronological. Equal timestamps retain application order as the stable
+ * tie-break. Historical lookups must not depend on archive line arrival order.
  *
  * No filesystem knowledge lives here: durability (writer/load protocols)
  * belongs to JsonlObservationRepository, which applies decoded records via
@@ -81,6 +90,8 @@ export class ArchiveIndex {
     storeRevisions: new Map(),
     offerRevisions: new Map(),
     snapshots: new Map(),
+    offerIdsByProduct: new Map(),
+    offerIdsByStore: new Map(),
     latestProduct: new Map(),
     latestStore: new Map(),
     latestOffer: new Map(),
@@ -89,7 +100,7 @@ export class ArchiveIndex {
 
   /** Every applied record, in application order. Treat as immutable. */
   getRecords() {
-    return this.#index.records;
+    return [...this.#index.records];
   }
 
   /** Discards all indexed state. */
@@ -100,6 +111,8 @@ export class ArchiveIndex {
       storeRevisions: new Map(),
       offerRevisions: new Map(),
       snapshots: new Map(),
+      offerIdsByProduct: new Map(),
+      offerIdsByStore: new Map(),
       latestProduct: new Map(),
       latestStore: new Map(),
       latestOffer: new Map(),
@@ -128,45 +141,63 @@ export class ArchiveIndex {
 
     if (record.type === "product") {
       const revisions = index.productRevisions.get(record.productId) ?? [];
-      revisions.push(record);
+      insertChronologically(revisions, record);
       index.productRevisions.set(record.productId, revisions);
-      index.latestProduct.set(record.productId, record);
+      index.latestProduct.set(record.productId, revisions.at(-1));
       return;
     }
     if (record.type === "store") {
       const revisions = index.storeRevisions.get(record.storeId) ?? [];
-      revisions.push(record);
+      insertChronologically(revisions, record);
       index.storeRevisions.set(record.storeId, revisions);
-      index.latestStore.set(record.storeId, record);
+      index.latestStore.set(record.storeId, revisions.at(-1));
       return;
     }
     if (record.type === "offer") {
       const revisions = index.offerRevisions.get(record.offerId) ?? [];
-      revisions.push(record);
+      insertChronologically(revisions, record);
       index.offerRevisions.set(record.offerId, revisions);
-      index.latestOffer.set(record.offerId, record);
+      index.latestOffer.set(record.offerId, revisions.at(-1));
+      const productOffers = index.offerIdsByProduct.get(record.productId) ?? new Set();
+      productOffers.add(record.offerId);
+      index.offerIdsByProduct.set(record.productId, productOffers);
+      const storeOffers = index.offerIdsByStore.get(record.storeId) ?? new Set();
+      storeOffers.add(record.offerId);
+      index.offerIdsByStore.set(record.storeId, storeOffers);
       return;
     }
     if (record.type === "snapshot") {
       const id = listingId(record.scope, record.storeId);
       const snapshots = index.snapshots.get(id) ?? [];
-      snapshots.push(record);
+      insertChronologically(snapshots, record);
       index.snapshots.set(id, snapshots);
-      const active = index.activeListings.get(id) ?? new Set();
-      for (const idToAdd of record.added) active.add(idToAdd);
-      for (const idToRemove of record.removed) active.delete(idToRemove);
-      index.activeListings.set(id, active);
+      index.activeListings.set(id, replaySnapshots(snapshots));
     }
   }
 
   /** Indexes one record into live state. */
   apply(record) {
-    this.#applyRecord(this.#index, record);
+    const problems = validateRecordEnvelope(record);
+    if (problems.length > 0) {
+      throw new TypeError(`Invalid archive record: ${problems.join("; ")}`);
+    }
+    if (!Number.isFinite(eventTime(record))) {
+      throw new TypeError("Invalid archive record: observedAt must be a valid ISO timestamp");
+    }
+    if (["product", "store", "offer"].includes(record.type) &&
+        (!record.data || typeof record.data !== "object" || Array.isArray(record.data))) {
+      throw new TypeError(`Invalid archive record: ${record.type} data must be an object`);
+    }
+    if (record.type === "snapshot" &&
+        (!Array.isArray(record.added) || !Array.isArray(record.removed))) {
+      throw new TypeError("Invalid archive record: snapshot added and removed must be arrays");
+    }
+    this.#applyRecord(this.#index, structuredClone(record));
   }
 
   /** Bulk-apply decoded records (e.g. the additions of one append batch). */
   applyAdditions(records) {
-    for (const record of records) this.#applyRecord(this.#index, record);
+    for (const record of records) this.apply(record);
   }
 
   /** Shallow structural copy of the index; record objects are shared. */
@@ -179,6 +210,12 @@ export class ArchiveIndex {
       storeRevisions: copyAll(this.#index.storeRevisions),
       offerRevisions: copyAll(this.#index.offerRevisions),
       snapshots: copyAll(this.#index.snapshots),
+      offerIdsByProduct: new Map(
+        [...this.#index.offerIdsByProduct].map(([key, value]) => [key, new Set(value)]),
+      ),
+      offerIdsByStore: new Map(
+        [...this.#index.offerIdsByStore].map(([key, value]) => [key, new Set(value)]),
+      ),
       latestProduct: new Map(this.#index.latestProduct),
       latestStore: new Map(this.#index.latestStore),
       latestOffer: new Map(this.#index.latestOffer),
@@ -332,7 +369,7 @@ export class ArchiveIndex {
     let lastSeenAt;
     let known = false;
     for (const snapshot of snapshots) {
-      if (eventTime(snapshot) > at) break;
+      if (eventTime(snapshot) > at) continue;
       known = true;
       for (const id of snapshot.added) active.add(id);
       for (const id of snapshot.removed) active.delete(id);
@@ -371,7 +408,20 @@ export class ArchiveIndex {
     };
     const observations = [];
 
-    for (const revisions of this.#index.offerRevisions.values()) {
+    let candidateRevisions;
+    if (query.productId && query.storeId) {
+      candidateRevisions = [this.#index.offerRevisions.get(`${query.productId}\u0000${query.storeId}`) ?? []];
+    } else if (query.productId) {
+      candidateRevisions = [...(this.#index.offerIdsByProduct.get(query.productId) ?? [])]
+        .map((offerIdValue) => this.#index.offerRevisions.get(offerIdValue) ?? []);
+    } else if (query.storeId) {
+      candidateRevisions = [...(this.#index.offerIdsByStore.get(query.storeId) ?? [])]
+        .map((offerIdValue) => this.#index.offerRevisions.get(offerIdValue) ?? []);
+    } else {
+      candidateRevisions = this.#index.offerRevisions.values();
+    }
+
+    for (const revisions of candidateRevisions) {
       for (const offer of revisions) {
         const timestamp = eventTime(offer);
         if (timestamp < from || timestamp > to) continue;

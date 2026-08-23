@@ -108,7 +108,6 @@ export class ArchiveIndex {
     offerIdsByStore: new Map(),
     latestProduct: new Map(),
     latestStore: new Map(),
-    latestOffer: new Map(),
   };
 
   /** Every applied record, in application order. Treat as immutable. */
@@ -133,7 +132,6 @@ export class ArchiveIndex {
       offerIdsByStore: new Map(),
       latestProduct: new Map(),
       latestStore: new Map(),
-      latestOffer: new Map(),
     };
   }
 
@@ -206,7 +204,6 @@ export class ArchiveIndex {
       const revisions = index.offerRevisions.get(record.offerId) ?? [];
       insertChronologically(revisions, record);
       index.offerRevisions.set(record.offerId, revisions);
-      index.latestOffer.set(record.offerId, revisions.at(-1));
       const productOffers = index.offerIdsByProduct.get(record.productId) ?? new Set();
       productOffers.add(record.offerId);
       index.offerIdsByProduct.set(record.productId, productOffers);
@@ -253,7 +250,6 @@ export class ArchiveIndex {
       ),
       latestProduct: new Map(this.#index.latestProduct),
       latestStore: new Map(this.#index.latestStore),
-      latestOffer: new Map(this.#index.latestOffer),
     };
   }
 
@@ -261,8 +257,11 @@ export class ArchiveIndex {
 
   #planProductRecord(index, observation) {
     const hash = fingerprint(observation.product);
-    const previous = index.latestProduct.get(observation.product.id);
-    if (previous?.hash === hash || this.#hasRevision("product", observation.product.id, hash, index)) {
+    const observedAt = Date.parse(observation.observedAt);
+    const revisions = index.productRevisions.get(observation.product.id) ?? [];
+    if (revisions.some((revision) =>
+      revision.hash === hash && eventTime(revision) <= observedAt
+    )) {
       return undefined;
     }
     return {
@@ -277,8 +276,11 @@ export class ArchiveIndex {
 
   #planStoreRecord(index, observation) {
     const hash = fingerprint(observation.store);
-    const previous = index.latestStore.get(observation.store.id);
-    if (previous?.hash === hash || this.#hasRevision("store", observation.store.id, hash, index)) {
+    const observedAt = Date.parse(observation.observedAt);
+    const revisions = index.storeRevisions.get(observation.store.id) ?? [];
+    if (revisions.some((revision) =>
+      revision.hash === hash && eventTime(revision) <= observedAt
+    )) {
       return undefined;
     }
     return {
@@ -299,8 +301,11 @@ export class ArchiveIndex {
       source: structuredClone(observation.source),
     };
     const hash = fingerprint(data);
+    const observedAt = Date.parse(observation.observedAt);
     const revisions = index.offerRevisions.get(id) ?? [];
-    if (revisions.some((revision) => revision.hash === hash)) return undefined;
+    if (revisions.some((revision) =>
+      revision.hash === hash && eventTime(revision) <= observedAt
+    )) return undefined;
     return {
       version: 2,
       type: "offer",
@@ -318,12 +323,15 @@ export class ArchiveIndex {
     const previous = listingStateAt(index.snapshots.get(id) ?? [], Date.parse(observedAt)).active;
     const added = [...currentOfferIds].filter((value) => !previous.has(value)).sort();
     const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
-    const offers = [...currentOfferIds]
-      .sort()
-      .map((id) => [
-        id,
-        revisionAt(index.offerRevisions.get(id) ?? [], Date.parse(observedAt))?.hash,
-      ]);
+    const offers = [...currentOfferIds].sort().map((offerIdValue) => {
+      const revision = revisionAt(index.offerRevisions.get(offerIdValue) ?? [], Date.parse(observedAt));
+      if (!revision) {
+        throw new Error(
+          `Snapshot for ${storeId} references offer ${offerIdValue} without a revision at ${observedAt}`,
+        );
+      }
+      return [offerIdValue, revision.hash];
+    });
     return {
       version: 2,
       type: "snapshot",

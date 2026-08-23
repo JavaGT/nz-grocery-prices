@@ -108,7 +108,8 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("query({}) materializes every offer with display-time revisions", async () => {
     assert.deepEqual(await repository.query({}), [
-      // Offers before their first product/store revision are not materialized.
+      // Backfilled product/store anchors make the older offer queryable.
+      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
       // Listed offers render at lastSeenAt (2026-08-13): latest product name
       // AND the CHANGED retailer/suburb — current semantics.
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
@@ -126,6 +127,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("query({productId}) filters post-materialization", async () => {
     assert.deepEqual(await repository.query({ productId: "p1" }), [
+      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
       expect({ id: "p1", name: "Milk 2L fresh", store: "s-nw-alb", retailer: "woolworths", suburb: "Albany", cents: 399, at: "2026-08-11T01:00:00.000Z", seen: "2026-08-13T01:00:00.000Z", src: "nw-1" }),
     ]);
@@ -146,7 +148,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
       expect({ id: "p2", name: "Product p2", store: "s-nw-alb", retailer: "newworld", cents: 550, at: "2026-08-10T01:00:00.000Z", known: true, src: "nw-2" }),
     ]);
     assert.equal((await repository.query({ retailer: "woolworths" })).length, 4);
-    assert.equal((await repository.query({ retailer: "paknsave" })).length, 3);
+    assert.equal((await repository.query({ retailer: "paknsave" })).length, 4);
   });
 
   it("query({from,to}) filters inclusively and pins asOf at `to`", async () => {
@@ -162,6 +164,7 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("asOf midday Aug-12 renders pre-change names, retailers, and listings", async () => {
     assert.deepEqual(await repository.query({ to: "2026-08-12T12:00:00.000Z" }), [
+      expect({ id: "p1", name: "Product p1", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 320, at: "2026-08-09T05:00:00.000Z", known: true, src: "pns-late" }),
       expect({ id: "p1", name: "Product p1", store: "s-nw-alb", retailer: "newworld", cents: 349, promoCents: 299, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-11T01:00:00.000Z", src: "nw-1" }),
       expect({ id: "p2", name: "Product p2", store: "s-nw-alb", retailer: "newworld", cents: 550, at: "2026-08-10T01:00:00.000Z", seen: "2026-08-11T01:00:00.000Z", src: "nw-2" }),
       expect({ id: "p2", name: "Product p2", store: "s-pns-mt", retailer: "paknsave", suburb: "Mt Roskill", cents: 450, at: "2026-08-10T01:30:00.000Z", seen: "2026-08-11T01:30:00.000Z", src: "pns-2" }),
@@ -179,6 +182,11 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
 
   it("productHistory lists revisions chronologically with pinned hashes", async () => {
     assert.deepEqual(await repository.productHistory("p1"), [
+      {
+        hash: "bd0cfeec4d1da705985565d87b03ff6424310e4190c2c144cbf2def7b5ad9102",
+        observedAt: "2026-08-09T05:00:00.000Z",
+        product: { id: "p1", name: "Product p1" },
+      },
       {
         hash: "bd0cfeec4d1da705985565d87b03ff6424310e4190c2c144cbf2def7b5ad9102",
         observedAt: "2026-08-10T01:00:00.000Z",
@@ -210,8 +218,8 @@ describe("CORE-3 parity: query materialization (via JsonlObservationRepository)"
   it("stats() reports counts by type, retailers of latest store revisions, span", async () => {
     assert.deepEqual(await repository.stats(), {
       records: {
-        product: 6, // p1×2 (rename), p2, p3, p4, p5
-        store: 4, // s-nw-alb×2 (retailer change), s-pns-mt, s-wgtn
+        product: 7, // p1 temporal anchor + p1 rename, p2, p3, p4, p5
+        store: 5, // s-pns-mt temporal anchor + s-nw-alb×2 + s-wgtn
         offer: 9,
         snapshot: 8, // day-2 writes unchanged-content snapshots too (offersHash differs)
       },
@@ -336,10 +344,19 @@ describe("ArchiveIndex unit behavior", () => {
 
     index.applyAdditions(index.planAppend([make("p1", "2026-08-09T00:00:00.000Z")], { snapshotScope: "specials" }));
     index.applyAdditions(index.planAppend([make("p2", "2026-08-12T00:00:00.000Z")], { snapshotScope: "specials" }));
+    const before = index.getRecords().length;
     assert.throws(
       () => index.planAppend([make("p3", "2026-08-10T00:00:00.000Z")], { snapshotScope: "specials" }),
       /append snapshots chronologically/,
     );
+    assert.equal(index.getRecords().length, before);
+
+    const mixed = new ArchiveIndex();
+    const planned = mixed.planAppend([
+      make("p4", "2026-08-10T00:00:00.000Z"),
+      make("p5", "2026-08-11T00:00:00.000Z"),
+    ], { snapshotScope: "specials" });
+    assert.equal(planned.find((record) => record.type === "snapshot").observedAt, "2026-08-11T00:00:00.000Z");
   });
 
   it("listingState reconstruction handles add/remove cycles across days", async () => {

@@ -548,12 +548,12 @@ export class JsonlObservationRepository {
     const snapshots = new Set();
     const compacted = this.#index.getRecordReferences().filter((record) => {
       if (record.type === "product") {
-        const key = `${record.productId}\u0000${record.hash}`;
+        const key = `${record.productId}\u0000${record.hash}\u0000${record.observedAt}`;
         if (productRevisions.has(key)) return false;
         productRevisions.add(key);
       }
       if (record.type === "store") {
-        const key = `${record.storeId}\u0000${record.hash}`;
+        const key = `${record.storeId}\u0000${record.hash}\u0000${record.observedAt}`;
         if (storeRevisions.has(key)) return false;
         storeRevisions.add(key);
       }

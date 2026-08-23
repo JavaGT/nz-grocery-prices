@@ -5,11 +5,11 @@ How to confirm a change works. Pair with `command-map.md`.
 ## Required checks before handoff
 
 1. **`npm run check`** — syntax-checks every source file. Fast. Always run.
-2. **`npm test`** — full suite (~477 tests, ~5s). All self-contained now:
+2. **`npm test`** — full suite (~600 tests, ~7s). All self-contained:
    - temp dirs in `os.tmpdir()` for JSONL/DB fixtures
    - in-process HTTP server on port `0` for app/API tests
-   - `test/server.test.js` spawns the legacy dashboard as a child process on an
-     ephemeral port against a temp fixture JSONL
+   - (The legacy dashboard child-process test was deleted with the dashboard
+     in CORE-6.)
 3. **`npm run pack:check`** — if you changed `package.json` `files`, `exports`,
    or `bin`.
 
@@ -25,10 +25,10 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 | `src/matching/` | `node --test test/matching/` |
 | `public/` (frontend) | `node --test test/frontend/` |
 | `scripts/archive-daily-local.sh` | `sh -n scripts/archive-daily-local.sh && node --test test/local-archive-runner.test.js` |
-| `dashboard/` | `node --test test/server.test.js` |
 | `src/archive.js`, `src/analytics.js` | `node --test test/archive.test.js test/analytics.test.js` |
 | `src/repository.js` writer/load/repair | `node --test test/repository-writer.test.js test/repository-load.test.js test/repository-repair.test.js` |
 | `src/archive-index.js` | `node --test test/archive-index.test.js test/repository-writer.test.js test/repository-load.test.js` |
+| `scripts/migrate-v1-archive.js`, v1 refusal paths | `node --test test/migrate-v1.test.js test/repository-load.test.js test/sqlite/rebuild.test.js` |
 
 ## Test seams (where a new test plugs in)
 
@@ -44,6 +44,9 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
   tmpDb)` + `rebuild({ force: true })` (see `test/sqlite/projection-repository.test.js`).
 - **Archive-runner test** → fake-npm pattern in
   `test/local-archive-runner.test.js` (no network, no real archive).
+- **v1 migration test** → temp-dir CLI pattern in `test/migrate-v1.test.js`:
+  run `scripts/migrate-v1-archive.js` via `execFile` against temp copies only;
+  never the live archive.
 
 ## Known footguns in verification
 
@@ -51,7 +54,11 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
   live retailer APIs and mutate `data/prices.jsonl`. Never run them to "verify"
   a change.
 - **`data/prices.jsonl` is live data.** Tests use temp dirs; never point a test
-  at the real archive.
+  at the real archive. Verify migrator behavior on live data by COPYING it to
+  a temp path and dry-running the copy.
+- **v1 fixtures are refused, not imported.** Post-CORE-6, a legacy v1 line in
+  any fixture makes the loader/rebuild throw with the migrator command — that
+  refusal is the expected behavior to assert, not a bug.
 - **Node version.** SQLite/app/server tests fail on Node 20 with an
   `ERR_MODULE_NOT_FOUND` for `node:sqlite`. Use Node 26.3.1+.
 - **Dead tables.** The projection schema has `deal_signals` and `product_matches`

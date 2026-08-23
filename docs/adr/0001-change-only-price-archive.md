@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — 2026-07-13.
+Accepted — 2026-07-13. Amended 2026-08-24 (CORE-6): legacy v1 records are no
+longer readable by the application's hot paths; see Consequences.
 
 ## Context
 
@@ -24,4 +25,4 @@ Unchanged daily collection becomes a handful of snapshot records while preservin
 
 An advertised-specials snapshot proves presence only for the collected special scope. Targeted `track` searches intentionally do not assert that an item remains on special. Product IDs shared by Foodstuffs can produce store-specific metadata variants; each unique metadata hash is retained once rather than alternately rewriting the same product record.
 
-Legacy observation JSONL remains readable and `npm run compact` rewrites it to v2.
+**Amendment (2026-08-24, CORE-6):** The original closing claim — "legacy observation JSONL remains readable and `npm run compact` rewrites it to v2" — no longer holds. Per owner direction ("no hangups on legacy"), the repository loader, `compact`, and the projection rebuild now **refuse** legacy v1 records with an error pointing at the one-shot migrator. v1 archives are converted exclusively with `node scripts/migrate-v1-archive.js --file <archive.jsonl>` (idempotent, backup-first, order-preserving); after conversion, `compact` works normally.

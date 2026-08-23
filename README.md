@@ -175,7 +175,7 @@ This keeps metadata and prices independently historical. Inspect all known versi
 npm run prices -- product foodstuffs:5226969-ea-000
 ```
 
-Run `npm run compact` to convert a legacy v1 archive or remove duplicate records after an interrupted/manual ingestion.
+Run `npm run compact` to remove duplicate records after an interrupted/manual ingestion. Archives containing legacy v1 records must be converted first with `node scripts/migrate-v1-archive.js --file <archive.jsonl>` (dry-run reports what would change; it refuses to touch the live archive without `--force`).
 
 For products that are not currently advertised, track targeted searches regularly:
 
@@ -365,7 +365,7 @@ npm run pack:check
 ```
 
 ```sh
-# Full test suite (432+ tests)
+# Full test suite (600+ tests)
 npm test
 
 # Run specific test groups
@@ -374,7 +374,7 @@ node --test test/app/             # Auth, app DB
 node --test test/server/          # API contract, security, permissions
 node --test test/matching/        # Matching engine (GTIN, source_id, fuzzy)
 
-# Rebuild projection DB (safe — app DB untouched)
+# Rebuild projection DB (safe — app DB untouched; refuses app.db outputs)
 npm run build-db
 
 # Run cross-retailer matching
@@ -402,13 +402,24 @@ Collection health is logged to stdout per run (see `src/collection-health.js`).
 Counts per retailer, total archive size, and any failures are recorded. The
 archive runner preserves the existing archive on failure.
 
-## Deprecation notice
+## Legacy formats and the old dashboard (removed 2026-08-24)
 
-The old `dashboard/` server (`npm run dashboard`, port 7070) is **deprecated**.
-It serves the same JSONL archive directly without the SQLite projection layer
-or user accounts. Use `npm start` for the new price·minder server.
+Per owner direction ("no hangups on legacy"), the legacy v1 support paths and
+the old `dashboard/` server are **removed**:
 
-- The `dashboard/` directory and files are preserved but not maintained.
-- The `npm run dashboard` command will continue to work for fallback.
-- The old `test/server.test.js` tests the dashboard server on port 7070.
-- All new development should target `src/app/server.js`.
+- The `dashboard/` directory, its `npm run dashboard` script, and
+  `test/server.test.js` were deleted. The canonical server is `npm start`
+  (`src/app/server.js`) — SQLite projection + user accounts.
+- Legacy v1 whole-observation records are **rejected** by the archive loader,
+  compaction, and the projection rebuild with an error pointing at the
+  migrator. Convert them once with:
+
+  ```sh
+  node scripts/migrate-v1-archive.js --file <archive.jsonl> --dry-run  # report only
+  node scripts/migrate-v1-archive.js --file <archive.jsonl>            # migrate (backs up first)
+  ```
+
+  The migrator preserves valid v2 lines byte-for-byte in order, derives v2
+  records from each v1 observation against all preceding state, quarantines
+  undecodable lines rather than inventing data, and writes a fsynced backup
+  before atomically replacing the file. A run with no v1 lines is a no-op.

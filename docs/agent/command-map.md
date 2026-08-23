@@ -2,12 +2,12 @@
 
 Canonical commands. Split into **targeted** (fast, one thing) and **full**
 checks. Node 26.3.1+ is required for anything using `node:sqlite`; Node 20+
-suffices for collectors and the legacy dashboard.
+suffices for collectors.
 
 ## Prerequisites
 
 - Node 26.3.1+ (for app server, build-db, matching, and SQLite/app/server tests)
-- Node 20+ (collectors, CLI, legacy dashboard, adapter tests)
+- Node 20+ (collectors, CLI, adapter tests)
 - No `npm install` needed — zero runtime dependencies.
 
 ## Targeted checks (run these first)
@@ -16,7 +16,7 @@ suffices for collectors and the legacy dashboard.
 |---|---|
 | Syntax-check all source | `npm run check` |
 | Shell syntax of archive runner | `sh -n scripts/archive-daily-local.sh` |
-| One test file | `node --test test/sqlite/projection-repository.test.js` |
+| One test file | `node --test test/sqlite/rebuild.test.js` |
 | One test by name | `node --test --test-name-pattern="extracts a normal" test/adapters/foodstuffs.test.js` |
 | One test directory | `node --test test/sqlite/` |
 | Publishable file set | `npm run pack:check` |
@@ -25,7 +25,7 @@ suffices for collectors and the legacy dashboard.
 
 | Task | Command | Notes |
 |---|---|---|
-| Full test suite | `npm test` | ~570 tests, ~6s. All self-contained (temp dirs, port 0, child-process dashboard). |
+| Full test suite | `npm test` | ~600 tests, ~7s. All self-contained (temp dirs, port 0). No child-process dashboard since CORE-6. |
 | Lint / typecheck | **none** | no ESLint, no TypeScript compiler. `npm run check` is the syntax gate. |
 
 ## Run / dev
@@ -33,18 +33,28 @@ suffices for collectors and the legacy dashboard.
 | Task | Command | Port | Env |
 |---|---|---|---|
 | App server (canonical) | `npm start` | 3010 | `PORT`, `HOST`, `JSONL_PATH`, `PRICES_DB`, `APP_DB`, `TRUST_PROXY_HEADERS=1`, `ENABLE_HSTS=1` |
-| Legacy dashboard (deprecated) | `npm run dashboard` | 7070 | `DASHBOARD_PORT`, `PRICE_FILE` |
-| Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db` |
+| Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db`. Refuses app.db/APP_DB outputs (two-DB rule); refuses v1 archives with the migrator command. Fail-fast `<db>.lock`. |
 | Run matching | `npm run matching -- --fuzzy` | — | writes to `app.db.product_match_pairs` |
-| Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Takes the `<archive>.lock` while scanning/rewriting (fails fast if a writer holds it; reclaims it if the holder's pid is dead). Rejects `.db` paths (case-insensitive); accepts `--file <path>` or `--file=<path>`; requires `--force` for `data/prices.jsonl`. |
+| Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Takes the `<archive>.lock` while scanning/rewriting (fails fast if a writer holds it; reclaims it if the holder's pid is dead). Rejects `.db` paths (case-insensitive); accepts `--file <path>` or `--file=<path>`; requires `--force` for `data/prices.jsonl`. Keeps legacy v1 lines byte-for-byte (migration is not repair's job). |
+| Migrate legacy v1 archive | `node scripts/migrate-v1-archive.js --file <path> [--dry-run] [--force]` | — | one-shot v1→v2 conversion (CORE-6). Dry run reports `{v1, v2, invalid, changes}` and writes nothing. Apply mode backs up the original bytes (`<file>.pre-v2-migration-<ts>`), quarantines undecodable lines, preserves mixed line order, rewrites atomically under the shared `<archive>.lock`. Refuses `.db` paths and the live `data/prices.jsonl` without `--force`; a no-v1 run is a true no-op. |
 
 ### Archive writer protocol
 
-All archive mutations (`append`, `compact`, repair, the collector publisher)
-take the same `<archive>.lock` mkdir-based lock and are mutually exclusive.
-Appends are fsync'd before in-memory state updates; compaction/repair replace
-the file atomically via rename. `fh.sync()` is fsync(2) — crash-atomic, not a
-power-loss guarantee on APFS (see DECISIONLOG 2026-08-23).
+All archive mutations (`append`, `compact`, repair, migrate-v1-archive, the
+collector publisher) take the same `<archive>.lock` mkdir-based lock and are
+mutually exclusive. Appends are fsync'd before in-memory state updates;
+compaction/repair/migration replace the file atomically via rename.
+`fh.sync()` is fsync(2) — crash-atomic, not a power-loss guarantee on APFS
+(see DECISIONLOG 2026-08-23).
+
+### Legacy v1 policy (CORE-6)
+
+v1 whole-observation records are refused everywhere in the hot path:
+
+- `JsonlObservationRepository` load/compact → error naming file:line + the
+  migrator command.
+- Projection rebuild → refusal before publishing (mixed or v1-only).
+- The only converter is `scripts/migrate-v1-archive.js`.
 
 ## Collectors (live network — do not run casually)
 
@@ -58,7 +68,6 @@ power-loss guarantee on APFS (see DECISIONLOG 2026-08-23).
 
 ## Known slow / side-effecting checks
 
-- `test/server.test.js` — spawns the legacy dashboard as a child process (~170ms).
 - `test/local-archive-runner.test.js` — runs the real shell script with a fake npm (no network, no real archive).
 - `npm run archive:local` and any `npm run <retailer>` — **live network collection, mutates data**. Not tests.
 

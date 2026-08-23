@@ -38,7 +38,7 @@ All application code, SQLite projection code, and the SPA frontend move into `/U
 | Daily archive runner | `scripts/archive-daily-local.sh` | prices repo |
 | LaunchDaemon template | `ops/` | prices repo |
 
-The old `dashboard/` directory (JSONL-direct server) is deprecated. After the new `src/app/` server passes all integration contract tests, the old dashboard entry point becomes a deprecation notice. The directory and its files are NEVER deleted; they remain as a preserved reference.
+The old `dashboard/` directory (JSONL-direct server) was **deleted on 2026-08-24 (CORE-6)** by owner-directed override of this spec's original preservation stance. The canonical server is `src/app/server.js`; the dashboard's feed/limit contracts were ported to `PriceArchive.agentFeed` and `/api/deals` tests. Historical planning text below may still describe the earlier deprecation-only approach.
 
 ### 1.3 Boundary between prices and Workbench
 

@@ -79,7 +79,9 @@ function forkBuild(jsonlPath, dbPath, force = false) {
 }
 
 describe('concurrent rebuilds', () => {
-  it('two simultaneous rebuilds to the same DB path both succeed with no corruption', async () => {
+  it('two simultaneous rebuilds to the same DB path: winner publishes, loser refuses cleanly', async () => {
+    // CORE-6 fail-fast locking: a loser must exit with the lock error and
+    // leave the winner's published DB intact.
     const { dir } = tmp();
     const jsonlPath = join(dir, 'concurrent.jsonl');
     const dbPath = join(dir, 'concurrent.db');
@@ -98,10 +100,13 @@ describe('concurrent rebuilds', () => {
         forkBuild(jsonlPath, dbPath),
       ]);
 
-      assert.ok(resultA.code === 0 || resultA.parsed?.status === 'rebuilt',
-        `Child A exited with code ${resultA.code}: ${resultA.stderr}`);
-      assert.ok(resultB.code === 0 || resultB.parsed?.status === 'rebuilt',
-        `Child B exited with code ${resultB.code}: ${resultB.stderr}`);
+      for (const [name, r] of [['A', resultA], ['B', resultB]]) {
+        if (r.code !== 0) {
+          assert.match(r.stderr, /locked by another writer/,
+            `child ${name} failed fast with the lock error: ${r.stderr}`);
+        }
+      }
+      assert.ok(resultA.code === 0 || resultB.code === 0, 'at least one rebuild succeeded');
 
       const db = new DatabaseSync(dbPath);
       db.exec('PRAGMA journal_mode=WAL');
@@ -126,7 +131,11 @@ describe('concurrent rebuilds', () => {
     }
   });
 
-  it('four concurrent rebuilds to the same DB path leave a valid DB with all data', async () => {
+  it('four concurrent rebuilds to the same DB path: one wins, losers fail fast, DB valid', async () => {
+    // CORE-6: the rebuild lock is FAIL-FAST (mirroring the archive writer
+    // policy) instead of spin-waiting. Concurrent runs are serialized by
+    // re-running them, not queued; a refused run must be a clean lock
+    // refusal, never a corrupt or half-published DB.
     const { dir } = tmp();
     const jsonlPath = join(dir, 'multi-concurrent.jsonl');
     const dbPath = join(dir, 'multi-concurrent.db');
@@ -149,17 +158,19 @@ describe('concurrent rebuilds', () => {
         forkBuild(jsonlPath, dbPath),
       ]);
 
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        assert.ok(r.code === 0 || r.parsed?.status !== undefined,
-          `Child ${i} exited with code ${r.code}: ${r.stderr}`);
+      const succeeded = results.filter(r => r.code === 0);
+      const refused = results.filter(r => r.code !== 0);
+      assert.ok(succeeded.length >= 1, 'at least one rebuild must succeed');
+      for (const r of refused) {
+        assert.match(r.stderr, /locked by another writer/,
+          'a losing rebuild fails fast with the lock error, not a crash');
       }
 
       const db = new DatabaseSync(dbPath);
       db.exec('PRAGMA journal_mode=WAL');
 
       const productCount = db.prepare('SELECT COUNT(*) AS cnt FROM products').get().cnt;
-      assert.equal(productCount, 5, 'should have 5 products after concurrent rebuilds');
+      assert.equal(productCount, 5, 'the winning rebuild published all 5 products');
 
       const offerCount = db.prepare('SELECT COUNT(*) AS cnt FROM offer_revisions').get().cnt;
       assert.equal(offerCount, 5, 'should have 5 offers after concurrent rebuilds');
@@ -174,7 +185,7 @@ describe('concurrent rebuilds', () => {
     }
   });
 
-  it('one force rebuild concurrent with a normal rebuild leaves DB valid', async () => {
+  it('one force rebuild concurrent with a normal rebuild: no corruption', async () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'mixed-concurrent.jsonl');
     const dbPath = join(dir, 'mixed-concurrent.db');
@@ -193,8 +204,13 @@ describe('concurrent rebuilds', () => {
         forkBuild(jsonlPath, dbPath, true), // force rebuild
       ]);
 
-      assert.ok(normal.code === 0, `normal build: ${normal.stderr}`);
-      assert.ok(forced.code === 0, `forced build: ${forced.stderr}`);
+      // Fail-fast locking means either both succeed (sequential timing) or
+      // exactly one is refused with the lock error — never corruption.
+      for (const [name, r] of [['normal', normal], ['forced', forced]]) {
+        if (r.code !== 0) {
+          assert.match(r.stderr, /locked by another writer/, `${name} build failure was a lock refusal`);
+        }
+      }
 
       const db = new DatabaseSync(dbPath);
       const productCount = db.prepare('SELECT COUNT(*) AS cnt FROM products').get().cnt;

@@ -37,6 +37,18 @@ function main() {
   const repo = new ProjectionRepository(jsonlPath, dbPath);
 
   try {
+    // Two-DB guard: rebuild() refuses app.db paths itself; this early check
+    // gives the CLI a clean message before any work is done.
+    if (resolve(dbPath).toLowerCase().endsWith('app.db') ||
+        resolve(dbPath).toLowerCase() ===
+          resolve(process.env.APP_DB || 'data/app.db').toLowerCase()) {
+      console.error(
+        `Refusing --output ${dbPath}: that is the application DB. ` +
+          `The two-DB rule keeps app.db (user data) out of every rebuild path — ` +
+          `projections belong in prices.db.`
+      );
+      process.exit(1);
+    }
     const result = repo.rebuild({ jsonlPath, dbPath, force });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === 'rebuilt' || result.status === 'skipped' ? 0 : 1);

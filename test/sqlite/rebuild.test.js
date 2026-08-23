@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   mkdtempSync,
   writeFileSync,
+  mkdirSync,
+  readdirSync,
   rmSync,
   readFileSync,
   existsSync,
@@ -231,7 +233,7 @@ describe('malformed line handling', () => {
     } finally { rmSync(dir, { recursive: true }); }
   });
 
-  it('handles structurally valid JSON — bare object is error, unknown type is silently imported', () => {
+  it('unknown-type v2 envelope is an ERROR, not a silent import (CORE-6 canonical parsing)', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'struct.jsonl');
     const dbPath = join(dir, 'struct.db');
@@ -245,14 +247,17 @@ describe('malformed line handling', () => {
       const r = new ProjectionRepository(jsonlPath, dbPath);
       const result = r.rebuild();
       assert.equal(result.status, 'rebuilt');
+      assert.equal(result.errors, 2, 'bare object AND unknown type both error');
       r.open();
       const meta = r.db.prepare("SELECT value FROM _meta WHERE key = 'error_count'").get();
-      assert.equal(meta.value, '1', 'bare object is error; unknown-type v2 record counts as imported (defect: type dispatch has no default case)');
+      assert.equal(meta.value, '2', 'nothing unrecognized is counted as imported');
+      const lastErrors = r.db.prepare("SELECT value FROM _meta WHERE key = 'last_errors'").get();
+      assert.match(lastErrors.value, /Line 4/, 'line numbers preserved for unknown types');
       r.close();
     } finally { rmSync(dir, { recursive: true }); }
   });
 
-  it('handles legacy-format records (pre-v2) as imports', () => {
+  it('rejects legacy v1 records with an actionable migration error (CORE-6)', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'legacy.jsonl');
     const dbPath = join(dir, 'legacy.db');
@@ -269,12 +274,56 @@ describe('malformed line handling', () => {
     ].join('\n') + '\n');
     try {
       const r = new ProjectionRepository(jsonlPath, dbPath);
-      const result = r.rebuild();
-      assert.equal(result.status, 'rebuilt');
-      r.open();
-      const meta = r.db.prepare("SELECT value FROM _meta WHERE key = 'records_imported'").get();
-      assert.equal(meta.value, '3', 'legacy record should be counted as imported');
-      r.close();
+      // v1 is detected by SHAPE (unversioned product/store/price/source), so
+      // the rebuild refuses BEFORE publishing a projection that silently
+      // dropped the legacy fact.
+      assert.throws(() => r.rebuild(), /migrate-v1-archive\.js --file/);
+      // The refusal happens before the temp DB is published: no db file.
+      assert.equal(existsSync(dbPath), false, 'no DB published for a v1-tainted archive');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('rejects a mixed v1/v2 archive even though v2 records exist', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'mixed.jsonl');
+    const dbPath = join(dir, 'mixed.db');
+    writeFileSync(jsonlPath, [
+      v2product('r:p1'),
+      v2store('r:s1'),
+      v2offer('r:p1', 'r:s1'),
+      JSON.stringify({
+        product: { id: 'r:p2', name: 'Legacy Item', categories: [] },
+        store: { id: 'r:s1', retailer: 'r', name: 'S' },
+        price: { regularCents: 999 },
+        source: { retailerProductId: 'x', adapter: 'legacy' },
+        observedAt: '2026-07-14T12:00:00.000Z',
+      }),
+    ].join('\n') + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(
+        () => r.rebuild(),
+        (err) => /migrate-v1-archive\.js/.test(err.message) && /refused/i.test(err.message),
+      );
+      assert.equal(existsSync(dbPath), false);
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('a v1-only archive fails the zero-valid-records check with the migration pointer', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'v1only.jsonl');
+    const dbPath = join(dir, 'v1only.db');
+    writeFileSync(jsonlPath, JSON.stringify({
+      product: { id: 'r:p2', name: 'Legacy Item', categories: [] },
+      store: { id: 'r:s1', retailer: 'r', name: 'S' },
+      price: { regularCents: 999 },
+      source: { retailerProductId: 'x', adapter: 'legacy' },
+      observedAt: '2026-07-13T12:00:00.000Z',
+    }) + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /migrate-v1-archive\.js/);
+      assert.equal(existsSync(dbPath), false);
     } finally { rmSync(dir, { recursive: true }); }
   });
 });
@@ -302,5 +351,96 @@ describe('missing archive', () => {
       assert.throws(() => r.rebuild());
       assert.equal(existsSync(dbPath), false, 'db file should not be created');
     } finally { rmSync(dir, { recursive: true }); }
+  });
+});
+
+describe('rebuild locking (CORE-6)', () => {
+  it('refuses to run while another rebuild holds the lock; no rename, no lock removal', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'locked.jsonl');
+    const dbPath = join(dir, 'locked.db');
+    writeFileSync(jsonlPath, v2product('r:p1') + '\n');
+    try {
+      mkdirSync(dbPath + '.lock'); // simulate a concurrent rebuild holding the lock
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /locked by another writer/);
+      // Nothing published, nothing stolen:
+      assert.equal(existsSync(dbPath), false, 'no rename happened');
+      assert.equal(readdirSync(dir).some(e => e.endsWith('.tmp-')), false, 'no temp artifacts');
+      // The OTHER writer's lock must still be present.
+      assert.equal(existsSync(dbPath + '.lock'), true, "another writer's lock untouched");
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('releases its own lock after a successful rebuild', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'unlock.jsonl');
+    const dbPath = join(dir, 'unlock.db');
+    writeFileSync(jsonlPath, v2product('r:p1') + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      const result = r.rebuild();
+      assert.equal(result.status, 'rebuilt');
+      assert.equal(existsSync(dbPath), true);
+      assert.equal(existsSync(dbPath + '.lock'), false, 'own lock released');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('releases its own lock after a failed rebuild (v1 refusal)', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'lockfail.jsonl');
+    const dbPath = join(dir, 'lockfail.db');
+    writeFileSync(jsonlPath, JSON.stringify({
+      product: { id: 'r:p2', name: 'Legacy Item', categories: [] },
+      store: { id: 'r:s1', retailer: 'r', name: 'S' },
+      price: { regularCents: 999 },
+      source: { retailerProductId: 'x', adapter: 'legacy' },
+      observedAt: '2026-07-13T12:00:00.000Z',
+    }) + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /migrate-v1-archive/);
+      assert.equal(existsSync(dbPath + '.lock'), false, 'own lock released on failure');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+});
+
+describe('two-DB guard (CORE-6)', () => {
+  it('refuses data/app.db as the output path without opening it', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'g.jsonl');
+    writeFileSync(jsonlPath, v2product('r:p1') + '\n');
+    const dbPath = join(dir, 'data', 'app.db');
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /application DB.*two-DB rule/s);
+      assert.equal(existsSync(dbPath), false, 'app.db was never created/opened');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('refuses APP_DB-configured paths and any path ending app.db (case-insensitive)', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'g2.jsonl');
+    writeFileSync(jsonlPath, v2product('r:p1') + '\n');
+    const cases = [
+      join(dir, 'weird-name-app.db'),
+      join(dir, 'APP.DB'),
+      join(dir, 'sub', 'dir', 'app.Db'),
+    ];
+    for (const dbPath of cases) {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /application DB/, `refused ${dbPath}`);
+      assert.equal(existsSync(dbPath), false);
+    }
+    // The configured APP_DB path is refused even under another name.
+    process.env.APP_DB = join(dir, 'configured', 'mydata.db');
+    try {
+      const r = new ProjectionRepository(jsonlPath, process.env.APP_DB);
+      assert.throws(() => r.rebuild(), /application DB/);
+    } finally {
+      delete process.env.APP_DB;
+      rmSync(dir, { recursive: true });
+    }
   });
 });

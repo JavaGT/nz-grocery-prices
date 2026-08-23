@@ -1,8 +1,46 @@
-import { readFileSync, renameSync, unlinkSync, mkdirSync, rmdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, renameSync, statSync, unlinkSync, mkdirSync, rmdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { classifyParsedRecord } from '../archive-records.js';
 import { applyProjectionMigrations } from './schema.js';
+
+/** mtime+size signature of a file for change detection; null when absent. */
+function statSignature(filePath) {
+  try {
+    const stats = statSync(filePath);
+    return { mtimeMs: stats.mtimeMs, size: stats.size };
+  } catch {
+    return null;
+  }
+}
+
+function sameSignature(a, b) {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size;
+}
+
+// The rebuild path opens ONLY the projection DB (two-DB rule). If a caller
+// points it at an application DB — data/app.db or any configured APP_DB
+// path — refuse before touching anything.
+function assertProjectionDbPath(dbPath) {
+  const normalized = resolve(dbPath).toLowerCase();
+  const appDb = resolve(process.env.APP_DB || 'data/app.db').toLowerCase();
+  if (normalized === appDb) {
+    throw new Error(
+      `Refusing to write the projection to ${dbPath}: that is the configured application DB (APP_DB). ` +
+        `The two-DB rule keeps app.db (user data) out of every rebuild path — ` +
+        `projections belong in prices.db.`
+    );
+  }
+  if (normalized.endsWith('app.db')) {
+    throw new Error(
+      `Refusing to write the projection to ${dbPath}: paths ending app.db are the ` +
+        `application DB by convention. The two-DB rule keeps app.db (user data) out ` +
+        `of every rebuild path — projections belong in prices.db.`
+    );
+  }
+}
 
 function bestImage(images) {
   if (!images) return null;
@@ -38,6 +76,37 @@ export class ProjectionRepository {
     const dbPath = options.dbPath || this.#dbPath;
     const force = options.force || false;
 
+    assertProjectionDbPath(dbPath);
+
+    // Acquire the DB rebuild lock BEFORE reading the JSONL: mkdir is atomic,
+    // so exactly one rebuild proceeds. A held lock is an error, not a queue
+    // (same fail-fast policy as the archive writers). The JSONL is read and
+    // fingerprinted INSIDE the lock and re-stat-verified right before the
+    // publish rename, so a concurrent archive writer cannot leave this
+    // rebuild advertising a fingerprint of bytes it never imported.
+    const lockPath = dbPath + '.lock';
+    let ownsLock = false;
+    try {
+      mkdirSync(lockPath);
+      ownsLock = true;
+    } catch {
+      throw new Error(
+        `Projection rebuild is locked by another writer (${lockPath}). ` +
+          `If no rebuild is running, remove the lock directory.`
+      );
+    }
+
+    try {
+      return this.#rebuildLocked(jsonlPath, dbPath, force, lockPath);
+    } finally {
+      // Release ONLY a lock we own — never another writer's.
+      if (ownsLock) {
+        try { rmdirSync(lockPath); } catch { /* best-effort */ }
+      }
+    }
+  }
+
+  #rebuildLocked(jsonlPath, dbPath, force, lockPath) {
     let contents;
     try {
       contents = readFileSync(jsonlPath, 'utf8');
@@ -48,12 +117,14 @@ export class ProjectionRepository {
       throw err;
     }
 
+    const signatureAtRead = statSignature(jsonlPath);
     const fingerprint = createHash('sha256').update(contents).digest('hex');
 
     if (!force) {
+      // readOnly so the skip CHECK never creates an empty DB file as a
+      // side effect — a refused rebuild must leave no db artifact.
       try {
-        const existingDb = new DatabaseSync(dbPath);
-        existingDb.exec('PRAGMA journal_mode=WAL');
+        const existingDb = new DatabaseSync(dbPath, { readOnly: true });
         const row = existingDb.prepare("SELECT value FROM _meta WHERE key = 'jsonl_fingerprint'").get();
         existingDb.close();
         if (row && row.value === fingerprint) {
@@ -67,21 +138,6 @@ export class ProjectionRepository {
     const pid = process.pid;
     const rand = Math.random().toString(36).slice(2, 8);
     const tmpPath = dbPath + '.tmp-' + pid + '-' + rand;
-
-    // Acquire rebuild lock (mkdir is atomic on all platforms)
-    const lockPath = dbPath + '.lock';
-    function acquireLock() {
-      for (let i = 0; i < 50; i++) {
-        try { mkdirSync(lockPath); return true; } catch {
-          const deadline = Date.now() + 10;
-          while (Date.now() < deadline) { /* spin */ }
-        }
-      }
-      return false;
-    }
-    function releaseLock() {
-      try { rmdirSync(lockPath); } catch { /* ok */ }
-    }
 
     try { unlinkSync(tmpPath); } catch { /* ok */ }
 
@@ -111,16 +167,24 @@ export class ProjectionRepository {
         const line = lines[i].trim();
         if (line === '') continue;
 
+        // Canonical classification shared with the archive loader and v1
+        // migrator: legacy v1, unknown types, and malformed envelopes are
+        // ALL rejected here — nothing is silently counted as imported.
         try {
-          const record = JSON.parse(line);
-          if (record.version === 2 && record.type) {
-            this.#insertRecord(tmpDb, record);
-            recordsImported++;
-          } else if (record.product && record.store && record.price && record.source) {
-            recordsImported++;
-          } else {
+          const parsed = JSON.parse(line);
+          const verdict = classifyParsedRecord(parsed);
+          if (verdict.status === 'legacy') {
+            throw new Error(
+              `Legacy v1 archive record; run node scripts/migrate-v1-archive.js --file ${jsonlPath} first`
+            );
+          }
+          if (verdict.status === 'invalid') {
+            throw new TypeError(`Invalid archive record (${verdict.problems.join('; ')})`);
+          }
+          if (!this.#insertRecord(tmpDb, verdict.record)) {
             throw new TypeError('Unknown archive record structure');
           }
+          recordsImported++;
         } catch (err) {
           errors++;
           errorDetails.push(`Line ${i + 1}: ${err.message}`);
@@ -128,6 +192,23 @@ export class ProjectionRepository {
       }
 
       const nonEmptyLines = lines.filter(l => l.trim() !== '');
+      // A v1-tainted archive must not produce a projection: refuse with the
+      // actionable fix whether it is mixed with valid v2 or entirely legacy
+      // (checked BEFORE publishing the temp DB).
+      const v1Details = errorDetails.filter(d => d.includes('migrate-v1-archive'));
+      if (v1Details.length > 0) {
+        if (recordsImported === 0) {
+          throw new Error(
+            `Archive contains only unrecognized/malformed records (${errors} line${errors !== 1 ? 's' : ''}, ` +
+              `including ${v1Details.length} legacy v1). ` +
+              `Run node scripts/migrate-v1-archive.js --file ${jsonlPath} first, then rebuild.`
+          );
+        }
+        throw new Error(
+          `Projection rebuild refused: the archive contains ${v1Details.length} legacy v1 record(s) that were NOT imported. ` +
+            `Run node scripts/migrate-v1-archive.js --file ${jsonlPath} first, then rebuild.`
+        );
+      }
       if (nonEmptyLines.length > 0 && recordsImported === 0) {
         throw new Error(
           `Archive contains zero valid recognized records (${errors} malformed line${errors !== 1 ? 's' : ''})`
@@ -155,12 +236,18 @@ export class ProjectionRepository {
 
       tmpDb.close();
 
-      acquireLock();
-      try {
-        renameSync(tmpPath, dbPath);
-      } finally {
-        releaseLock();
+      // Re-validate under the lock right before publishing: if the JSONL
+      // changed since we read it, this rebuild's fingerprint would lie
+      // about the imported bytes — refuse and let the next run re-read.
+      const signatureAtPublish = statSignature(jsonlPath);
+      if (!sameSignature(signatureAtRead, signatureAtPublish)) {
+        throw new Error(
+          `JSONL archive changed during projection rebuild (${jsonlPath}); ` +
+            `refusing to publish a stale fingerprint. Re-run the rebuild.`
+        );
       }
+
+      renameSync(tmpPath, dbPath);
 
       return { status: 'rebuilt', fingerprint, recordsImported, errors };
     } catch (err) {
@@ -169,12 +256,15 @@ export class ProjectionRepository {
     }
   }
 
+  // Returns true when the record was inserted; false for an unrecognized
+  // (but envelope-valid) type so the caller can count it as an error.
   #insertRecord(db, record) {
     switch (record.type) {
-      case 'product':  this.#insertProduct(db, record); break;
-      case 'store':    this.#insertStore(db, record); break;
-      case 'offer':    this.#insertOffer(db, record); break;
-      case 'snapshot': this.#insertSnapshot(db, record); break;
+      case 'product':  this.#insertProduct(db, record); return true;
+      case 'store':    this.#insertStore(db, record); return true;
+      case 'offer':    this.#insertOffer(db, record); return true;
+      case 'snapshot': this.#insertSnapshot(db, record); return true;
+      default:         return false;
     }
   }
 

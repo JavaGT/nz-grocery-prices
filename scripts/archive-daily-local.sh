@@ -82,7 +82,9 @@ run_archive() {
 
     health_record "$retailer" "$status" 0 "$started_at" "$ended_at" "$stderr_file"
     rm -f "$stderr_file"
-    health_finish
+    # The explicit health_finish here is best-effort (the EXIT trap runs
+    # it again); guarded so set -eu cannot skip the trap's cleanup steps.
+    health_finish || true
     exit "$status"
   }
 
@@ -148,11 +150,13 @@ run_archive warehouse "$npm_command" run warehouse -- archive --file "$stage_fil
 health_finish
 
 # Verify the staged archive before it becomes the archive served to the app.
+# Guarded: under set -eu a failure here must still run the EXIT trap's
+# cleanup (stage-file removal + lock release), not leave them behind.
 node -e '
   const fs = require("node:fs");
   const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
   for (const line of lines) JSON.parse(line);
-' "$stage_file"
+' "$stage_file" || fail "staged archive failed JSON validation"
 
 # fsync the stage file so its bytes are on disk before the rename.
 node -e '

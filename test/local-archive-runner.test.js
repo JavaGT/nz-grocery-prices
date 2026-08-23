@@ -80,13 +80,28 @@ test("local archive runner publishes only after every collector succeeds", async
   ]);
 });
 
+test("local archive runner releases the archive lock on success", async () => {
+  const { archiveFile, directory, stdout } = await runArchive();
+  assert.match(stdout, /archive collection completed/);
+  const files = await readdir(directory);
+  assert.equal(
+    files.some((file) => file.endsWith(".lock")),
+    false,
+    "<archive>.lock must be released after a successful publish",
+  );
+});
+
 test("local archive runner preserves the live archive after a collector failure", async () => {
   const { archiveFile, directory, code, stderr } = await runArchive({ failCommand: "newworld" });
   assert.equal(code, 17);
   assert.match(stderr, /archive collection failed/);
   assert.equal(await readFile(archiveFile, "utf8"), '{"existing":true}\n');
   const files = await readdir(directory);
-  assert.equal(files.some((file) => file.includes(".tmp.") || file.endsWith(".collect.lock")), false);
+  // The mkdir-based lock is `<archive>.lock` (shared with the repository
+  // writer protocol); it must be released on failure too. No stage or
+  // health temp files may survive either.
+  assert.equal(files.some((file) => file.endsWith(".lock")), false);
+  assert.equal(files.some((file) => file.includes(".tmp.") || file.includes(".err.")), false);
 
   const healthFile = resolveHealthFile(archiveFile);
   const healthContent = await readFile(healthFile, "utf8");

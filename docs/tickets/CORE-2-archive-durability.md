@@ -1,11 +1,14 @@
 # CORE-2 — Archive durability
 
-> **Status (2026-08-23):** IN PROGRESS — resumed same session after it died
-> mid-flight. Committed: M1 `bd8ae37` (archive-records.js canonical encoding),
-> M2 `e16a39f` (append-boundary validation). Uncommitted M3 work had broken
-> 2 projection-equivalence tests; manager diagnosed, session resumed with
-> reconciliation instructions. Remaining: M3 writer protocol, M4 load
-> protocol, M5 repair CLI + publisher alignment, M6 docs.
+> **Status: COMPLETE (2026-08-23) — hostile review pending.**
+> M1 `bd8ae37` canonical encoding (locale-pinned sort, parity-proven) ·
+> M2 `e16a39f` append-boundary validation · M3 `6d679e4` writer protocol
+> (lock / pure-plan / fsync-before-apply / atomic compact) · M4 `cdb0b1e`
+> tail-tolerant chunked load + envelope checks + getLoadDefects() ·
+> M5 `38ed1d5` repair CLI (.db rejection, --force gating) + collector lock
+> alignment · M6 docs `9fee4ad` + DECISIONLOG. Full suite 565/565.
+> Note: two mid-flight agent deaths (silent completions); manager finished
+> M3's test arithmetic and M6 docs directly.
 
 ## Summary
 Make the JSONL archive crash-safe end to end: fsync'd appends that never

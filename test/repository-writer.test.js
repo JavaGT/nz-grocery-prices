@@ -108,7 +108,7 @@ describe("writer protocol (CORE-2 M3)", () => {
     for (const line of lines) JSON.parse(line);
   });
 
-  it("a failed persist leaves memory matching disk; retry succeeds", async () => {
+  it("a failed persist resets memory so disk truth wins on retry", async () => {
     const repository = new JsonlObservationRepository(filePath);
     await repository.append([obs({ productId: "prod:keep", sourceId: "k" })]);
 
@@ -118,7 +118,9 @@ describe("writer protocol (CORE-2 M3)", () => {
     await mkdir(filePath);
     await assert.rejects(() => repository.append([obs({ productId: "prod:lost", sourceId: "l" })]));
 
-    // Restore a valid (empty) archive at the path and retry.
+    // Restore a valid (empty) archive at the path and retry. The failed
+    // persist reset memory, so the retry reloads from disk (now empty) and
+    // plans fresh — nothing is assumed to have "not landed".
     await rmdir(filePath);
     const added = await repository.append([obs({ productId: "prod:retry", sourceId: "r" })]);
     assert.equal(added, 3);

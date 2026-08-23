@@ -668,7 +668,9 @@ export class JsonlObservationRepository {
   /**
    * PURE: computes the records `observations` would add, against a draft
    * copy of the index. Never touches live state, so a persist failure
-   * leaves memory untouched and a retry re-plans identically.
+   * leaves memory untouched by the UNAPPLIED plan; the operation then
+   * resets state so the next operation reloads disk truth — if bytes did
+   * land, the torn-tail policy blocks appends and points at repair.
    */
   #planAppend(observations, options = {}) {
     const draft = this.#draftIndex();
@@ -748,7 +750,16 @@ export class JsonlObservationRepository {
     }
     const additions = this.#planAppend(observations, options);
     if (additions.length > 0) {
-      await this.#persistAdditions(additions);
+      try {
+        await this.#persistAdditions(additions);
+      } catch (error) {
+        // Disk truth is now unknowable from memory (bytes may or may not
+        // have landed). Reset so the next operation reloads the file: a
+        // torn tail then correctly blocks appends and points at repair,
+        // and a fully-landed write is re-read instead of re-applied.
+        this.#resetState();
+        throw error;
+      }
       for (const record of additions) this.#applyRecord(this.#index, record);
       this.#fileSignature = await this.#currentSignature();
       this.#endsWithNewline = true;
@@ -817,11 +828,14 @@ export class JsonlObservationRepository {
         await handle.close();
       }
       await rename(tempPath, this.filePath);
+      await this.#fsyncParentDir();
     } catch (error) {
       await rm(tempPath, { force: true });
+      // Disk truth is unknowable from memory (the rename may have landed
+      // even if a later step threw); reset so the next operation reloads.
+      this.#resetState();
       throw error;
     }
-    await this.#fsyncParentDir();
 
     // Rebuild in-memory state from the compacted record set.
     this.#resetState();

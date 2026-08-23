@@ -14,7 +14,9 @@ case "$archive_file" in
 esac
 
 archive_dir=$(dirname -- "$archive_file")
-lock_dir="${archive_file}.collect.lock"
+# Shared with src/repository.js: mkdir-based exclusive lock taken for ALL
+# archive mutations, so a publish never races an app append/compact.
+lock_dir="${archive_file}.lock"
 stage_file=""
 
 health_file="${COLLECTION_HEALTH_FILE:-${archive_dir}/collection-health.jsonl}"
@@ -147,6 +149,21 @@ node -e '
   for (const line of lines) JSON.parse(line);
 ' "$stage_file"
 
+# fsync the stage file so its bytes are on disk before the rename.
+node -e '
+  const fs = require("node:fs");
+  const fd = fs.openSync(process.argv[1], "r+");
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+' "$stage_file"
+
 mv -f -- "$stage_file" "$archive_file"
 stage_file=""
+
+# fsync the parent directory so the rename itself is durable.
+node -e '
+  const fs = require("node:fs");
+  const fd = fs.openSync(process.argv[1], "r");
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+' "$archive_dir"
+
 printf '%s\n' "archive collection completed: $archive_file"

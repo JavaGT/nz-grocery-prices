@@ -48,6 +48,7 @@
     "build-db": "node scripts/build-db.js",
     "matching": "node scripts/matching-cli.js",
     "compact": "node scripts/compact-archive.js",
+    "archive:repair": "node scripts/repair-archive.js --file data/prices.jsonl --force",
     "paknsave": "node scripts/paknsave.js",
     "newworld": "node scripts/newworld.js",
     "woolworths": "node scripts/woolworths.js",

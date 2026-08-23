@@ -38,6 +38,88 @@ function observationKey(observation) {
   ].join("\u0000");
 }
 
+/** Recomputed content hash for a loaded record's payload. */
+function revisionHashFor(record) {
+  if (record.type === "product") return productRevisionHash(record.data);
+  if (record.type === "store") return storeRevisionHash(record.data);
+  return offerRevisionHash(record.data);
+}
+
+/**
+ * Chunked streaming read of a JSONL archive. Lines are split on "\n"
+ * across chunk boundaries manually — readline cannot report whether the
+ * file's final byte was a newline, and torn-tail policy needs to know.
+ * Returns `{ line, terminated }` entries; `terminated` is false only for
+ * an unterminated final fragment. Shared by the repository loader and the
+ * repair CLI.
+ */
+async function readArchiveLines(filePath) {
+  const handle = await open(filePath, "r");
+  try {
+    const lines = [];
+    const stream = handle.createReadStream({ encoding: "utf8" });
+    let pending = "";
+    for await (const chunk of stream) {
+      const pieces = chunk.split("\n");
+      pending += pieces[0];
+      for (let index = 1; index < pieces.length; index += 1) {
+        lines.push({ line: pending, terminated: true });
+        pending = pieces[index];
+      }
+    }
+    // After a trailing newline `pending` is ""; otherwise it holds the
+    // unterminated final fragment.
+    if (pending !== "") lines.push({ line: pending, terminated: false });
+    return lines;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Decodes and classifies one archive line — the single tolerance policy
+ * shared by the repository loader and scripts/repair-archive.js.
+ *
+ * Returns one of:
+ *   { status: "v2", record, defect? } — envelope-valid v2 record; `defect`
+ *     is set when the stored hash ≠ recomputed fingerprint (never fatal).
+ *   { status: "legacy", record }      — v1 whole-observation.
+ *   { status: "torn" }                — undecodable UNTERMINATED final
+ *     bytes; caller decides recovery vs quarantine.
+ *
+ * Throws an Error naming filePath:lineNumber for anything else, i.e. any
+ * newline-terminated line that fails to decode or violates the envelope.
+ */
+function decodeArchiveLine(line, filePath, lineNumber, terminated) {
+  let verdict;
+  try {
+    verdict = classifyParsedRecord(JSON.parse(line));
+  } catch (error) {
+    if (!terminated) return { status: "torn" };
+    throw new Error(`Invalid JSONL at ${filePath}:${lineNumber}`, { cause: error });
+  }
+  if (verdict.status === "invalid") {
+    if (!terminated) return { status: "torn" };
+    throw new Error(
+      `Invalid archive record at ${filePath}:${lineNumber} (${verdict.problems.join("; ")})`,
+    );
+  }
+  if (verdict.status === "legacy") return verdict;
+
+  const expectedHash = revisionHashFor(verdict.record);
+  const defect =
+    typeof verdict.record.hash === "string" && verdict.record.hash !== expectedHash
+      ? {
+          line: lineNumber,
+          type: verdict.record.type,
+          id: verdict.record.productId ?? verdict.record.storeId ?? verdict.record.offerId,
+          stored: verdict.record.hash,
+          recomputed: expectedHash,
+        }
+      : undefined;
+  return { status: "v2", record: verdict.record, defect };
+}
+
 function filterObservations(observations, query = {}) {
   const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
   const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
@@ -183,6 +265,20 @@ export class JsonlObservationRepository {
    */
   getLoadDefects() {
     return [...this.#loadDefects];
+  }
+
+  /** Chunked torn-tail-aware line reader (see readArchiveLines). */
+  static async readArchiveLines(filePath) {
+    return readArchiveLines(filePath);
+  }
+
+  /**
+   * Shared line decode/tolerance policy (see decodeArchiveLine): the
+   * repair CLI scans archives through this so quarantine decisions match
+   * loader behavior exactly.
+   */
+  static decodeArchiveLine(line, filePath, lineNumber, terminated) {
+    return decodeArchiveLine(line, filePath, lineNumber, terminated);
   }
 
   #hasRevision(type, id, hash, index = this.#index) {
@@ -357,51 +453,24 @@ export class JsonlObservationRepository {
   // ---- loading ----
 
   /**
-   * Chunked streaming read of the archive. Lines are split on "\n" across
-   * chunk boundaries manually — readline cannot report whether the file's
-   * final byte was a newline, and torn-tail policy needs to know. Returns
-   * `{ line, terminated }` entries; `terminated` is false only for an
-   * unterminated final fragment.
-   */
-  async #lines() {
-    const handle = await open(this.filePath, "r");
-    try {
-      const lines = [];
-      const stream = handle.createReadStream({ encoding: "utf8" });
-      let pending = "";
-      for await (const chunk of stream) {
-        const pieces = chunk.split("\n");
-        pending += pieces[0];
-        for (let index = 1; index < pieces.length; index += 1) {
-          lines.push({ line: pending, terminated: true });
-          pending = pieces[index];
-        }
-      }
-      // After a trailing newline `pending` is ""; otherwise it holds the
-      // unterminated final fragment.
-      if (pending !== "") lines.push({ line: pending, terminated: false });
-      return lines;
-    } finally {
-      await handle.close();
-    }
-  }
-
-  /**
    * Load protocol: stream line-by-line so torn tails are detectable.
    *
-   * - Newline-terminated line failing decode → hard error naming
+   * - Newline-terminated line failing decode \u2192 hard error naming
    *   filePath:lineNumber (even when it is the last line).
-   * - Unterminated final bytes: JSON.parse success → recover as a record
-   *   (a crash happened between write and newline); failure → set
-   *   #tornTail and skip the fragment.
-   * - Every loaded record passes classifyParsedRecord (envelope check);
-   *   stored hashes are verified against recomputed fingerprints with
-   *   mismatches collected into #loadDefects rather than aborting — the
+   * - Unterminated final bytes: decodes to a valid/legacy record \u2192
+   *   recover it (a crash happened between write and newline); anything
+   *   else \u2192 set #tornTail and skip the fragment.
+   * - Stored hashes are verified against recomputed fingerprints with
+   *   mismatches collected into #loadDefects rather than aborting \u2014
    *   data still queries, getLoadDefects() surfaces the damage.
    * - Snapshot offersHash is deliberately NOT recomputed on load:
    *   deriving it requires replaying listing state across all prior
    *   snapshots, which is costly and fragile against mid-archive
    *   corruption. Dedup treats it as stored.
+   *
+   * Line reading/classification lives in readArchiveLines +
+   * decodeArchiveLine (module scope) so scripts/repair-archive.js reuses
+   * identical semantics instead of duplicating them.
    */
   async #load() {
     if (this.#loaded) return;
@@ -413,65 +482,30 @@ export class JsonlObservationRepository {
       else throw error;
     }
 
-    // Only the final entry from #lines() can be unterminated; that fragment
-    // is the torn tail. A terminated line must decode or the archive is
-    // corrupt mid-file (or at EOF after a newline — equally fatal).
     if (!exists) {
       this.#fileSignature = await this.#currentSignature();
       this.#loaded = true;
       return;
     }
 
-    const lines = await this.#lines();
+    const lines = await readArchiveLines(this.filePath);
     let lineNumber = 0;
     for (const entry of lines) {
       lineNumber += 1;
-      const isTornFragment = !entry.terminated;
-      let verdict;
-      try {
-        verdict = classifyParsedRecord(JSON.parse(entry.line));
-      } catch (error) {
-        if (isTornFragment) {
-          this.#tornTail = true; // unparseable final bytes: skip, block appends
-          break;
-        }
-        throw new Error(`Invalid JSONL at ${this.filePath}:${lineNumber}`, { cause: error });
+      if (entry.line.trim() === "") continue; // stray blank lines are not corruption
+      const outcome = decodeArchiveLine(entry.line, this.filePath, lineNumber, entry.terminated);
+      if (outcome.status === "torn") {
+        this.#tornTail = true; // undecodable final bytes: skip, block appends
+        break;
       }
-      if (verdict.status === "invalid") {
-        if (isTornFragment) {
-          this.#tornTail = true; // envelope-invalid fragment cannot be trusted
-          break;
-        }
-        throw new Error(
-          `Invalid archive record at ${this.filePath}:${lineNumber} (${verdict.problems.join("; ")})`,
-        );
-      }
-      if (verdict.status === "legacy") {
+      if (outcome.status === "legacy") {
         // Legacy observations are accepted and projected into v2 in memory.
-        const additions = this.#planAppend([verdict.record]);
+        const additions = this.#planAppend([outcome.record]);
         for (const addition of additions) this.#applyRecord(this.#index, addition);
         continue;
       }
-
-      const expectedHash =
-        verdict.record.type === "product"
-          ? productRevisionHash(verdict.record.data)
-          : verdict.record.type === "store"
-          ? storeRevisionHash(verdict.record.data)
-          : offerRevisionHash(verdict.record.data);
-      if (
-        typeof verdict.record.hash === "string" &&
-        verdict.record.hash !== expectedHash
-      ) {
-        this.#loadDefects.push({
-          line: lineNumber,
-          type: verdict.record.type,
-          id: verdict.record.productId ?? verdict.record.storeId ?? verdict.record.offerId,
-          stored: verdict.record.hash,
-          recomputed: expectedHash,
-        });
-      }
-      this.#applyRecord(this.#index, verdict.record);
+      if (outcome.defect) this.#loadDefects.push(outcome.defect);
+      this.#applyRecord(this.#index, outcome.record);
     }
     if (!this.#tornTail && lines.length > 0 && !lines[lines.length - 1].terminated) {
       // A valid record recovered from an unterminated tail still means the

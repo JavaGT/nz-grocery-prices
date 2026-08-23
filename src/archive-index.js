@@ -410,15 +410,19 @@ export class ArchiveIndex {
    */
   stats() {
     const counts = { product: 0, store: 0, offer: 0, snapshot: 0 };
-    let firstObservedAt;
-    let lastObservedAt;
+    let firstTime = Number.POSITIVE_INFINITY;
+    let lastTime = Number.NEGATIVE_INFINITY;
+    let firstObservedAt = null;
+    let lastObservedAt = null;
     for (const record of this.#index.records) {
       counts[record.type] += 1;
       const time = eventTime(record);
-      if (firstObservedAt === undefined || time < eventTime(firstObservedAt)) {
+      if (time < firstTime) {
+        firstTime = time;
         firstObservedAt = record.observedAt;
       }
-      if (lastObservedAt === undefined || time > eventTime(lastObservedAt)) {
+      if (time > lastTime) {
+        lastTime = time;
         lastObservedAt = record.observedAt;
       }
     }

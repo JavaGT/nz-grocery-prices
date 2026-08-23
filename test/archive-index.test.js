@@ -283,6 +283,15 @@ describe("ArchiveIndex unit behavior", () => {
     assert.deepEqual(index.planAppend([observation]), []);
   });
 
+  it("deduplicates an offer revision even when a newer revision was applied first", () => {
+    const index = new ArchiveIndex();
+    const first = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-12T00:00:00.000Z", regularCents: 100 });
+    const older = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-10T00:00:00.000Z", regularCents: 200 });
+    index.applyAdditions(index.planAppend([first]));
+    index.applyAdditions(index.planAppend([older]));
+    assert.deepEqual(index.planAppend([older]), []);
+  });
+
   it("hasRevision tracks applied product/store content hashes", () => {
     const index = new ArchiveIndex();
     assert.equal(index.hasRevision("product", "p1", "hash-p1-a"), false);
@@ -316,6 +325,24 @@ describe("ArchiveIndex unit behavior", () => {
       const tied = await index.query({ storeId: "s2" });
       assert.equal(tied[0].store.retailer, "y-second");
     });
+  });
+
+  it("plans a late snapshot against the chronological prior listing state", () => {
+    const index = new ArchiveIndex();
+    const make = (productId, observedAt) => obs({
+      productId,
+      storeId: "s1",
+      retailer: "r",
+      sourceId: productId,
+      observedAt,
+      regularCents: 100,
+    });
+
+    index.applyAdditions(index.planAppend([make("p1", "2026-08-09T00:00:00.000Z")], { snapshotScope: "specials" }));
+    index.applyAdditions(index.planAppend([make("p2", "2026-08-12T00:00:00.000Z")], { snapshotScope: "specials" }));
+    const late = index.planAppend([make("p3", "2026-08-10T00:00:00.000Z")], { snapshotScope: "specials" });
+    const snapshot = late.find((record) => record.type === "snapshot");
+    assert.deepEqual(snapshot.removed, ["p1\u0000s1"]);
   });
 
   it("listingState reconstruction handles add/remove cycles across days", async () => {
@@ -376,9 +403,27 @@ describe("ArchiveIndex unit behavior", () => {
     index.apply(record);
     record.data.name = "Mutated";
     const records = index.getRecords();
+    records[0].data.name = "Returned mutation";
     records.pop();
     assert.equal(index.getRecords().length, 1);
     assert.equal(index.getRecords()[0].data.name, "Original");
+
+    assert.throws(
+      () => index.applyAdditions([
+        productRecord("p2", "P2", "2026-08-10T00:00:00.000Z"),
+        { version: 2, type: "offer", offerId: "bad", productId: "p2", storeId: "s2", observedAt: "2026-08-10T00:00:00.000Z", data: {} },
+      ]),
+      /offer data must contain price and source/,
+    );
+    assert.equal(index.getRecords().length, 1);
+  });
+
+  it("combined candidate queries intersect product and store indexes", async () => {
+    const index = new ArchiveIndex();
+    index.apply(productRecord("p1", "P1", "2026-08-09T00:00:00.000Z"));
+    index.apply({ version: 2, type: "store", storeId: "s1", hash: "h-s1", observedAt: "2026-08-09T00:00:00.000Z", data: { id: "s1", retailer: "r" } });
+    index.apply(offerRecord("non-canonical", "p1", "s1", "2026-08-10T00:00:00.000Z", 100));
+    assert.equal((await index.query({ productId: "p1", storeId: "s1" })).length, 1);
   });
 
   it("stats() starts empty and clears() resets everything", async () => {

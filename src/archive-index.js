@@ -60,13 +60,24 @@ function insertChronologically(records, record) {
   records.splice(index, 0, record);
 }
 
-function replaySnapshots(snapshots) {
+function listingStateAt(snapshots, at = Number.POSITIVE_INFINITY) {
   const active = new Set();
+  let lastSeenAt;
+  let known = false;
   for (const snapshot of snapshots) {
+    if (eventTime(snapshot) > at) continue;
+    known = true;
     for (const offerIdValue of snapshot.added) active.add(offerIdValue);
     for (const offerIdValue of snapshot.removed) active.delete(offerIdValue);
   }
-  return active;
+  if (known) lastSeenAt = snapshots
+    .filter((snapshot) => eventTime(snapshot) <= at)
+    .at(-1)?.observedAt;
+  return { active, lastSeenAt, known };
+}
+
+function replaySnapshots(snapshots) {
+  return listingStateAt(snapshots).active;
 }
 
 /**
@@ -100,7 +111,7 @@ export class ArchiveIndex {
 
   /** Every applied record, in application order. Treat as immutable. */
   getRecords() {
-    return [...this.#index.records];
+    return structuredClone(this.#index.records);
   }
 
   /** Discards all indexed state. */
@@ -125,6 +136,38 @@ export class ArchiveIndex {
       ? index.productRevisions.get(id)
       : index.storeRevisions.get(id);
     return revisions?.some((revision) => revision.hash === hash) ?? false;
+  }
+
+  #validateRecord(record) {
+    const problems = validateRecordEnvelope(record);
+    if (problems.length > 0) {
+      throw new TypeError(`Invalid archive record: ${problems.join("; ")}`);
+    }
+    if (!Number.isFinite(eventTime(record))) {
+      throw new TypeError("Invalid archive record: observedAt must be a valid ISO timestamp");
+    }
+    if (["product", "store", "offer"].includes(record.type) &&
+        (!record.data || typeof record.data !== "object" || Array.isArray(record.data))) {
+      throw new TypeError(`Invalid archive record: ${record.type} data must be an object`);
+    }
+    if (record.type === "product" && record.data.id !== record.productId) {
+      throw new TypeError("Invalid archive record: product data.id must match productId");
+    }
+    if (record.type === "store" && record.data.id !== record.storeId) {
+      throw new TypeError("Invalid archive record: store data.id must match storeId");
+    }
+    if (record.type === "offer") {
+      if (!record.data.price || typeof record.data.price !== "object" ||
+          !record.data.source || typeof record.data.source !== "object") {
+        throw new TypeError("Invalid archive record: offer data must contain price and source");
+      }
+    }
+    if (record.type === "snapshot" &&
+        (!Array.isArray(record.added) || !Array.isArray(record.removed) ||
+         record.added.some((value) => typeof value !== "string") ||
+         record.removed.some((value) => typeof value !== "string"))) {
+      throw new TypeError("Invalid archive record: snapshot added and removed must be string arrays");
+    }
   }
 
   /**
@@ -177,27 +220,14 @@ export class ArchiveIndex {
 
   /** Indexes one record into live state. */
   apply(record) {
-    const problems = validateRecordEnvelope(record);
-    if (problems.length > 0) {
-      throw new TypeError(`Invalid archive record: ${problems.join("; ")}`);
-    }
-    if (!Number.isFinite(eventTime(record))) {
-      throw new TypeError("Invalid archive record: observedAt must be a valid ISO timestamp");
-    }
-    if (["product", "store", "offer"].includes(record.type) &&
-        (!record.data || typeof record.data !== "object" || Array.isArray(record.data))) {
-      throw new TypeError(`Invalid archive record: ${record.type} data must be an object`);
-    }
-    if (record.type === "snapshot" &&
-        (!Array.isArray(record.added) || !Array.isArray(record.removed))) {
-      throw new TypeError("Invalid archive record: snapshot added and removed must be arrays");
-    }
+    this.#validateRecord(record);
     this.#applyRecord(this.#index, structuredClone(record));
   }
 
   /** Bulk-apply decoded records (e.g. the additions of one append batch). */
   applyAdditions(records) {
-    for (const record of records) this.apply(record);
+    for (const record of records) this.#validateRecord(record);
+    for (const record of records) this.#applyRecord(this.#index, structuredClone(record));
   }
 
   /** Shallow structural copy of the index; record objects are shared. */
@@ -267,8 +297,8 @@ export class ArchiveIndex {
       source: structuredClone(observation.source),
     };
     const hash = fingerprint(data);
-    const previous = index.latestOffer.get(id);
-    if (previous?.hash === hash) return undefined;
+    const revisions = index.offerRevisions.get(id) ?? [];
+    if (revisions.some((revision) => revision.hash === hash)) return undefined;
     return {
       version: 2,
       type: "offer",
@@ -283,7 +313,7 @@ export class ArchiveIndex {
 
   #planSnapshotRecord(index, scope, storeId, observedAt, currentOfferIds) {
     const id = listingId(scope, storeId);
-    const previous = index.activeListings.get(id) ?? new Set();
+    const previous = listingStateAt(index.snapshots.get(id) ?? [], Date.parse(observedAt)).active;
     const added = [...currentOfferIds].filter((value) => !previous.has(value)).sort();
     const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
     const offers = [...currentOfferIds]
@@ -365,17 +395,7 @@ export class ArchiveIndex {
 
   #listingState(scope, storeId, at) {
     const snapshots = this.#index.snapshots.get(listingId(scope, storeId)) ?? [];
-    const active = new Set();
-    let lastSeenAt;
-    let known = false;
-    for (const snapshot of snapshots) {
-      if (eventTime(snapshot) > at) continue;
-      known = true;
-      for (const id of snapshot.added) active.add(id);
-      for (const id of snapshot.removed) active.delete(id);
-      lastSeenAt = snapshot.observedAt;
-    }
-    return { active, lastSeenAt, known };
+    return listingStateAt(snapshots, at);
   }
 
   async productHistory(productId) {
@@ -410,7 +430,11 @@ export class ArchiveIndex {
 
     let candidateRevisions;
     if (query.productId && query.storeId) {
-      candidateRevisions = [this.#index.offerRevisions.get(`${query.productId}\u0000${query.storeId}`) ?? []];
+      const productOffers = this.#index.offerIdsByProduct.get(query.productId) ?? new Set();
+      const storeOffers = this.#index.offerIdsByStore.get(query.storeId) ?? new Set();
+      candidateRevisions = [...productOffers]
+        .filter((offerIdValue) => storeOffers.has(offerIdValue))
+        .map((offerIdValue) => this.#index.offerRevisions.get(offerIdValue) ?? []);
     } else if (query.productId) {
       candidateRevisions = [...(this.#index.offerIdsByProduct.get(query.productId) ?? [])]
         .map((offerIdValue) => this.#index.offerRevisions.get(offerIdValue) ?? []);

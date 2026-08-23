@@ -102,7 +102,7 @@ describe("load protocol (CORE-2 M4)", () => {
   });
 
   it("recovers an unterminated final line as a queryable record", async () => {
-    const tail = validV2ProductLine.replace("prod:0", "prod:1");
+    const tail = cleanProductLine("prod:1", "Seed");
     await writeFile(filePath, validV2ProductLine + "\n" + tail);
     const repository = new JsonlObservationRepository(filePath);
     const history = await repository.productHistory("prod:1");

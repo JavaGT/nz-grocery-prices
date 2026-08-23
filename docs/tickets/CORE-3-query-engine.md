@@ -13,7 +13,10 @@
 > before persistence (later deltas cannot be rewritten safely), mixed-time
 > batches use their latest timestamp, snapshot hashes use historical offer
 > revisions, and historical queries do not fall back to future metadata.
-> Full suite: **597/597**.
+> `9ddb0e8` adds temporal anchors for backfilled same-hash revisions, rejects
+> snapshots whose offers have no revision at the snapshot time, removes the
+> unused latest-offer cache, and preserves anchors through compaction. Full
+> suite: **597/597**.
 
 ## Summary
 Extract in-memory indexing + observation materialization out of

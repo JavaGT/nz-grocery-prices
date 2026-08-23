@@ -281,7 +281,8 @@ Executed P0.1 (verify baseline) and P0.2 (verify dirty state), then implemented 
 - Fixed SPA suggestions parameter name mismatch (`?q=` → `?query=`) to align with
   server expectations.
 - Added `npm run build-db`, `npm run start`, and `npm run matching` scripts to
-  `package.json`. `npm run dashboard` (legacy) preserved unchanged.
+  `package.json`. Historical note: the legacy `npm run dashboard` command was
+  later removed by CORE-6 on 2026-08-24.
 - Added `appDbInit` hook to test server helpers for seeding AppDatabase match data
   in tests.
 - Added 2 new tests: (1) product detail returns confirmed matches and fuzzy
@@ -437,7 +438,11 @@ resolved all 3 deferred unknowns. Total tests: 443 (was 435), all pass.
   ordering, watch-preferred priority, watch-other tier, all tier, category
   matching, and invalid-session handling.
 
-### P7.1 — Deprecation pointers
+### P7.1 — Deprecation pointers (historical; superseded by CORE-6)
+
+The following entries describe the 2026-07-17 deprecation-only plan. The
+dashboard files and command were deleted on 2026-08-24 under the owner-directed
+CORE-6 cutover; they are retained here only as historical planning context.
 
 - **`dashboard/server.js`**: added `console.warn(...)` deprecation banner on load.
 - **`dashboard/README.md`**: new — deprecation notice pointing to `npm start`.

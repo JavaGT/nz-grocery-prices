@@ -15,7 +15,8 @@ staged cutover [SOL-12].
    derivation against ALL preceding state via `parseObservation` +
    `ArchiveIndex.planAppend`, mixed line order preserved, byte-exact fsynced
    backup before temp+rename rewrite under the shared `<archive>.lock`,
-   quarantine-not-invent for undecodable lines, true no-op on no-v1 files.
+   quarantine-not-invent for undecodable lines, true no-op on clean no-v1
+   files, and invalid-only quarantine without archive rewriting.
 2. ✅ Dry-run against live archive via temp copy: 18,726 records, 0 v1,
    0 invalid, copy byte-identical after run.
 3. ✅ Repository refusal (43edc2e): `#load()` throws

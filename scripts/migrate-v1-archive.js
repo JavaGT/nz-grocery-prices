@@ -19,8 +19,9 @@
  *     (fsync'd BEFORE the replace), then rewrites via sibling temp file +
  *     writeAllAndSync + rename + parent-dir fsync.
  *
- * --dry-run reports {v1, v2, invalid, changes} and touches nothing. A run
- * with no v1 lines is a no-op: no backup, no rewrite — second runs are safe.
+ * --dry-run reports {v1, v2, invalid, changes} and touches nothing. A clean
+ * v2 run is a no-op; invalid-only input creates a quarantine while leaving
+ * the archive untouched. A migrated second run is still safe and unchanged.
  *
  * Usage:
  *   node scripts/migrate-v1-archive.js (--file <archive.jsonl> |
@@ -243,11 +244,26 @@ try {
       );
     }
 
-    if (args.dryRun || report.v1 === 0) {
-      // Dry run, or nothing to migrate: report and leave the file untouched.
-      // (A no-v1 run writes NO backup and performs NO rewrite — this is what
-      // makes a second migration run a true no-op.)
+    if (args.dryRun) {
+      // Dry run always leaves the archive and quarantine state untouched.
       report.dryRun = args.dryRun;
+      return;
+    }
+
+    if (report.v1 === 0) {
+      // A clean v2 archive is a true no-op. Invalid-only input is different:
+      // quarantine the bad fragments even though there is no v1 rewrite to
+      // perform, while leaving the archive bytes untouched for repair.
+      if (quarantined.length > 0) {
+        const quarantinePath =
+          `${filePath}.corrupt-${new Date().toISOString().replaceAll(":", "-")}`;
+        await fsyncFile(
+          quarantinePath,
+          quarantined.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        );
+        report.quarantineFile = quarantinePath;
+        await fsyncParentDir(quarantinePath);
+      }
       return;
     }
 

@@ -291,6 +291,25 @@ describe("migrate-v1-archive CLI (CORE-6)", () => {
     assert.equal(records[2].type, "offer");
   });
 
+  it("quarantines invalid-only input without rewriting the archive", async () => {
+    const original = "not-json\n";
+    await writeFile(filePath, original);
+
+    const report = JSON.parse(
+      (await run("node", [cli, "--file", filePath])).stdout,
+    );
+    assert.equal(report.v1, 0);
+    assert.equal(report.v2, 0);
+    assert.equal(report.invalid, 1);
+    assert.ok(report.quarantineFile);
+    assert.equal(await readFile(filePath, "utf8"), original);
+    assert.equal(
+      (await readdir(directory)).filter((entry) => entry.includes("pre-v2-migration")).length,
+      0,
+      "invalid-only input does not create a migration backup",
+    );
+  });
+
   it("creates an fsynced backup of the original before replacing", async () => {
     const original = v1({ productId: "prod:1", sourceId: "s1" }) + "\n";
     await writeFile(filePath, original);

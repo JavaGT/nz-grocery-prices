@@ -5,6 +5,10 @@
 **Architecture:** Design B — clean canonical ownership (node:sqlite, two-DB separation)
 **Runtime:** Node.js 26.3.1 (built-in `node:sqlite`)
 
+**Status:** Historical plan. CORE-6 deleted the legacy `dashboard/` and
+`test/server.test.js` on 2026-08-24; dashboard paths below are retained only
+as dated implementation history.
+
 ---
 
 ## Architecture Choice: Design B over Design A

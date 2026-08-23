@@ -283,6 +283,37 @@ describe('malformed line handling', () => {
     } finally { rmSync(dir, { recursive: true }); }
   });
 
+  it('projects valid mixed-order records without dropping early offers', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'mixed-order.jsonl');
+    const dbPath = join(dir, 'mixed-order.db');
+    writeFileSync(jsonlPath, [
+      v2offer('r:p1', 'r:s1'),
+      v2product('r:p1'),
+      v2store('r:s1'),
+    ].join('\n') + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      const result = r.rebuild();
+      assert.equal(result.recordsImported, 3);
+      r.open();
+      assert.equal(r.query({}).length, 1, 'offer before its context remains queryable');
+      r.close();
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('refuses an offer whose store context is absent instead of dropping it', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'missing-context.jsonl');
+    const dbPath = join(dir, 'missing-context.db');
+    writeFileSync(jsonlPath, v2offer('r:p1', 'r:missing') + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      assert.throws(() => r.rebuild(), /no matching store revision/);
+      assert.equal(existsSync(dbPath), false, 'lossy projection is never published');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
   it('rejects a mixed v1/v2 archive even though v2 records exist', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'mixed.jsonl');

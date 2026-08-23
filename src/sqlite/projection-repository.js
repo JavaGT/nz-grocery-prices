@@ -5,11 +5,16 @@ import { createHash } from 'node:crypto';
 import { classifyParsedRecord } from '../archive-records.js';
 import { applyProjectionMigrations } from './schema.js';
 
-/** mtime+size signature of a file for change detection; null when absent. */
+/** Inode/content-size/high-resolution timestamp signature for change detection. */
 function statSignature(filePath) {
   try {
-    const stats = statSync(filePath);
-    return { mtimeMs: stats.mtimeMs, size: stats.size };
+    const stats = statSync(filePath, { bigint: true });
+    return {
+      dev: stats.dev,
+      ino: stats.ino,
+      mtimeNs: stats.mtimeNs,
+      size: stats.size,
+    };
   } catch {
     return null;
   }
@@ -17,7 +22,8 @@ function statSignature(filePath) {
 
 function sameSignature(a, b) {
   if (a === null || b === null) return a === b;
-  return a.mtimeMs === b.mtimeMs && a.size === b.size;
+  return a.dev === b.dev && a.ino === b.ino &&
+    a.mtimeNs === b.mtimeNs && a.size === b.size;
 }
 
 // The rebuild path opens ONLY the projection DB (two-DB rule). If a caller
@@ -86,10 +92,12 @@ export class ProjectionRepository {
     // rebuild advertising a fingerprint of bytes it never imported.
     const lockPath = dbPath + '.lock';
     let ownsLock = false;
+    mkdirSync(dirname(dbPath), { recursive: true });
     try {
       mkdirSync(lockPath);
       ownsLock = true;
-    } catch {
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
       throw new Error(
         `Projection rebuild is locked by another writer (${lockPath}). ` +
           `If no rebuild is running, remove the lock directory.`
@@ -141,11 +149,10 @@ export class ProjectionRepository {
 
     try { unlinkSync(tmpPath); } catch { /* ok */ }
 
-    mkdirSync(dirname(dbPath), { recursive: true });
-
-    const tmpDb = new DatabaseSync(tmpPath);
+    let tmpDb = null;
 
     try {
+      tmpDb = new DatabaseSync(tmpPath);
       tmpDb.exec('PRAGMA journal_mode=WAL');
       tmpDb.exec('PRAGMA foreign_keys=ON');
 
@@ -159,7 +166,11 @@ export class ProjectionRepository {
       const runId = Number(tmpDb.prepare('SELECT last_insert_rowid() AS id').get().id);
 
       const lines = contents.split('\n');
-      let recordsImported = 0;
+
+      // ---- Phase 1: parse/classify EVERY nonblank line first ----
+      // Valid v2 records are staged by type with their original line
+      // numbers; anything undecodable becomes a line-numbered error here.
+      const staged = { product: [], store: [], offer: [], snapshot: [] };
       let errors = 0;
       const errorDetails = [];
 
@@ -167,9 +178,6 @@ export class ProjectionRepository {
         const line = lines[i].trim();
         if (line === '') continue;
 
-        // Canonical classification shared with the archive loader and v1
-        // migrator: legacy v1, unknown types, and malformed envelopes are
-        // ALL rejected here — nothing is silently counted as imported.
         try {
           const parsed = JSON.parse(line);
           const verdict = classifyParsedRecord(parsed);
@@ -181,14 +189,57 @@ export class ProjectionRepository {
           if (verdict.status === 'invalid') {
             throw new TypeError(`Invalid archive record (${verdict.problems.join('; ')})`);
           }
-          if (!this.#insertRecord(tmpDb, verdict.record)) {
+          if (!(verdict.record.type in staged)) {
             throw new TypeError('Unknown archive record structure');
           }
-          recordsImported++;
+          staged[verdict.record.type].push({ lineNumber: i + 1, record: verdict.record });
         } catch (err) {
           errors++;
           errorDetails.push(`Line ${i + 1}: ${err.message}`);
         }
+      }
+
+      // ---- Phase 2: insert dependency-first ----
+      // products → stores → offers → snapshots, so an offer/snapshot line
+      // that appears BEFORE its store/product context still resolves.
+      // Relative order within each type is preserved. recordsImported
+      // counts ONLY records actually inserted.
+      let recordsImported = 0;
+      const unresolved = [];
+      for (const entry of staged.product) {
+        this.#insertRecord(tmpDb, entry.record);
+        recordsImported++;
+      }
+      for (const entry of staged.store) {
+        this.#insertRecord(tmpDb, entry.record);
+        recordsImported++;
+      }
+      for (const entry of staged.offer) {
+        if (this.#insertRecord(tmpDb, entry.record)) recordsImported++;
+        else unresolved.push(entry);
+      }
+      for (const entry of staged.snapshot) {
+        if (this.#insertRecord(tmpDb, entry.record)) recordsImported++;
+        else unresolved.push(entry);
+      }
+
+      // A record whose store context is defined NOWHERE in this archive
+      // cannot be projected — inserting it is impossible and skipping it
+      // would silently lose the fact (the pre-CORE-6 bug). Refuse with the
+      // offending line instead of publishing a lossy projection.
+      if (unresolved.length > 0) {
+        for (const entry of unresolved) {
+          errors++;
+          errorDetails.push(
+            `Line ${entry.lineNumber}: ${entry.record.type} references store context ` +
+              `${entry.record.storeId}, which has no store revision in this archive`
+          );
+        }
+        throw new Error(
+          `Projection build failed: ${unresolved.length} record(s) reference store contexts ` +
+            `with no matching store revision. First: ${errorDetails[errorDetails.length - unresolved.length]}. ` +
+            `No projection was published.`
+        );
       }
 
       const nonEmptyLines = lines.filter(l => l.trim() !== '');
@@ -235,6 +286,7 @@ export class ProjectionRepository {
       );
 
       tmpDb.close();
+      tmpDb = null;
 
       // Re-validate under the lock right before publishing: if the JSONL
       // changed since we read it, this rebuild's fingerprint would lie
@@ -251,19 +303,31 @@ export class ProjectionRepository {
 
       return { status: 'rebuilt', fingerprint, recordsImported, errors };
     } catch (err) {
-      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      // The temp DB may still be open on this path — close before cleanup
+      // so WAL/SHM sidecars are checkpointed and removable.
+      if (tmpDb) {
+        try { tmpDb.close(); } catch { /* already closed */ }
+        tmpDb = null;
+      }
       throw err;
+    } finally {
+      // Clean up the temp DB AND its journal sidecars. Runs only after
+      // close (or a failed open), so the published DB is never touched.
+      for (const suffix of ['', '-wal', '-shm']) {
+        try { unlinkSync(tmpPath + suffix); } catch { /* absent */ }
+      }
     }
   }
 
-  // Returns true when the record was inserted; false for an unrecognized
-  // (but envelope-valid) type so the caller can count it as an error.
+  // Returns true when the record was inserted; false when its store
+  // context could not be resolved (caller refuses rather than silently
+  // dropping the record). Unknown types return false as well.
   #insertRecord(db, record) {
     switch (record.type) {
       case 'product':  this.#insertProduct(db, record); return true;
       case 'store':    this.#insertStore(db, record); return true;
-      case 'offer':    this.#insertOffer(db, record); return true;
-      case 'snapshot': this.#insertSnapshot(db, record); return true;
+      case 'offer':    return this.#insertOffer(db, record);
+      case 'snapshot': return this.#insertSnapshot(db, record);
       default:         return false;
     }
   }
@@ -354,8 +418,9 @@ export class ProjectionRepository {
     const retailerId = storeId.split(':')[0];
 
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
-    if (!context) return;
-
+    // Unresolved context: report false so the caller refuses the build
+    // instead of silently dropping this offer (pre-CORE-6-review bug).
+    if (!context) return false;
     db.prepare(`
       INSERT OR IGNORE INTO offer_revisions(
         offer_key, product_id, context_id,
@@ -373,6 +438,7 @@ export class ProjectionRepository {
       JSON.stringify(data.source),
       observedAt
     );
+    return true;
   }
 
   #insertSnapshot(db, record) {
@@ -381,7 +447,9 @@ export class ProjectionRepository {
     const retailerId = storeId.split(':')[0];
 
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
-    if (!context) return;
+    // Unresolved context: report false so the caller refuses the build
+    // instead of silently dropping this snapshot.
+    if (!context) return false;
 
     db.prepare(`
       INSERT INTO special_snapshots(context_id, observed_at, offers_hash, offer_count, added, removed)
@@ -392,6 +460,7 @@ export class ProjectionRepository {
       JSON.stringify(record.added || []),
       JSON.stringify(record.removed || [])
     );
+    return true;
   }
 
   query(query = {}) {

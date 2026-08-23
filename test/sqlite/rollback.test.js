@@ -109,7 +109,7 @@ describe('atomic rollback on rebuild failure', () => {
     rmSync(dir, { recursive: true });
   });
 
-  it('existing DB preserved when JSONL causes SQL constraint violation in tmp', () => {
+  it('existing DB preserved when JSONL references an unknown store', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'constraint.jsonl');
     const dbPath = join(dir, 'preserved.db');
@@ -119,7 +119,7 @@ describe('atomic rollback on rebuild failure', () => {
       v2product('r:p1'),
       v2offer('r:p1', 'r:s1'),
       v2product('r:p2'),
-      v2offer('r:p2', 'r:non_existent_store'), // context lookup returns undefined → offer silently skipped
+      v2offer('r:p2', 'r:non_existent_store'), // unresolved references refuse publication
     ].join('\n') + '\n');
 
     buildGoodDb(dbPath);
@@ -127,13 +127,8 @@ describe('atomic rollback on rebuild failure', () => {
     assert.equal(originalCnt, 1);
 
     const r = new ProjectionRepository(jsonlPath, dbPath);
-    const result = r.rebuild();
-    assert.equal(result.status, 'rebuilt');
-
-    r.open();
-    const offerCnt = r.db.prepare('SELECT COUNT(*) AS cnt FROM offer_revisions').get().cnt;
-    assert.equal(offerCnt, 1, 'only the valid offer should be imported');
-    r.close();
+    assert.throws(() => r.rebuild(), /no matching store revision/);
+    assert.equal(getProductCount(dbPath), originalCnt, 'old DB should be preserved');
 
     rmSync(dir, { recursive: true });
   });

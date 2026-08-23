@@ -936,7 +936,8 @@ As documented in `HANDOFF.md`:
 6. Matching tests: `test/app/matching.test.js`
 
 ### Worker 7: Deprecation, Documentation & Integration
-1. Deprecate old `dashboard/`: replace `server.js` entry point with a deprecation pointer. Do NOT delete any files.
+1. Historical superseded plan: deprecate old `dashboard/` with a pointer. CORE-6
+   deleted the dashboard on 2026-08-24 under the owner-directed cutover.
 2. Add pointer README.md to `.worktrees/sqlite-migration/` noting its work has been absorbed into main; do NOT delete the worktree.
 3. Add pointer README.md to `workbench/projects/grocery-prices/` noting the app has moved to `prices` repo; do NOT delete or archive.
 4. Full system integration test (`npm test && npm run check && npm run pack:check`)
@@ -1005,7 +1006,9 @@ The full programme is **complete** when:
 2. **`npm test` exits 0** on a clean checkout with no pre-existing `data/prices.db` or `data/app.db`.
 3. **`node scripts/build-db.js`** produces a `data/prices.db` that passes equivalence tests against `JsonlObservationRepository` over the live `data/prices.jsonl` archive.
 4. **`npm start`** launches the HTTP server, applies both DB schemas, rebuilds the projection if stale, and serves the SPA.
-5. **Dashboard deprecation:** The old `dashboard/` server has a deprecation pointer; the directory and files are untouched.
+5. **Historical dashboard deprecation:** This acceptance note predates CORE-6.
+   The old dashboard and its test were deleted on 2026-08-24; `/api/deals` and
+   `PriceArchive.agentFeed` are the canonical contracts.
 6. **Workbench reference:** The prototype at `workbench/projects/grocery-prices` is unmodified; a pointer README has been added.
 7. **Worktree reference:** The `.worktrees/sqlite-migration` worktree is untouched; a pointer README has been added.
 8. **Rebuild never touches `data/app.db`:** Verified by a test that deletes `data/prices.db`, rebuilds, and asserts `data/app.db` tables are intact.

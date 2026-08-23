@@ -116,7 +116,10 @@ sudo launchctl kickstart -k system/nz.grocery-prices.archive
 
 ## Repository hygiene
 
-Pre-existing dirty changes existed in `README.md`, `package.json`, `dashboard/`, and `test/` before this work. Preserve unrelated edits. Local scheduling work is confined to the runner, daemon template, focused runner test, README, and this handoff.
+This handoff predates the CORE-6 dashboard deletion on 2026-08-24. The
+repository is now clean with respect to the legacy dashboard; local scheduling
+work is confined to the runner, daemon template, focused runner test, README,
+and this handoff.
 
 ## Deferred unknowns (resolved 2026-07-17)
 

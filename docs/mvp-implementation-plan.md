@@ -9,6 +9,10 @@ and reads the existing JSONL archive directly. Retain the SQLite import/read
 model steps below as the next scale-up plan; do not start them before measuring
 the direct archive path.
 
+CORE-6 deleted the historical `dashboard/` implementation and its test on
+2026-08-24. Dashboard paths in the table below are historical design notes,
+not active files or commands.
+
 ## Scope and sequence
 
 This plan adds public product search/comparison/history and private store

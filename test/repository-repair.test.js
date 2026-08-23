@@ -51,6 +51,36 @@ describe("repair CLI (CORE-2 M5)", () => {
     );
   });
 
+  it("refuses *.DB paths case-insensitively", async () => {
+    const dbPath = join(directory, "prices.DB");
+    await writeFile(dbPath, "");
+    await assert.rejects(
+      () => run("node", [cli, "--file", dbPath]),
+      (error) => error.code === 1 && /two-DB rule/.test(error.stderr),
+    );
+  });
+
+  it("accepts the --file=<path> form", async () => {
+    const productData = { id: "prod:eq", name: "Equals" };
+    await writeFile(filePath, JSON.stringify({
+      version: 2, type: "product", productId: "prod:eq",
+      hash: productRevisionHash(productData),
+      observedAt: "2026-08-01T00:00:00.000Z", data: productData,
+    }) + "\n");
+    const result = await run("node", [cli, `--file=${filePath}`]);
+    assert.equal(JSON.parse(result.stdout).kept, 1);
+  });
+
+  it("rejects bare positional arguments", async () => {
+    await assert.rejects(
+      () => run("node", [cli, filePath]),
+      (error) => error.code === 1 && /Unexpected argument/.test(error.stderr),
+    );
+    // The positional was rejected before any scan/rewrite.
+    const entries = await readdir(directory);
+    assert.equal(entries.some((entry) => entry.endsWith(".lock")), false);
+  });
+
   it("refuses data/prices.jsonl without --force, before touching anything", async () => {
     await mkdir(join(fakeRoot, "data"), { recursive: true });
     await writeFile(join(fakeRoot, "data", "prices.jsonl"), "seed\n");

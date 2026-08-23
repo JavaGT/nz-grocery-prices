@@ -37,10 +37,16 @@ function parseArgs(argv) {
     if (value === "--file") {
       index += 1;
       args.file = argv[index];
+    } else if (value.startsWith("--file=")) {
+      args.file = value.slice("--file=".length);
     } else if (value === "--force") {
       args.force = true;
     } else if (value === "--help" || value === "-h") {
       args.help = true;
+    } else if (!value.startsWith("--")) {
+      // Bare positional arguments are never valid for this CLI — accepting
+      // them silently would let typos target the wrong path.
+      (args.positionals ??= []).push(value);
     }
   }
   return args;
@@ -48,15 +54,23 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 
+if (!args.help && args.positionals?.length) {
+  console.error(
+    `Unexpected argument(s): ${args.positionals.join(", ")}. ` +
+      `Pass the archive via --file <path> or --file=<path>.`,
+  );
+  process.exit(1);
+}
+
 if (args.help || !args.file) {
-  console.log("Usage: node scripts/repair-archive.js --file <archive.jsonl> [--force]");
+  console.log("Usage: node scripts/repair-archive.js (--file <archive.jsonl> | --file=<archive.jsonl>) [--force]");
   if (!args.help) console.error("--file <path> is required");
   process.exit(args.help ? 0 : 1);
 }
 
 const filePath = resolve(args.file);
 
-if (filePath.endsWith(".db")) {
+if (/\.db$/i.test(filePath)) {
   console.error(
     `Refusing to repair ${filePath}: this is a SQLite DB, not a JSONL archive. ` +
       `The two-DB rule keeps prices.db (projection) and app.db (user data) out of ` +
@@ -178,6 +192,15 @@ try {
           .join("\n") + "\n",
       );
       report.quarantineFile = quarantinePath;
+      // Fsync the parent directory NOW, before the live-file rename below:
+      // a crash in between must not lose the quarantine entry AND the old
+      // file together (the corrupt bytes would be gone with no copy left).
+      const quarantineDirHandle = await open(dirname(filePath), "r");
+      try {
+        await quarantineDirHandle.sync();
+      } finally {
+        await quarantineDirHandle.close();
+      }
     }
 
     const tempPath = `${filePath}.repair-${process.pid}-${Date.now()}.tmp`;
@@ -189,7 +212,8 @@ try {
       throw error;
     }
 
-    // fsync the parent directory so the renames survive a crash.
+    // fsync the parent directory so the live-file rename survives a crash
+    // (the quarantine entry was already made durable above).
     const dirHandle = await open(dirname(filePath), "r");
     try {
       await dirHandle.sync();

@@ -42,7 +42,11 @@ function observationKey(observation) {
 function revisionHashFor(record) {
   if (record.type === "product") return productRevisionHash(record.data);
   if (record.type === "store") return storeRevisionHash(record.data);
-  return offerRevisionHash(record.data);
+  if (record.type === "offer") return offerRevisionHash(record.data);
+  // Snapshots carry offersHash over listing state, not a payload hash;
+  // recomputing one requires replaying prior listing state (see
+  // DECISIONLOG 2026-08-23) and is deliberately never done at load.
+  return undefined;
 }
 
 /**
@@ -108,7 +112,8 @@ function decodeArchiveLine(line, filePath, lineNumber, terminated) {
 
   const expectedHash = revisionHashFor(verdict.record);
   const defect =
-    typeof verdict.record.hash === "string" && verdict.record.hash !== expectedHash
+    typeof expectedHash === "string" &&
+    verdict.record.hash !== expectedHash
       ? {
           line: lineNumber,
           type: verdict.record.type,

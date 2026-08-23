@@ -64,6 +64,31 @@ describe("load protocol (CORE-2 M4)", () => {
     assert.equal(repository.getLoadDefects().length, 0);
   });
 
+  it("loads snapshot records cleanly; offersHash is never recomputed", async () => {
+    // Regression: snapshots carry offersHash over listing state rather than a
+    // payload hash+data pair. Hash verification must skip them instead of
+    // treating them as corrupt.
+    const validV2SnapshotLine =
+      '{"version":2,"type":"snapshot","scope":"specials","storeId":"store:0",' +
+      '"observedAt":"2026-08-02T00:00:00.000Z","offerCount":1,' +
+      '"offersHash":"' + "a".repeat(64) + '",' +
+      '"added":["prod:s\\u0000store:0"],"removed":[]}\n';
+    await writeFile(filePath, validV2SnapshotLine);
+    const repository = new JsonlObservationRepository(filePath);
+    await repository.append([
+      {
+        product: { id: "prod:s", name: "Cheese" },
+        store: { id: "store:0", retailer: "t" },
+        price: { regularCents: 500 },
+        source: { retailerProductId: "p1" },
+        observedAt: "2026-08-03T00:00:00.000Z",
+      },
+    ]);
+    assert.equal(repository.getLoadDefects().length, 0);
+    const [observation] = await repository.query({ productId: "prod:s" });
+    assert.equal(observation.isOnSpecial, true);
+  });
+
   it("throws naming file:line for a terminated invalid line (even when last)", async () => {
     // Corrupt line in the middle.
     await writeFile(filePath, validV2ProductLine + '\n{"version":3,"type":"product"}\n');

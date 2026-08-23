@@ -31,9 +31,10 @@ collectors and the legacy dashboard).
 
 ```
 src/adapters/          retailer API clients + pure transforms
-src/archive.js         PriceArchive (agentFeed, history, sales)
-src/repository.js      JsonlObservationRepository (v2 record ↔ observation)
-src/analytics.js       calculateSales / calculateOngoingSales / toAgentFeed
+src/domain/            observation validation (parseObservation / validateObservation)
+src/archive-records.js canonical v2 record encoding + content hashing (locale-pinned sort)
+src/repository.js      JsonlObservationRepository — lock, durable append, atomic compact, tail-tolerant load
+src/analytics.js       calculateSales / calculateOngoingSales / buildPriceSeries / toAgentFeed
 src/sqlite/            projection + app DB, migration runner
   migrations/projection/   001_initial.sql (LIKE + NOCASE, NO FTS5)
   migrations/app/          001_app_auth.sql, 002_product_matching.sql

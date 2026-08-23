@@ -25,7 +25,7 @@ suffices for collectors and the legacy dashboard.
 
 | Task | Command | Notes |
 |---|---|---|
-| Full test suite | `npm test` | ~477 tests, ~5s. All self-contained (temp dirs, port 0, child-process dashboard). |
+| Full test suite | `npm test` | ~570 tests, ~6s. All self-contained (temp dirs, port 0, child-process dashboard). |
 | Lint / typecheck | **none** | no ESLint, no TypeScript compiler. `npm run check` is the syntax gate. |
 
 ## Run / dev
@@ -36,6 +36,15 @@ suffices for collectors and the legacy dashboard.
 | Legacy dashboard (deprecated) | `npm run dashboard` | 7070 | `DASHBOARD_PORT`, `PRICE_FILE` |
 | Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db` |
 | Run matching | `npm run matching -- --fuzzy` | — | writes to `app.db.product_match_pairs` |
+| Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Rejects `.db` paths; requires `--force` for `data/prices.jsonl`. |
+
+### Archive writer protocol
+
+All archive mutations (`append`, `compact`, repair, the collector publisher)
+take the same `<archive>.lock` mkdir-based lock and are mutually exclusive.
+Appends are fsync'd before in-memory state updates; compaction/repair replace
+the file atomically via rename. `fh.sync()` is fsync(2) — crash-atomic, not a
+power-loss guarantee on APFS (see DECISIONLOG 2026-08-23).
 
 ## Collectors (live network — do not run casually)
 

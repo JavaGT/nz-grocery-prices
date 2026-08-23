@@ -72,3 +72,14 @@ End every task with:
 
 (Capture codebase-specific lessons here as dated atomic bullets. Global
 behavior lessons go in `~/.config/opencode/rules/lessons.md`.)
+
+- 2026-08-24 — Projection insert/lookup pairs must derive identity from the
+  SAME source. `price_contexts` was keyed on display payloads (`data.id`,
+  `data.retailer`) at insert but on envelope `storeId` at lookup, so valid
+  archives with unprefixed store IDs silently dropped (later: refused)
+  offers. Rule: envelope IDs are identity; payload fields are display only.
+- 2026-08-24 — "Count as imported" must mean "verifiably projected." Any
+  insert path that can no-op or early-return while the caller still
+  increments a counter will eventually hide data loss; make callees return a
+  reason and let one place decide success.
+

@@ -1,8 +1,22 @@
 # CORE-6 — Legacy cutover
 
 > **Status: COMPLETE (2026-08-24).** All stages landed and hostile-reviewed
-> (Luna round 2 blockers/concerns addressed). v1 is refused by every hot
-> path; the dashboard is deleted; the migrator is the only v1 handler.
+> (Luna round 2; Grok rounds 3–4). v1 is refused by every hot path; the
+> dashboard is deleted; the migrator is the only v1 handler.
+>
+> Post-COMPLETE hardening from Grok's final review: `d9bbb33` (dependency-first
+> projection staging, unresolved-reference refusal, inode+high-res stat
+> signature, temp sidecar cleanup, invalid-only migrator quarantine,
+> historical doc labeling), `42de458` (orphan product/snapshot-offer
+> references also refused), `67463a4` (store identity keyed on the ENVELOPE
+> storeId on both insert and lookup — display payloads `data.id`/`data.retailer`
+> are not identity). Live-archive probe after each fix: 18,726 records
+> rebuilt, 0 errors, fingerprint stable. Full suite: **621/621**.
+>
+> Accepted gap: the "archive vanishes between read and publish" branch of
+> `statSignature` fails closed (throws) but has no direct test — it is not
+> injectable without a new seam; deliberately left untested rather than
+> adding API surface for one branch.
 
 ## Summary
 Remove legacy paths per owner direction ("no hangups on legacy"): delete the

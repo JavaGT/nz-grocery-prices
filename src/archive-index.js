@@ -165,7 +165,6 @@ export class ArchiveIndex {
     }
   }
 
-  /**
   /** Applies one record to `index` (the live state or a planning draft). */
   #applyRecord(index, record) {
     index.records.push(record);

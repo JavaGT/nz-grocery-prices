@@ -235,4 +235,19 @@ describe("writer protocol (CORE-2 M3)", () => {
     const reopened = new JsonlObservationRepository(filePath);
     assert.equal((await reopened.query()).length, 2);
   });
+
+  it("compact preserves temporal anchors and price reverts", async () => {
+    const repository = new JsonlObservationRepository(filePath);
+    await repository.append([obs({ productId: "prod:anchor", sourceId: "a", observedAt: "2026-08-12T00:00:00.000Z", regularCents: 100 })]);
+    await repository.append([obs({ productId: "prod:anchor", sourceId: "a", observedAt: "2026-08-10T00:00:00.000Z", regularCents: 100 })]);
+    await repository.append([obs({ productId: "prod:anchor", sourceId: "a", observedAt: "2026-08-14T00:00:00.000Z", regularCents: 200 })]);
+    await repository.append([obs({ productId: "prod:anchor", sourceId: "a", observedAt: "2026-08-16T00:00:00.000Z", regularCents: 100 })]);
+
+    const before = await repository.query({});
+    const result = await repository.compact();
+    const reopened = new JsonlObservationRepository(filePath);
+    assert.deepEqual(await reopened.query({}), before);
+    assert.equal((await reopened.productHistory("prod:anchor")).length, 2);
+    assert.equal(result.records, 8); // 2 product + 2 store anchors, 4 offers
+  });
 });

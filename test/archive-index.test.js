@@ -294,9 +294,24 @@ describe("ArchiveIndex unit behavior", () => {
     index.applyAdditions(index.planAppend([first]));
     index.applyAdditions(index.planAppend([newer]));
     const revert = obs({ productId: "p1", storeId: "s1", retailer: "r", sourceId: "p1", observedAt: "2026-08-14T00:00:00.000Z", regularCents: 100 });
-    assert.equal(index.planAppend([revert]).filter((record) => record.type === "offer").length, 1);
+    assert.deepEqual(index.planAppend([revert]).map((record) => record.type), ["offer"]);
     index.applyAdditions(index.planAppend([revert]));
     assert.deepEqual(index.planAppend([revert]), []);
+
+    const names = new ArchiveIndex();
+    const named = (name, observedAt) => ({
+      ...obs({ productId: "p2", storeId: "s2", retailer: "r", sourceId: "p2", observedAt }),
+      product: { id: "p2", name },
+    });
+    names.applyAdditions(names.planAppend([named("A", "2026-08-10T00:00:00.000Z")]));
+    names.applyAdditions(names.planAppend([named("B", "2026-08-12T00:00:00.000Z")]));
+    assert.deepEqual(names.planAppend([named("A", "2026-08-14T00:00:00.000Z")]).map((record) => record.type), ["product"]);
+
+    const stores = new ArchiveIndex();
+    const retailed = (retailer, observedAt) => obs({ productId: "p3", storeId: "s3", retailer, sourceId: "p3", observedAt });
+    stores.applyAdditions(stores.planAppend([retailed("a", "2026-08-10T00:00:00.000Z")]));
+    stores.applyAdditions(stores.planAppend([retailed("b", "2026-08-12T00:00:00.000Z")]));
+    assert.deepEqual(stores.planAppend([retailed("a", "2026-08-14T00:00:00.000Z")]).map((record) => record.type), ["store"]);
   });
 
   it("ORDERING INVARIANT [SOL-7/GROK-7]: revision-at follows chronology with stable ties", () => {

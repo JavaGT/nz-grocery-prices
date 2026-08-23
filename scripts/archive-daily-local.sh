@@ -15,7 +15,9 @@ esac
 
 archive_dir=$(dirname -- "$archive_file")
 # Shared with src/repository.js: mkdir-based exclusive lock taken for ALL
-# archive mutations, so a publish never races an app append/compact.
+# archive mutations, so a publish never races an app append/compact. The
+# pid file inside lets the next writer reclaim the lock if we die holding
+# it (repository.js treats an unknown/dead holder as stale).
 lock_dir="${archive_file}.lock"
 stage_file=""
 
@@ -28,19 +30,22 @@ fail() {
 
 cleanup() {
   [ -z "$stage_file" ] || rm -f -- "$stage_file"
-  rmdir -- "$lock_dir" 2>/dev/null || true
+  rm -rf -- "$lock_dir"
 }
 
 mkdir -p -- "$archive_dir"
 if ! mkdir -- "$lock_dir" 2>/dev/null; then
   fail "another collection appears to be running ($lock_dir)"
 fi
+printf '%s\n' "$$" > "${lock_dir}/pid"
 
 HEALTH_JS_PATH="$repo_root/src/collection-health.js"
 # shellcheck source=scripts/lib/collection-health.sh
 . "$script_dir/lib/collection-health.sh"
 health_init "$health_file"
-trap 'health_finish 2>/dev/null; health_cleanup; cleanup' 0 HUP INT TERM
+# health_finish failure must not skip cleanup (set -eu would abort the
+# trap on its first failing command), so every trap step is guarded.
+trap 'health_finish || true; health_cleanup || true; cleanup' 0 HUP INT TERM
 
 stage_file=$(mktemp "${archive_file}.tmp.XXXXXX")
 if [ -f "$archive_file" ]; then

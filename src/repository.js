@@ -1,5 +1,5 @@
-import { mkdir, open, rename, rm, rmdir, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import {
   classifyParsedRecord,
   encodeRecord,
@@ -384,29 +384,20 @@ export class JsonlObservationRepository {
   // ---- locking ----
 
   /**
-   * Cross-process exclusive lock: mkdir is atomic, so creating the lock
-   * directory succeeds for exactly one writer. scripts/
-   * archive-daily-local.sh takes the same lock while publishing.
+   * Cross-process exclusive lock (see acquireArchiveLock): mkdir is
+   * atomic, so creating the lock directory succeeds for exactly one
+   * writer. A `pid` file inside names the holder so a crashed writer's
+   * lock can be reclaimed. scripts/archive-daily-local.sh takes the same
+   * lock while publishing and records its pid too.
    */
-  async #acquireLock() {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    try {
-      await mkdir(this.#lockPath);
-    } catch (error) {
-      if (error.code === "EEXIST") {
-        throw new Error(
-          `Archive is locked by another writer (${this.#lockPath}). If no writer is running, remove the lock directory.`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
+  #acquireLock() {
+    return acquireArchiveLock(this.#lockPath);
   }
 
   async #releaseLock() {
     // A failed unlock must not mask the operation's own outcome; a stale
-    // lock directory is safe to remove manually.
-    await rmdir(this.#lockPath).catch(() => {});
+    // lock directory is reclaimed automatically via the pid file.
+    await rm(this.#lockPath, { recursive: true, force: true }).catch(() => {});
   }
 
   /** Runs `operation` holding the lock, serialized behind the queue. */
@@ -930,34 +921,86 @@ export class JsonlObservationRepository {
 }
 
 /**
- * Runs `operation` while holding the cross-process archive lock for
- * `filePath` — the same `<archive>.lock` directory (mkdir-acquire /
- * rmdir-release) the writer protocol uses above, so external tools
- * (scripts/repair-archive.js) are mutually exclusive with appends,
- * compaction, and publisher renames.
+ * Cross-process exclusive archive lock: mkdir-based (atomic), with a
+ * `pid` file inside naming the holder so a crashed writer's lock can be
+ * reclaimed. Deliberately FAIL-FAST — a held lock throws immediately;
+ * correctness comes from re-stat-reloading the file under the lock, not
+ * from waiting (see DECISIONLOG 2026-08-23).
  *
- * The lock is deliberately fail-fast: a held lock throws immediately.
- * Callers MUST (re-)read the archive INSIDE the operation — anything
- * scanned before acquiring the lock can be stale by the time it is held.
+ * On EEXIST the holder pid is read: dead (or unreadable) pid → the stale
+ * directory is removed and acquisition retried ONCE; alive → throw.
+ * process.kill(pid, 0) throwing EPERM still means ALIVE (the process
+ * exists but is owned by another user). Shared by the repository's
+ * internal writer protocol and scripts/repair-archive.js via
+ * withArchiveLock().
+ */
+async function acquireArchiveLock(lockPath, writePid = true) {
+  await mkdir(dirname(lockPath), { recursive: true });
+  try {
+    await mkdir(lockPath);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const holderPid = await readLockPid(lockPath);
+    if (!holderPid || isProcessAlive(holderPid)) {
+      const detail = holderPid ? `held by live process ${holderPid}` : "holder pid unknown";
+      throw new Error(
+        `Archive is locked by another writer (${lockPath}, ${detail}). ` +
+          `If no writer is running, remove the lock directory.`,
+        { cause: error },
+      );
+    }
+    // Stale: the recorded pid is gone, so the writer died holding it.
+    await rm(lockPath, { recursive: true, force: true });
+    await mkdir(lockPath);
+  }
+  if (writePid) {
+    // Written after acquire; a crash between mkdir and this write leaves
+    // no pid file, which the next acquirer treats as stale (safe — an
+    // unknown holder must prove it is alive to block anyone).
+    try {
+      await writeFile(join(lockPath, "pid"), `${process.pid}\n`);
+    } catch {
+      // Lock is held regardless; pid recording is best-effort recovery data.
+    }
+  }
+}
+
+/** Reads and parses a lock dir's `pid` file; null when absent/garbled. */
+async function readLockPid(lockPath) {
+  try {
+    const raw = await readFile(join(lockPath, "pid"), "utf8");
+    const pid = Number.parseInt(raw.trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM"; // exists but owned by another user
+  }
+}
+
+/**
+ * Runs `operation` while holding the cross-process archive lock for
+ * `filePath`. See acquireArchiveLock() for the policy (fail-fast, pid
+ * file, single stale-reclaim retry). Callers MUST (re-)read the archive
+ * INSIDE the operation — anything scanned before acquiring the lock can
+ * be stale by the time it is held.
  */
 export async function withArchiveLock(filePath, operation) {
   const target = resolve(filePath);
   const lockPath = `${target}.lock`;
-  await mkdir(dirname(target), { recursive: true });
-  try {
-    await mkdir(lockPath);
-  } catch (error) {
-    if (error.code === "EEXIST") {
-      throw new Error(
-        `Archive is locked by another writer (${lockPath}). If no writer is running, remove the lock directory.`,
-        { cause: error },
-      );
-    }
-    throw error;
-  }
+  await acquireArchiveLock(lockPath);
   try {
     return await operation();
   } finally {
-    await rmdir(lockPath).catch(() => {});
+    // rm -rf (not rmdir): the dir carries a pid file, and a crashed
+    // previous holder may have left one behind inside ours.
+    await rm(lockPath, { recursive: true, force: true }).catch(() => {});
   }
 }

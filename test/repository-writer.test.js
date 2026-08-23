@@ -180,6 +180,40 @@ describe("writer protocol (CORE-2 M3)", () => {
     );
   });
 
+  it("reclaims a stale lock left by a dead process (pid file recovery)", async () => {
+    await writeFile(filePath, v2ProductLine);
+    const repository = new JsonlObservationRepository(filePath);
+
+    // A genuinely dead pid: spawn a child, capture its pid, let it exit.
+    const { spawn } = await import("node:child_process");
+    const deadPid = await new Promise((resolveDone) => {
+      const child = spawn(process.execPath, ["-e", ""]);
+      child.on("exit", () => resolveDone(child.pid));
+    });
+
+    // Simulate a crashed writer holding the lock.
+    await mkdir(`${filePath}.lock`);
+    await writeFile(`${filePath}.lock/pid`, `${deadPid}\n`);
+
+    // The dead holder's lock is reclaimed once and append succeeds.
+    const added = await repository.append([obs({ productId: "prod:9", sourceId: "999" })]);
+    assert.ok(added >= 1);
+    const entries = await readdir(directory);
+    assert.equal(entries.some((entry) => entry.endsWith(".lock")), false);
+  });
+
+  it("refuses to steal a lock whose pid file names a live process", async () => {
+    await writeFile(filePath, v2ProductLine);
+    const repository = new JsonlObservationRepository(filePath);
+    await mkdir(`${filePath}.lock`);
+    await writeFile(`${filePath}.lock/pid`, `${process.pid}\n`); // this test process: alive
+    await assert.rejects(
+      () => repository.append([obs({ productId: "prod:2", sourceId: "222" })]),
+      /held by live process/,
+    );
+    await rm(`${filePath}.lock`, { recursive: true, force: true });
+  });
+
   it("compact() replaces the inode atomically and preserves data", async () => {
     const repository = new JsonlObservationRepository(filePath);
     await repository.append([

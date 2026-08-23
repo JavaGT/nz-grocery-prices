@@ -7,6 +7,7 @@ import {
   readFileSync,
   existsSync,
   renameSync,
+  readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -187,8 +188,13 @@ describe('atomic rollback on rebuild failure', () => {
       // expected
     }
 
-    const tmpPath = dbPath + '.tmp';
-    assert.equal(existsSync(tmpPath), false, 'tmp file should be cleaned up on failure');
+    // Temp DB and its WAL/SHM sidecars are all removed on failure. Real
+    // temp names are `noclean.db.tmp-<pid>-<rand>` (plus -wal/-shm), so
+    // match the prefix rather than one exact path.
+    const leftovers = readdirSync(dir).filter((entry) =>
+      entry.startsWith('noclean.db.tmp-'),
+    );
+    assert.deepEqual(leftovers, [], 'temp db and sidecars cleaned up on failure');
     rmSync(dir, { recursive: true });
   });
 });

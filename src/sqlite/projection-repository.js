@@ -206,7 +206,8 @@ export class ProjectionRepository {
       // products → stores → offers → snapshots, so an offer/snapshot line
       // that appears BEFORE its store/product context still resolves.
       // Relative order within each type is preserved. recordsImported
-      // counts ONLY records actually inserted.
+      // counts ACCEPTED archive lines (an INSERT OR IGNORE duplicate is
+      // still an accepted, deduplicated line — not a silent skip).
       let recordsImported = 0;
       const unresolved = [];
       for (const entry of staged.product) {
@@ -230,26 +231,13 @@ export class ProjectionRepository {
         else unresolved.push({ ...entry, reason: result });
       }
 
-      // A record whose store context is defined NOWHERE in this archive
-      // cannot be projected — inserting it is impossible and skipping it
-      // would silently lose the fact (the pre-CORE-6 bug). Refuse with the
+      // A record whose references resolve NOWHERE in this archive cannot be
+      // projected — inserting it is impossible and skipping it would
+      // silently lose the fact (the pre-CORE-6 bug). Refuse with the
       // offending line instead of publishing a lossy projection.
-      if (unresolved.length > 0) {
-        for (const entry of unresolved) {
-          errors++;
-          errorDetails.push(`Line ${entry.lineNumber}: ${entry.reason}`);
-        }
-        throw new Error(
-          `Projection build failed: ${unresolved.length} unresolved record(s). ` +
-            `First: ${errorDetails[errorDetails.length - unresolved.length]}. ` +
-            `No projection was published.`
-        );
-      }
-
       const nonEmptyLines = lines.filter(l => l.trim() !== '');
-      // A v1-tainted archive must not produce a projection: refuse with the
-      // actionable fix whether it is mixed with valid v2 or entirely legacy
-      // (checked BEFORE publishing the temp DB).
+      // The v1 refusal is checked FIRST so a mixed archive always points at
+      // the migrator, even when it also contains dangling references.
       const v1Details = errorDetails.filter(d => d.includes('migrate-v1-archive'));
       if (v1Details.length > 0) {
         if (recordsImported === 0) {
@@ -264,6 +252,21 @@ export class ProjectionRepository {
             `Run node scripts/migrate-v1-archive.js --file ${jsonlPath} first, then rebuild.`
         );
       }
+      if (unresolved.length > 0) {
+        for (const entry of unresolved) {
+          errors++;
+          errorDetails.push(`Line ${entry.lineNumber}: ${entry.reason}`);
+        }
+        throw new Error(
+          `Projection build failed: ${unresolved.length} unresolved record(s). ` +
+            `First: ${errorDetails[errorDetails.length - unresolved.length]}. ` +
+            `No projection was published.`
+        );
+      }
+
+      // A v1-tainted archive must not produce a projection: refuse with the
+      // actionable fix whether it is mixed with valid v2 or entirely legacy
+      // (checked BEFORE publishing the temp DB).
       if (nonEmptyLines.length > 0 && recordsImported === 0) {
         throw new Error(
           `Archive contains zero valid recognized records (${errors} malformed line${errors !== 1 ? 's' : ''})`
@@ -389,12 +392,16 @@ export class ProjectionRepository {
   #insertStore(db, record) {
     const data = record.data || {};
     const storeId = record.storeId;
-    const retailerId = data.retailer || storeId.split(':')[0];
+    // Store identity is the ENVELOPE storeId everywhere: offers/snapshots
+    // look up (storeId.split(':')[0], record.storeId), so insertion must
+    // key exactly that pair — never data.id/data.retailer, which are
+    // display payloads and may legitimately differ from the envelope.
+    const retailerId = storeId.split(':')[0];
     const observedAt = Date.parse(record.observedAt);
 
     this.#ensureRetailer(db, retailerId);
 
-    const storeKey = data.id || storeId;
+    const storeKey = storeId;
     const existing = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeKey);
     let contextId;
     if (existing) {
@@ -425,7 +432,7 @@ export class ProjectionRepository {
       return `offer ${record.offerId || record.offerKey} references product ${record.productId}, which has no product revision in this archive`;
     }
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
-    // Unresolved context: report false so the caller refuses the build
+    // Unresolved context: return a reason so the caller refuses the build
     // instead of silently dropping this offer (pre-CORE-6-review bug).
     if (!context) {
       return `offer ${record.offerId || record.offerKey} references store context ${storeId}, which has no store revision in this archive`;
@@ -456,7 +463,7 @@ export class ProjectionRepository {
     const retailerId = storeId.split(':')[0];
 
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
-    // Unresolved context: report false so the caller refuses the build
+    // Unresolved context: return a reason so the caller refuses the build
     // instead of silently dropping this snapshot.
     if (!context) {
       return `snapshot for ${storeId} references a store context with no store revision in this archive`;

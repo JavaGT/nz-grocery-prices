@@ -357,6 +357,98 @@ describe('malformed line handling', () => {
     } finally { rmSync(dir, { recursive: true }); }
   });
 
+  it('refuses snapshots whose store context or removed-only offers are absent', () => {
+    const { dir } = tmp();
+    const snapshotLine = (added, removed, storeId = 'r:s1') => JSON.stringify({
+      version: 2,
+      type: 'snapshot',
+      scope: 'specials',
+      storeId,
+      observedAt: '2026-07-13T12:00:00.000Z',
+      offersHash: 'h'.repeat(64),
+      offerCount: added.length,
+      added,
+      removed,
+    });
+
+    const noStorePath = join(dir, 'snap-no-store.jsonl');
+    const noStoreDb = join(dir, 'snap-no-store.db');
+    writeFileSync(noStorePath, snapshotLine([], []) + '\n');
+
+    const orphanRemovedPath = join(dir, 'snap-orphan-removed.jsonl');
+    const orphanRemovedDb = join(dir, 'snap-orphan-removed.db');
+    writeFileSync(orphanRemovedPath, [
+      v2store('r:s1'),
+      v2product('r:p1'),
+      v2offer('r:p1', 'r:s1'),
+      snapshotLine([], ['ghost\x00key']),
+    ].join('\n') + '\n');
+
+    try {
+      assert.throws(
+        () => new ProjectionRepository(noStorePath, noStoreDb).rebuild(),
+        /no store revision/,
+      );
+      assert.throws(
+        () => new ProjectionRepository(orphanRemovedPath, orphanRemovedDb).rebuild(),
+        /has no offer revision/,
+      );
+      assert.equal(existsSync(noStoreDb), false);
+      assert.equal(existsSync(orphanRemovedDb), false);
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('staging lets a snapshot precede its offers and supports unprefixed storeIds', () => {
+    const { dir } = tmp();
+    const jsonlPath = join(dir, 'staging.jsonl');
+    const dbPath = join(dir, 'staging.db');
+    writeFileSync(jsonlPath, [
+      JSON.stringify({
+        version: 2,
+        type: 'snapshot',
+        scope: 'specials',
+        storeId: 'plain-store',
+        observedAt: '2026-07-14T12:00:00.000Z',
+        offersHash: 'h'.repeat(64),
+        offerCount: 1,
+        added: ['r:p1\x00plain-store'],
+        removed: [],
+      }),
+      // Unprefixed storeId with a display retailer — store identity stays
+      // the envelope storeId on both insert and lookup (review fix).
+      JSON.stringify({
+        version: 2,
+        type: 'store',
+        storeId: 'plain-store',
+        hash: 'b'.repeat(64),
+        observedAt: '2026-07-13T12:00:00.000Z',
+        data: { id: 'plain-store', retailer: 'local', name: 'S' },
+      }),
+      v2product('r:p1'),
+      JSON.stringify({
+        version: 2,
+        type: 'offer',
+        offerId: 'r:p1\x00plain-store',
+        productId: 'r:p1',
+        storeId: 'plain-store',
+        hash: 'c'.repeat(64),
+        observedAt: '2026-07-13T12:00:00.000Z',
+        data: {
+          price: { regularCents: 500 },
+          source: { retailerProductId: 'x', adapter: 'test', url: 'https://x.com' },
+        },
+      }),
+    ].join('\n') + '\n');
+    try {
+      const r = new ProjectionRepository(jsonlPath, dbPath);
+      const result = r.rebuild();
+      assert.equal(result.recordsImported, 4);
+      r.open();
+      assert.equal(r.query({}).length, 1);
+      r.close();
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
   it('rejects a mixed v1/v2 archive even though v2 records exist', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'mixed.jsonl');
@@ -440,7 +532,7 @@ describe('rebuild locking (CORE-6)', () => {
       assert.throws(() => r.rebuild(), /locked by another writer/);
       // Nothing published, nothing stolen:
       assert.equal(existsSync(dbPath), false, 'no rename happened');
-      assert.equal(readdirSync(dir).some(e => e.endsWith('.tmp-')), false, 'no temp artifacts');
+      assert.equal(readdirSync(dir).some(e => e.includes('.tmp-')), false, 'no temp artifacts');
       // The OTHER writer's lock must still be present.
       assert.equal(existsSync(dbPath + '.lock'), true, "another writer's lock untouched");
     } finally { rmSync(dir, { recursive: true }); }

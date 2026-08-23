@@ -1,0 +1,439 @@
+import { fingerprint } from "./archive-records.js";
+
+/**
+ * Dedup identity of an observation within a batch/repository (memory-only
+ * repositories): everything that makes one observation distinct from another.
+ */
+function observationKey(observation) {
+  return [
+    observation.product.id,
+    observation.store.id,
+    observation.observedAt,
+    JSON.stringify(observation.price),
+    observation.source.retailerProductId,
+  ].join("\u0000");
+}
+
+/**
+ * Shared observation filtering: predicate match on productId/storeId/
+ * retailer plus an inclusive [from, to] window on observedAt, then stable
+ * sort by observedAt ascending and a structuredClone so callers can never
+ * mutate index state. Used by every query path (JSONL, memory).
+ */
+function filterObservations(observations, query = {}) {
+  const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
+  const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
+
+  return observations
+    .filter((observation) => {
+      const timestamp = Date.parse(observation.observedAt);
+      return (
+        (!query.productId || observation.product.id === query.productId) &&
+        (!query.storeId || observation.store.id === query.storeId) &&
+        (!query.retailer || observation.store.retailer === query.retailer) &&
+        timestamp >= from &&
+        timestamp <= to
+      );
+    })
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
+    .map((observation) => structuredClone(observation));
+}
+
+/** Offer identity: one product at one store. */
+function offerId(observation) {
+  return `${observation.product.id}\u0000${observation.store.id}`;
+}
+
+/** Listing identity: a snapshot scope (e.g. "specials") at one store. */
+function listingId(scope, storeId) {
+  return `${scope}\u0000${storeId}`;
+}
+
+function eventTime(record) {
+  return Date.parse(record.observedAt);
+}
+
+/**
+ * In-memory projection of the archive: content-addressed product/store/offer
+ * revisions, daily listing snapshots, and observation materialization.
+ *
+ * ORDERING INVARIANT [SOL-7/GROK-7]: per-entity revision arrays (and every
+ * other map here) hold records in INSERTION order, i.e. file order at load
+ * and append order afterwards. Revision-at lookups (#revisionAt,
+ * #listingState) walk that order backwards and return the latest record
+ * whose observedAt is ≤ the display time, falling back to the earliest —
+ * they do NOT require chronological order, so out-of-order appends and
+ * equal-timestamp ties (insertion sequence decides) behave identically to
+ * the pre-extraction implementation. This was a deliberate parity decision
+ * for the CORE-3 extraction; sorting revisions chronologically at load AND
+ * apply remains a follow-up and must not change mid-extraction.
+ *
+ * No filesystem knowledge lives here: durability (writer/load protocols)
+ * belongs to JsonlObservationRepository, which applies decoded records via
+ * apply()/applyAdditions() and plans writes through draft()/planAppend().
+ */
+export class ArchiveIndex {
+  // Records are never mutated after creation, so draft() can safely share
+  // them while copying the surrounding structure.
+  #index = {
+    records: [],
+    productRevisions: new Map(),
+    storeRevisions: new Map(),
+    offerRevisions: new Map(),
+    snapshots: new Map(),
+    latestProduct: new Map(),
+    latestStore: new Map(),
+    latestOffer: new Map(),
+    activeListings: new Map(),
+  };
+
+  /** Every applied record, in application order. Treat as immutable. */
+  getRecords() {
+    return this.#index.records;
+  }
+
+  /** Discards all indexed state. */
+  clear() {
+    this.#index = {
+      records: [],
+      productRevisions: new Map(),
+      storeRevisions: new Map(),
+      offerRevisions: new Map(),
+      snapshots: new Map(),
+      latestProduct: new Map(),
+      latestStore: new Map(),
+      latestOffer: new Map(),
+      activeListings: new Map(),
+    };
+  }
+
+  #hasRevision(type, id, hash, index = this.#index) {
+    const revisions = type === "product"
+      ? index.productRevisions.get(id)
+      : index.storeRevisions.get(id);
+    return revisions?.some((revision) => revision.hash === hash) ?? false;
+  }
+
+  /**
+   * Whether a product/store revision with exactly this content hash has
+   * already been applied (archive dedup identity).
+   */
+  hasRevision(type, id, hash) {
+    return this.#hasRevision(type, id, hash);
+  }
+
+  /** Applies one record to `index` (the live state or a planning draft). */
+  #applyRecord(index, record) {
+    index.records.push(record);
+
+    if (record.type === "product") {
+      const revisions = index.productRevisions.get(record.productId) ?? [];
+      revisions.push(record);
+      index.productRevisions.set(record.productId, revisions);
+      index.latestProduct.set(record.productId, record);
+      return;
+    }
+    if (record.type === "store") {
+      const revisions = index.storeRevisions.get(record.storeId) ?? [];
+      revisions.push(record);
+      index.storeRevisions.set(record.storeId, revisions);
+      index.latestStore.set(record.storeId, record);
+      return;
+    }
+    if (record.type === "offer") {
+      const revisions = index.offerRevisions.get(record.offerId) ?? [];
+      revisions.push(record);
+      index.offerRevisions.set(record.offerId, revisions);
+      index.latestOffer.set(record.offerId, record);
+      return;
+    }
+    if (record.type === "snapshot") {
+      const id = listingId(record.scope, record.storeId);
+      const snapshots = index.snapshots.get(id) ?? [];
+      snapshots.push(record);
+      index.snapshots.set(id, snapshots);
+      const active = index.activeListings.get(id) ?? new Set();
+      for (const idToAdd of record.added) active.add(idToAdd);
+      for (const idToRemove of record.removed) active.delete(idToRemove);
+      index.activeListings.set(id, active);
+    }
+  }
+
+  /** Indexes one record into live state. */
+  apply(record) {
+    this.#applyRecord(this.#index, record);
+  }
+
+  /** Bulk-apply decoded records (e.g. the additions of one append batch). */
+  applyAdditions(records) {
+    for (const record of records) this.#applyRecord(this.#index, record);
+  }
+
+  /** Shallow structural copy of the index; record objects are shared. */
+  draft() {
+    const copyAll = (map) =>
+      new Map([...map].map(([key, value]) => [key, [...value]]));
+    return {
+      records: [...this.#index.records],
+      productRevisions: copyAll(this.#index.productRevisions),
+      storeRevisions: copyAll(this.#index.storeRevisions),
+      offerRevisions: copyAll(this.#index.offerRevisions),
+      snapshots: copyAll(this.#index.snapshots),
+      latestProduct: new Map(this.#index.latestProduct),
+      latestStore: new Map(this.#index.latestStore),
+      latestOffer: new Map(this.#index.latestOffer),
+      activeListings: new Map(
+        [...this.#index.activeListings].map(([key, set]) => [key, new Set(set)]),
+      ),
+    };
+  }
+
+  // ---- pure planning ----
+
+  #planProductRecord(index, observation) {
+    const hash = fingerprint(observation.product);
+    const previous = index.latestProduct.get(observation.product.id);
+    if (previous?.hash === hash || this.#hasRevision("product", observation.product.id, hash, index)) {
+      return undefined;
+    }
+    return {
+      version: 2,
+      type: "product",
+      productId: observation.product.id,
+      hash,
+      observedAt: observation.observedAt,
+      data: structuredClone(observation.product),
+    };
+  }
+
+  #planStoreRecord(index, observation) {
+    const hash = fingerprint(observation.store);
+    const previous = index.latestStore.get(observation.store.id);
+    if (previous?.hash === hash || this.#hasRevision("store", observation.store.id, hash, index)) {
+      return undefined;
+    }
+    return {
+      version: 2,
+      type: "store",
+      storeId: observation.store.id,
+      hash,
+      observedAt: observation.observedAt,
+      data: structuredClone(observation.store),
+    };
+  }
+
+  #planOfferRecord(index, observation) {
+    const id = offerId(observation);
+    const data = {
+      price: structuredClone(observation.price),
+      ...(observation.promotion ? { promotion: structuredClone(observation.promotion) } : {}),
+      source: structuredClone(observation.source),
+    };
+    const hash = fingerprint(data);
+    const previous = index.latestOffer.get(id);
+    if (previous?.hash === hash) return undefined;
+    return {
+      version: 2,
+      type: "offer",
+      offerId: id,
+      productId: observation.product.id,
+      storeId: observation.store.id,
+      hash,
+      observedAt: observation.observedAt,
+      data,
+    };
+  }
+
+  #planSnapshotRecord(index, scope, storeId, observedAt, currentOfferIds) {
+    const id = listingId(scope, storeId);
+    const previous = index.activeListings.get(id) ?? new Set();
+    const added = [...currentOfferIds].filter((value) => !previous.has(value)).sort();
+    const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
+    const offers = [...currentOfferIds]
+      .sort()
+      .map((id) => [id, index.latestOffer.get(id)?.hash]);
+    return {
+      version: 2,
+      type: "snapshot",
+      scope,
+      storeId,
+      observedAt,
+      offerCount: currentOfferIds.size,
+      offersHash: fingerprint(offers),
+      added,
+      removed,
+    };
+  }
+
+  /**
+   * PURE: computes the records `observations` would add, against a draft
+   * copy of the index. Never touches live state, so a persist failure
+   * leaves memory untouched by the UNAPPLIED plan; the caller then resets
+   * state so the next operation reloads disk truth — if bytes did land,
+   * the torn-tail policy blocks appends and points at repair.
+   */
+  planAppend(observations, options = {}) {
+    const draft = this.draft();
+    const additions = [];
+    const listings = new Map();
+
+    for (const observation of observations) {
+      const product = this.#planProductRecord(draft, observation);
+      if (product) {
+        this.#applyRecord(draft, product);
+        additions.push(product);
+      }
+      const store = this.#planStoreRecord(draft, observation);
+      if (store) {
+        this.#applyRecord(draft, store);
+        additions.push(store);
+      }
+      const offer = this.#planOfferRecord(draft, observation);
+      if (offer) {
+        this.#applyRecord(draft, offer);
+        additions.push(offer);
+      }
+
+      if (options.snapshotScope) {
+        const current = listings.get(observation.store.id) ?? {
+          observedAt: observation.observedAt,
+          offerIds: new Set(),
+        };
+        current.offerIds.add(offerId(observation));
+        listings.set(observation.store.id, current);
+      }
+    }
+
+    for (const [storeId, listing] of listings) {
+      const snapshot = this.#planSnapshotRecord(
+        draft,
+        options.snapshotScope,
+        storeId,
+        listing.observedAt,
+        listing.offerIds,
+      );
+      additions.push(snapshot);
+    }
+    return additions;
+  }
+
+  // ---- queries ----
+
+  #revisionAt(revisions, at) {
+    for (let index = revisions.length - 1; index >= 0; index -= 1) {
+      if (eventTime(revisions[index]) <= at) return revisions[index];
+    }
+    return revisions[0];
+  }
+
+  #listingState(scope, storeId, at) {
+    const snapshots = this.#index.snapshots.get(listingId(scope, storeId)) ?? [];
+    const active = new Set();
+    let lastSeenAt;
+    let known = false;
+    for (const snapshot of snapshots) {
+      if (eventTime(snapshot) > at) break;
+      known = true;
+      for (const id of snapshot.added) active.add(id);
+      for (const id of snapshot.removed) active.delete(id);
+      lastSeenAt = snapshot.observedAt;
+    }
+    return { active, lastSeenAt, known };
+  }
+
+  async productHistory(productId) {
+    return (this.#index.productRevisions.get(productId) ?? []).map((record) => ({
+      hash: record.hash,
+      observedAt: record.observedAt,
+      product: structuredClone(record.data),
+    }));
+  }
+
+  /**
+   * Materializes observations from offer revisions: each offer renders with
+   * the product/store revisions in effect at its DISPLAY time — the
+   * snapshot listing's lastSeenAt when listed under `scope: "specials"`,
+   * otherwise its own observedAt — so retailer comes from the HISTORICAL
+   * store revision, never the latest one. Unlisted offers (removed from the
+   * listing) carry isOnSpecial: false; unknown-listing stores carry no
+   * listing fields at all.
+   */
+  async query(query = {}) {
+    const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
+    const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
+    const asOf = Number.isFinite(to) ? to : Date.now();
+    const listingStates = new Map();
+    const listingFor = (storeId) => {
+      if (!listingStates.has(storeId)) {
+        listingStates.set(storeId, this.#listingState("specials", storeId, asOf));
+      }
+      return listingStates.get(storeId);
+    };
+    const observations = [];
+
+    for (const revisions of this.#index.offerRevisions.values()) {
+      for (const offer of revisions) {
+        const timestamp = eventTime(offer);
+        if (timestamp < from || timestamp > to) continue;
+        const listing = listingFor(offer.storeId);
+        const displayAt = listing.active.has(offer.offerId) && listing.lastSeenAt
+          ? Date.parse(listing.lastSeenAt)
+          : timestamp;
+        const product = this.#revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
+        const store = this.#revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
+        if (!product || !store) continue;
+        if (query.productId && offer.productId !== query.productId) continue;
+        if (query.storeId && offer.storeId !== query.storeId) continue;
+        if (query.retailer && store.data.retailer !== query.retailer) continue;
+        observations.push({
+          product: structuredClone(product.data),
+          store: structuredClone(store.data),
+          price: structuredClone(offer.data.price),
+          ...(offer.data.promotion ? { promotion: structuredClone(offer.data.promotion) } : {}),
+          observedAt: offer.observedAt,
+          ...(listing.known
+            ? listing.active.has(offer.offerId)
+              ? { lastSeenAt: listing.lastSeenAt, isOnSpecial: true }
+              : { isOnSpecial: false }
+            : {}),
+          source: structuredClone(offer.data.source),
+        });
+      }
+    }
+    return filterObservations(observations, query);
+  }
+
+  /**
+   * Summary of indexed state: record counts by type, distinct retailers
+   * across the LATEST store revisions, and the observedAt span of every
+   * record. Null dates when empty.
+   */
+  stats() {
+    const counts = { product: 0, store: 0, offer: 0, snapshot: 0 };
+    let firstObservedAt;
+    let lastObservedAt;
+    for (const record of this.#index.records) {
+      counts[record.type] += 1;
+      const time = eventTime(record);
+      if (firstObservedAt === undefined || time < eventTime(firstObservedAt)) {
+        firstObservedAt = record.observedAt;
+      }
+      if (lastObservedAt === undefined || time > eventTime(lastObservedAt)) {
+        lastObservedAt = record.observedAt;
+      }
+    }
+    const retailers = [
+      ...new Set(
+        [...this.#index.latestStore.values()].map((record) => record.data.retailer),
+      ),
+    ].sort();
+    return {
+      records: counts,
+      retailers,
+      firstObservedAt: firstObservedAt ?? null,
+      lastObservedAt: lastObservedAt ?? null,
+    };
+  }
+}
+
+export { filterObservations, observationKey };

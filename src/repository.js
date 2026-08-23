@@ -8,6 +8,7 @@ import {
   productRevisionHash,
   storeRevisionHash,
 } from "./archive-records.js";
+import { ArchiveIndex, filterObservations, observationKey } from "./archive-index.js";
 import { validateObservation } from "./domain/observation.js";
 
 /**
@@ -26,16 +27,6 @@ function assertValidObservations(observations) {
       );
     }
   }
-}
-
-function observationKey(observation) {
-  return [
-    observation.product.id,
-    observation.store.id,
-    observation.observedAt,
-    JSON.stringify(observation.price),
-    observation.source.retailerProductId,
-  ].join("\u0000");
 }
 
 /** Recomputed content hash for a loaded record's payload. */
@@ -153,37 +144,6 @@ async function writeAllAndSync(handle, payload) {
 
 export { writeAllAndSync };
 
-function filterObservations(observations, query = {}) {
-  const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
-  const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
-
-  return observations
-    .filter((observation) => {
-      const timestamp = Date.parse(observation.observedAt);
-      return (
-        (!query.productId || observation.product.id === query.productId) &&
-        (!query.storeId || observation.store.id === query.storeId) &&
-        (!query.retailer || observation.store.retailer === query.retailer) &&
-        timestamp >= from &&
-        timestamp <= to
-      );
-    })
-    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
-    .map((observation) => structuredClone(observation));
-}
-
-function offerId(observation) {
-  return `${observation.product.id}\u0000${observation.store.id}`;
-}
-
-function listingId(scope, storeId) {
-  return `${scope}\u0000${storeId}`;
-}
-
-function eventTime(record) {
-  return Date.parse(record.observedAt);
-}
-
 export class MemoryObservationRepository {
   #keys = new Set();
   #observations = [];
@@ -253,19 +213,9 @@ export class MemoryObservationRepository {
  * getLoadDefects()), never fatal.
  */
 export class JsonlObservationRepository {
-  // Mutable archive index. Records are never mutated after creation, so the
-  // planner can safely share them with a draft copy of this structure.
-  #index = {
-    records: [],
-    productRevisions: new Map(),
-    storeRevisions: new Map(),
-    offerRevisions: new Map(),
-    snapshots: new Map(),
-    latestProduct: new Map(),
-    latestStore: new Map(),
-    latestOffer: new Map(),
-    activeListings: new Map(),
-  };
+  // Mutable archive index (see ArchiveIndex). Records are never mutated
+  // after creation, so the planner can safely share them with a draft copy.
+  #index = new ArchiveIndex();
   #loaded = false;
   // Single-flight load promise: created by the first concurrent caller,
   // awaited by all of them, so records are applied exactly once no matter
@@ -316,69 +266,6 @@ export class JsonlObservationRepository {
    */
   static decodeArchiveLine(line, filePath, lineNumber, terminated) {
     return decodeArchiveLine(line, filePath, lineNumber, terminated);
-  }
-
-  #hasRevision(type, id, hash, index = this.#index) {
-    const revisions = type === "product"
-      ? index.productRevisions.get(id)
-      : index.storeRevisions.get(id);
-    return revisions?.some((revision) => revision.hash === hash) ?? false;
-  }
-
-  /** Applies one record to `index` (the live state or a planning draft). */
-  #applyRecord(index, record) {
-    index.records.push(record);
-
-    if (record.type === "product") {
-      const revisions = index.productRevisions.get(record.productId) ?? [];
-      revisions.push(record);
-      index.productRevisions.set(record.productId, revisions);
-      index.latestProduct.set(record.productId, record);
-      return;
-    }
-    if (record.type === "store") {
-      const revisions = index.storeRevisions.get(record.storeId) ?? [];
-      revisions.push(record);
-      index.storeRevisions.set(record.storeId, revisions);
-      index.latestStore.set(record.storeId, record);
-      return;
-    }
-    if (record.type === "offer") {
-      const revisions = index.offerRevisions.get(record.offerId) ?? [];
-      revisions.push(record);
-      index.offerRevisions.set(record.offerId, revisions);
-      index.latestOffer.set(record.offerId, record);
-      return;
-    }
-    if (record.type === "snapshot") {
-      const id = listingId(record.scope, record.storeId);
-      const snapshots = index.snapshots.get(id) ?? [];
-      snapshots.push(record);
-      index.snapshots.set(id, snapshots);
-      const active = index.activeListings.get(id) ?? new Set();
-      for (const idToAdd of record.added) active.add(idToAdd);
-      for (const idToRemove of record.removed) active.delete(idToRemove);
-      index.activeListings.set(id, active);
-    }
-  }
-
-  /** Shallow structural copy of the index; record objects are shared. */
-  #draftIndex() {
-    const copyAll = (map) =>
-      new Map([...map].map(([key, value]) => [key, [...value]]));
-    return {
-      records: [...this.#index.records],
-      productRevisions: copyAll(this.#index.productRevisions),
-      storeRevisions: copyAll(this.#index.storeRevisions),
-      offerRevisions: copyAll(this.#index.offerRevisions),
-      snapshots: copyAll(this.#index.snapshots),
-      latestProduct: new Map(this.#index.latestProduct),
-      latestStore: new Map(this.#index.latestStore),
-      latestOffer: new Map(this.#index.latestOffer),
-      activeListings: new Map(
-        [...this.#index.activeListings].map(([key, set]) => [key, new Set(set)]),
-      ),
-    };
   }
 
   // ---- locking ----
@@ -452,17 +339,7 @@ export class JsonlObservationRepository {
 
   /** Discards every bit of in-memory archive state. */
   #resetState() {
-    this.#index = {
-      records: [],
-      productRevisions: new Map(),
-      storeRevisions: new Map(),
-      offerRevisions: new Map(),
-      snapshots: new Map(),
-      latestProduct: new Map(),
-      latestStore: new Map(),
-      latestOffer: new Map(),
-      activeListings: new Map(),
-    };
+    this.#index.clear();
     this.#loaded = false;
     this.#loadPromise = null;
     this.#fileSignature = null;
@@ -563,12 +440,12 @@ export class JsonlObservationRepository {
       }
       if (outcome.status === "legacy") {
         // Legacy observations are accepted and projected into v2 in memory.
-        const additions = this.#planAppend([outcome.record]);
-        for (const addition of additions) this.#applyRecord(this.#index, addition);
+        const additions = this.#index.planAppend([outcome.record]);
+        this.#index.applyAdditions(additions);
         continue;
       }
       if (outcome.defect) this.#loadDefects.push(outcome.defect);
-      this.#applyRecord(this.#index, outcome.record);
+      this.#index.apply(outcome.record);
     }
     if (!this.#tornTail && lines.length > 0 && !lines[lines.length - 1].terminated) {
       // A valid record recovered from an unterminated tail still means the
@@ -577,135 +454,6 @@ export class JsonlObservationRepository {
     }
     this.#fileSignature = await this.#currentSignature();
     this.#loaded = true;
-  }
-
-  // ---- pure planning ----
-
-  #planProductRecord(index, observation) {
-    const hash = fingerprint(observation.product);
-    const previous = index.latestProduct.get(observation.product.id);
-    if (previous?.hash === hash || this.#hasRevision("product", observation.product.id, hash, index)) {
-      return undefined;
-    }
-    return {
-      version: 2,
-      type: "product",
-      productId: observation.product.id,
-      hash,
-      observedAt: observation.observedAt,
-      data: structuredClone(observation.product),
-    };
-  }
-
-  #planStoreRecord(index, observation) {
-    const hash = fingerprint(observation.store);
-    const previous = index.latestStore.get(observation.store.id);
-    if (previous?.hash === hash || this.#hasRevision("store", observation.store.id, hash, index)) {
-      return undefined;
-    }
-    return {
-      version: 2,
-      type: "store",
-      storeId: observation.store.id,
-      hash,
-      observedAt: observation.observedAt,
-      data: structuredClone(observation.store),
-    };
-  }
-
-  #planOfferRecord(index, observation) {
-    const id = offerId(observation);
-    const data = {
-      price: structuredClone(observation.price),
-      ...(observation.promotion ? { promotion: structuredClone(observation.promotion) } : {}),
-      source: structuredClone(observation.source),
-    };
-    const hash = fingerprint(data);
-    const previous = index.latestOffer.get(id);
-    if (previous?.hash === hash) return undefined;
-    return {
-      version: 2,
-      type: "offer",
-      offerId: id,
-      productId: observation.product.id,
-      storeId: observation.store.id,
-      hash,
-      observedAt: observation.observedAt,
-      data,
-    };
-  }
-
-  #planSnapshotRecord(index, scope, storeId, observedAt, currentOfferIds) {
-    const id = listingId(scope, storeId);
-    const previous = index.activeListings.get(id) ?? new Set();
-    const added = [...currentOfferIds].filter((value) => !previous.has(value)).sort();
-    const removed = [...previous].filter((value) => !currentOfferIds.has(value)).sort();
-    const offers = [...currentOfferIds]
-      .sort()
-      .map((id) => [id, index.latestOffer.get(id)?.hash]);
-    return {
-      version: 2,
-      type: "snapshot",
-      scope,
-      storeId,
-      observedAt,
-      offerCount: currentOfferIds.size,
-      offersHash: fingerprint(offers),
-      added,
-      removed,
-    };
-  }
-
-  /**
-   * PURE: computes the records `observations` would add, against a draft
-   * copy of the index. Never touches live state, so a persist failure
-   * leaves memory untouched by the UNAPPLIED plan; the operation then
-   * resets state so the next operation reloads disk truth — if bytes did
-   * land, the torn-tail policy blocks appends and points at repair.
-   */
-  #planAppend(observations, options = {}) {
-    const draft = this.#draftIndex();
-    const additions = [];
-    const listings = new Map();
-
-    for (const observation of observations) {
-      const product = this.#planProductRecord(draft, observation);
-      if (product) {
-        this.#applyRecord(draft, product);
-        additions.push(product);
-      }
-      const store = this.#planStoreRecord(draft, observation);
-      if (store) {
-        this.#applyRecord(draft, store);
-        additions.push(store);
-      }
-      const offer = this.#planOfferRecord(draft, observation);
-      if (offer) {
-        this.#applyRecord(draft, offer);
-        additions.push(offer);
-      }
-
-      if (options.snapshotScope) {
-        const current = listings.get(observation.store.id) ?? {
-          observedAt: observation.observedAt,
-          offerIds: new Set(),
-        };
-        current.offerIds.add(offerId(observation));
-        listings.set(observation.store.id, current);
-      }
-    }
-
-    for (const [storeId, listing] of listings) {
-      const snapshot = this.#planSnapshotRecord(
-        draft,
-        options.snapshotScope,
-        storeId,
-        listing.observedAt,
-        listing.offerIds,
-      );
-      additions.push(snapshot);
-    }
-    return additions;
   }
 
   // ---- mutation (writer protocol) ----
@@ -750,7 +498,7 @@ export class JsonlObservationRepository {
           `Repair first: node scripts/repair-archive.js --file ${this.filePath}`,
       );
     }
-    const additions = this.#planAppend(observations, options);
+    const additions = this.#index.planAppend(observations, options);
     if (additions.length > 0) {
       try {
         await this.#persistAdditions(additions);
@@ -762,7 +510,7 @@ export class JsonlObservationRepository {
         this.#resetState();
         throw error;
       }
-      for (const record of additions) this.#applyRecord(this.#index, record);
+      for (const record of additions) this.#index.apply(record);
       this.#fileSignature = await this.#currentSignature();
       this.#endsWithNewline = true;
     }
@@ -798,7 +546,7 @@ export class JsonlObservationRepository {
     const productRevisions = new Set();
     const storeRevisions = new Set();
     const snapshots = new Set();
-    const compacted = this.#index.records.filter((record) => {
+    const compacted = this.#index.getRecords().filter((record) => {
       if (record.type === "product") {
         const key = `${record.productId}\u0000${record.hash}`;
         if (productRevisions.has(key)) return false;
@@ -841,10 +589,10 @@ export class JsonlObservationRepository {
 
     // Rebuild in-memory state from the compacted record set.
     this.#resetState();
-    for (const record of compacted) this.#applyRecord(this.#index, record);
+    this.#index.applyAdditions(compacted);
     this.#fileSignature = await this.#currentSignature();
     this.#loaded = true;
-    return { records: this.#index.records.length, file: this.filePath };
+    return { records: this.#index.getRecords().length, file: this.filePath };
   }
 
   compact() {
@@ -853,81 +601,23 @@ export class JsonlObservationRepository {
 
   // ---- queries ----
 
-  #revisionAt(revisions, at) {
-    for (let index = revisions.length - 1; index >= 0; index -= 1) {
-      if (eventTime(revisions[index]) <= at) return revisions[index];
-    }
-    return revisions[0];
-  }
-
-  #listingState(scope, storeId, at) {
-    const snapshots = this.#index.snapshots.get(listingId(scope, storeId)) ?? [];
-    const active = new Set();
-    let lastSeenAt;
-    let known = false;
-    for (const snapshot of snapshots) {
-      if (eventTime(snapshot) > at) break;
-      known = true;
-      for (const id of snapshot.added) active.add(id);
-      for (const id of snapshot.removed) active.delete(id);
-      lastSeenAt = snapshot.observedAt;
-    }
-    return { active, lastSeenAt, known };
-  }
-
   async productHistory(productId) {
     await this.#load();
-    return (this.#index.productRevisions.get(productId) ?? []).map((record) => ({
-      hash: record.hash,
-      observedAt: record.observedAt,
-      product: structuredClone(record.data),
-    }));
+    return this.#index.productHistory(productId);
   }
 
   async query(query = {}) {
     await this.#load();
-    const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
-    const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
-    const asOf = Number.isFinite(to) ? to : Date.now();
-    const listingStates = new Map();
-    const listingFor = (storeId) => {
-      if (!listingStates.has(storeId)) {
-        listingStates.set(storeId, this.#listingState("specials", storeId, asOf));
-      }
-      return listingStates.get(storeId);
-    };
-    const observations = [];
+    return this.#index.query(query);
+  }
 
-    for (const revisions of this.#index.offerRevisions.values()) {
-      for (const offer of revisions) {
-        const timestamp = eventTime(offer);
-        if (timestamp < from || timestamp > to) continue;
-        const listing = listingFor(offer.storeId);
-        const displayAt = listing.active.has(offer.offerId) && listing.lastSeenAt
-          ? Date.parse(listing.lastSeenAt)
-          : timestamp;
-        const product = this.#revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
-        const store = this.#revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
-        if (!product || !store) continue;
-        if (query.productId && offer.productId !== query.productId) continue;
-        if (query.storeId && offer.storeId !== query.storeId) continue;
-        if (query.retailer && store.data.retailer !== query.retailer) continue;
-        observations.push({
-          product: structuredClone(product.data),
-          store: structuredClone(store.data),
-          price: structuredClone(offer.data.price),
-          ...(offer.data.promotion ? { promotion: structuredClone(offer.data.promotion) } : {}),
-          observedAt: offer.observedAt,
-          ...(listing.known
-            ? listing.active.has(offer.offerId)
-              ? { lastSeenAt: listing.lastSeenAt, isOnSpecial: true }
-              : { isOnSpecial: false }
-            : {}),
-          source: structuredClone(offer.data.source),
-        });
-      }
-    }
-    return filterObservations(observations, query);
+  /**
+   * Record counts by type, distinct retailers across latest store revisions,
+   * and the observedAt span — a passthrough of ArchiveIndex.stats().
+   */
+  async stats() {
+    await this.#load();
+    return this.#index.stats();
   }
 }
 

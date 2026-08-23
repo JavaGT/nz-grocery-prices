@@ -717,7 +717,18 @@ export class JsonlObservationRepository {
    * parent directory only when this call created the file.
    */
   async #persistAdditions(additions) {
-    const existed = this.#fileSignature !== null;
+    // Decide "created" by statting the path IMMEDIATELY before open, not
+    // from the cached load signature: the cache can be stale (external
+    // delete/recreate, or a reset after a failed persist), and only a
+    // true create needs the parent-dir fsync below for its directory
+    // entry to survive a crash.
+    let existed = true;
+    try {
+      await stat(this.filePath);
+    } catch (error) {
+      if (error.code === "ENOENT") existed = false;
+      else throw error;
+    }
     await mkdir(dirname(this.filePath), { recursive: true });
     const separator = this.#endsWithNewline ? "" : "\n";
     const payload =

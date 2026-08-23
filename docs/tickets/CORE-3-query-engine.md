@@ -1,13 +1,14 @@
 # CORE-3 — Indexed query engine
 
-> **Status: COMPLETE — hostile review pending (2026-08-23).** Commits
+> **Status: REVIEW FIXES IN PROGRESS (2026-08-23).** Commits
 > `c0a6df7` (ArchiveIndex extraction) and `8fd3fc7` (parity fixture, stats,
 > performance smoke). `src/repository.js` shrank 1017 → 707 lines. The
 > deterministic pre/post harness proved byte-identical results across 12
 > queries covering revisions, snapshots, retailer changes, out-of-order
 > records, equal timestamps, and product history. Full suite: 592/592.
-> True chronological sorting remains a deliberate follow-up because changing
-> insertion-order semantics would be a behavioral change.
+> Luna's hostile review found two blockers: revisions and snapshots still
+> depended on insertion order. Those are being fixed now, together with
+> candidate indexes, independent baseline parity, and apply-boundary checks.
 
 ## Summary
 Extract in-memory indexing + observation materialization out of

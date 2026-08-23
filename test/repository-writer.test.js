@@ -1,6 +1,6 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir, stat, writeFile, mkdir, rmdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, stat, writeFile, mkdir, rmdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlObservationRepository } from "../src/repository.js";
@@ -128,6 +128,54 @@ describe("writer protocol (CORE-2 M3)", () => {
     // prod:keep was lost with the sabotaged file (disk truth won via reload);
     // the retried batch is fully present exactly once.
     assert.deepEqual(products, ["prod:retry"]);
+  });
+
+  it("a short write (bytesWritten < length) is retried until the full payload lands", async () => {
+    const repository = new JsonlObservationRepository(filePath);
+    await repository.append([obs({ productId: "prod:seed", sourceId: "s" })]);
+
+    // Patch FileHandle.prototype.write so the FIRST call reports a short
+    // write (writes only 3 real bytes, claims bytesWritten: 3), then
+    // delegates for all subsequent calls. Every handle shares this
+    // prototype, so the repository's append write hits it. The prototype
+    // is not a named export of node:fs/promises, so reach it via a probe
+    // handle.
+    const probe = await open(filePath, "r");
+    const prototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    const realWrite = prototype.write;
+    const shortWrite = mock.method(prototype, "write", async function (...args) {
+      if (shortWrite.mock.callCount() === 0) {
+        const [buffer] = args;
+        const truncated = buffer.subarray(0, 3);
+        await realWrite.call(this, truncated, 0);
+        return { bytesWritten: 3, buffer };
+      }
+      return realWrite.apply(this, args);
+    });
+
+    let added;
+    try {
+      added = await repository.append([obs({ productId: "prod:short", sourceId: "sh" })]);
+    } finally {
+      shortWrite.mock.restore();
+    }
+    assert.equal(added, 2); // product + offer (store already seeded)
+
+    // The truncated 3-byte prefix was retried from the right offset, so
+    // every line still parses and no bytes were dropped or duplicated.
+    const contents = await readFile(filePath, "utf8");
+    const lines = contents.split("\n").filter((line) => line.trim() !== "");
+    assert.equal(lines.length, 5); // seed 3 + product + offer
+    for (const line of lines) JSON.parse(line);
+
+    // A reopened instance sees everything the short-write append wrote.
+    const reopened = new JsonlObservationRepository(filePath);
+    const observations = await reopened.query();
+    assert.deepEqual(
+      observations.map((entry) => entry.product.id).sort(),
+      ["prod:seed", "prod:short"],
+    );
   });
 
   it("compact() replaces the inode atomically and preserves data", async () => {

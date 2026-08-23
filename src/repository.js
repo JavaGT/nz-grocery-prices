@@ -125,6 +125,34 @@ function decodeArchiveLine(line, filePath, lineNumber, terminated) {
   return { status: "v2", record: verdict.record, defect };
 }
 
+/**
+ * Write EVERY byte of `payload` to `handle`, then fh.sync() it.
+ *
+ * FileHandle.write() is allowed to resolve with bytesWritten < payload
+ * length (short write), so a single write followed by sync can silently
+ * drop a record tail. This loops from the returned offset until the whole
+ * payload has landed — only then is sync meaningful. Takes a string and
+ * encodes to a Buffer itself so partial-write offsets are BYTE offsets,
+ * not UTF-8 code-unit offsets. Shared by the repository writer paths and
+ * scripts/repair-archive.js.
+ */
+async function writeAllAndSync(handle, payload) {
+  const buffer = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesWritten } = await handle.write(buffer, offset);
+    if (!Number.isInteger(bytesWritten) || bytesWritten <= 0) {
+      throw new Error(
+        `Archive write made no progress (bytesWritten=${bytesWritten} at offset ${offset})`,
+      );
+    }
+    offset += bytesWritten;
+  }
+  await handle.sync();
+}
+
+export { writeAllAndSync };
+
 function filterObservations(observations, query = {}) {
   const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
   const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
@@ -664,8 +692,7 @@ export class JsonlObservationRepository {
       separator + additions.map((record) => encodeRecord(record)).join("\n") + "\n";
     const handle = await open(this.filePath, "a");
     try {
-      await handle.write(payload, null, "utf8");
-      await handle.sync();
+      await writeAllAndSync(handle, payload);
     } finally {
       await handle.close();
     }
@@ -746,8 +773,7 @@ export class JsonlObservationRepository {
     try {
       const handle = await open(tempPath, "w");
       try {
-        await handle.write(content, null, "utf8");
-        await handle.sync();
+        await writeAllAndSync(handle, content);
       } finally {
         await handle.close();
       }

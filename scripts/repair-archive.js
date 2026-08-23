@@ -22,6 +22,7 @@ import { open, realpath, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   JsonlObservationRepository,
+  writeAllAndSync,
 } from "../src/repository.js";
 
 function parseArgs(argv) {
@@ -149,8 +150,9 @@ report.scanned = lines.length;
 async function fsyncFile(path, payload) {
   const handle = await open(path, "w");
   try {
-    await handle.write(payload, null, "utf8");
-    await handle.sync();
+    // writeAllAndSync loops on short writes before fsyncing — a partial
+    // write here would otherwise quarantine/rewrite truncated content.
+    await writeAllAndSync(handle, payload);
   } finally {
     await handle.close();
   }

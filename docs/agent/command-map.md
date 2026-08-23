@@ -36,7 +36,7 @@ suffices for collectors and the legacy dashboard.
 | Legacy dashboard (deprecated) | `npm run dashboard` | 7070 | `DASHBOARD_PORT`, `PRICE_FILE` |
 | Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db` |
 | Run matching | `npm run matching -- --fuzzy` | — | writes to `app.db.product_match_pairs` |
-| Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Rejects `.db` paths; requires `--force` for `data/prices.jsonl`. |
+| Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Takes the `<archive>.lock` while scanning/rewriting (fails fast if a writer holds it; reclaims it if the holder's pid is dead). Rejects `.db` paths (case-insensitive); accepts `--file <path>` or `--file=<path>`; requires `--force` for `data/prices.jsonl`. |
 
 ### Archive writer protocol
 

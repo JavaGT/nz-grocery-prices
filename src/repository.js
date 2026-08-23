@@ -267,6 +267,10 @@ export class JsonlObservationRepository {
     activeListings: new Map(),
   };
   #loaded = false;
+  // Single-flight load promise: created by the first concurrent caller,
+  // awaited by all of them, so records are applied exactly once no matter
+  // how many first-queries race. Cleared by #resetState().
+  #loadPromise = null;
   #lockPath;
   // Stat signature captured when the file was loaded; a mismatch under the
   // lock means another writer touched the file and we must reload.
@@ -469,6 +473,7 @@ export class JsonlObservationRepository {
       activeListings: new Map(),
     };
     this.#loaded = false;
+    this.#loadPromise = null;
     this.#fileSignature = null;
     this.#endsWithNewline = true;
     this.#tornTail = false;
@@ -505,8 +510,42 @@ export class JsonlObservationRepository {
    * decodeArchiveLine (module scope) so scripts/repair-archive.js reuses
    * identical semantics instead of duplicating them.
    */
-  async #load() {
-    if (this.#loaded) return;
+  /**
+   * Load protocol: stream line-by-line so torn tails are detectable.
+   *
+   * - Newline-terminated line failing decode \u2192 hard error naming
+   *   filePath:lineNumber (even when it is the last line).
+   * - Unterminated final bytes: decodes to a valid/legacy record \u2192
+   *   recover it (a crash happened between write and newline); anything
+   *   else \u2192 set #tornTail and skip the fragment.
+   * - Stored hashes are verified against recomputed fingerprints with
+   *   mismatches collected into #loadDefects rather than aborting \u2014
+   *   data still queries, getLoadDefects() surfaces the damage.
+   * - Snapshot offersHash is deliberately NOT recomputed on load:
+   *   deriving it requires replaying listing state across all prior
+   *   snapshots, which is costly and fragile against mid-archive
+   *   corruption. Dedup treats it as stored.
+   *
+   * Line reading/classification lives in readArchiveLines +
+   * decodeArchiveLine (module scope) so scripts/repair-archive.js reuses
+   * identical semantics instead of duplicating them.
+   */
+  #load() {
+    // Single flight: concurrent first callers share one load so records
+    // cannot be applied twice.
+    if (this.#loaded) return Promise.resolve();
+    if (!this.#loadPromise) {
+      this.#loadPromise = this.#loadUncached().catch((error) => {
+        // A failed load can leave partially-applied state; reset so the
+        // next caller starts from a clean slate instead of a half index.
+        this.#resetState();
+        throw error;
+      });
+    }
+    return this.#loadPromise;
+  }
+
+  async #loadUncached() {
     let exists = true;
     try {
       await stat(this.filePath);

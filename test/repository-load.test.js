@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlObservationRepository } from "../src/repository.js";
-import { productRevisionHash } from "../src/archive-records.js";
+import { offerRevisionHash, productRevisionHash } from "../src/archive-records.js";
 
 function obs(overrides = {}) {
   return {
@@ -164,5 +164,85 @@ describe("load protocol (CORE-2 M4)", () => {
       () => repository.query(),
       /archive\.jsonl:1 [\s\S]*snapshot record scope must be/,
     );
+  });
+
+  it("concurrent first queries share one load — no duplicated records", async () => {
+    const offerData = {
+      price: { regularCents: 349 },
+      source: { retailerProductId: "111" },
+    };
+    const offerLine = JSON.stringify({
+      version: 2, type: "offer",
+      offerId: "prod:1\u0000store:1", productId: "prod:1", storeId: "store:1",
+      hash: offerRevisionHash(offerData),
+      observedAt: "2026-08-02T00:00:00.000Z", data: offerData,
+    });
+    const storeData = { id: "store:1", retailer: "testretailer" };
+    const storeLine = JSON.stringify({
+      version: 2, type: "store", storeId: "store:1",
+      hash: productRevisionHash(storeData),
+      observedAt: "2026-08-01T00:00:00.000Z", data: storeData,
+    });
+    await writeFile(
+      filePath,
+      `${cleanProductLine("prod:1", "Milk")}\n${storeLine}\n${offerLine}\n`,
+    );
+    const repository = new JsonlObservationRepository(filePath);
+
+    // Three first-queries race; single-flight must apply the file once,
+    // so every caller sees exactly one observation (not duplicated).
+    const results = await Promise.all([
+      repository.query(),
+      repository.query(),
+      repository.query(),
+    ]);
+    for (const observations of results) {
+      assert.equal(observations.length, 1);
+    }
+    assert.equal((await repository.productHistory("prod:1")).length, 1);
+
+    // On-disk truth: a reopened instance sees exactly one as well.
+    const reopened = new JsonlObservationRepository(filePath);
+    assert.equal((await reopened.query()).length, 1);
+  });
+
+  it("a failed load resets state — the same instance recovers after the file is fixed", async () => {
+    const offerData = {
+      price: { regularCents: 349 },
+      source: { retailerProductId: "111" },
+    };
+    const cleanOfferLine = JSON.stringify({
+      version: 2, type: "offer",
+      offerId: "prod:1\u0000store:1", productId: "prod:1", storeId: "store:1",
+      hash: offerRevisionHash(offerData),
+      observedAt: "2026-08-02T00:00:00.000Z", data: offerData,
+    });
+    const storeData = { id: "store:1", retailer: "testretailer" };
+    const cleanStoreLine = JSON.stringify({
+      version: 2, type: "store", storeId: "store:1",
+      hash: productRevisionHash(storeData),
+      observedAt: "2026-08-01T00:00:00.000Z", data: storeData,
+    });
+    // Self-consistent archive: product + store + one offer → one observation.
+    const cleanArchive = `${cleanProductLine("prod:1", "Milk")}\n${cleanStoreLine}\n${cleanOfferLine}\n`;
+    await writeFile(filePath, cleanArchive);
+    const repository = new JsonlObservationRepository(filePath);
+
+    // First query hits a corrupt mid-file line: load throws.
+    const corrupt = `${cleanProductLine("prod:1", "Milk")}\n{"version":3,"type":"product"}\n${cleanStoreLine}\n${cleanOfferLine}\n`;
+    await writeFile(filePath, corrupt);
+    await assert.rejects(() => repository.query(), /archive\.jsonl:2/);
+
+    // Repair the file on disk; the SAME instance must load it cleanly —
+    // no half-applied index, no duplicates, no stale torn/defect state.
+    await writeFile(filePath, cleanArchive);
+    const observations = await repository.query();
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].product.id, "prod:1");
+    assert.equal(observations[0].price.regularCents, 349);
+    // The product revision that WAS applied before the corrupt line threw
+    // must not appear twice (a half-applied index would duplicate it).
+    assert.equal((await repository.productHistory("prod:1")).length, 1);
+    assert.equal(repository.getLoadDefects().length, 0);
   });
 });

@@ -127,7 +127,7 @@ describe('atomic rollback on rebuild failure', () => {
     assert.equal(originalCnt, 1);
 
     const r = new ProjectionRepository(jsonlPath, dbPath);
-    assert.throws(() => r.rebuild(), /no matching store revision/);
+    assert.throws(() => r.rebuild(), /no store revision/);
     assert.equal(getProductCount(dbPath), originalCnt, 'old DB should be preserved');
 
     rmSync(dir, { recursive: true });

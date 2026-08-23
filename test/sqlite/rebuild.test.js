@@ -306,11 +306,54 @@ describe('malformed line handling', () => {
     const { dir } = tmp();
     const jsonlPath = join(dir, 'missing-context.jsonl');
     const dbPath = join(dir, 'missing-context.db');
-    writeFileSync(jsonlPath, v2offer('r:p1', 'r:missing') + '\n');
+    writeFileSync(jsonlPath, [
+      v2product('r:p1'),
+      v2offer('r:p1', 'r:missing'),
+    ].join('\n') + '\n');
     try {
       const r = new ProjectionRepository(jsonlPath, dbPath);
-      assert.throws(() => r.rebuild(), /no matching store revision/);
+      assert.throws(() => r.rebuild(), /no store revision/);
       assert.equal(existsSync(dbPath), false, 'lossy projection is never published');
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+
+  it('refuses offers with missing products and snapshots with orphan offer IDs', () => {
+    const { dir } = tmp();
+    const missingProductPath = join(dir, 'missing-product.jsonl');
+    const missingProductDb = join(dir, 'missing-product.db');
+    writeFileSync(missingProductPath, [
+      v2store('r:s1'),
+      v2offer('r:missing', 'r:s1'),
+    ].join('\n') + '\n');
+
+    const orphanSnapshotPath = join(dir, 'orphan-snapshot.jsonl');
+    const orphanSnapshotDb = join(dir, 'orphan-snapshot.db');
+    writeFileSync(orphanSnapshotPath, [
+      v2store('r:s1'),
+      JSON.stringify({
+        version: 2,
+        type: 'snapshot',
+        scope: 'specials',
+        storeId: 'r:s1',
+        observedAt: '2026-07-13T12:00:00.000Z',
+        offersHash: 'h'.repeat(64),
+        offerCount: 1,
+        added: ['r:p1\x00r:s1'],
+        removed: [],
+      }),
+    ].join('\n') + '\n');
+
+    try {
+      assert.throws(
+        () => new ProjectionRepository(missingProductPath, missingProductDb).rebuild(),
+        /has no product revision/,
+      );
+      assert.throws(
+        () => new ProjectionRepository(orphanSnapshotPath, orphanSnapshotDb).rebuild(),
+        /has no offer revision/,
+      );
+      assert.equal(existsSync(missingProductDb), false);
+      assert.equal(existsSync(orphanSnapshotDb), false);
     } finally { rmSync(dir, { recursive: true }); }
   });
 

@@ -15,13 +15,14 @@ function statSignature(filePath) {
       mtimeNs: stats.mtimeNs,
       size: stats.size,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error(`Cannot stat JSONL archive ${filePath}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 
 function sameSignature(a, b) {
-  if (a === null || b === null) return a === b;
   return a.dev === b.dev && a.ino === b.ino &&
     a.mtimeNs === b.mtimeNs && a.size === b.size;
 }
@@ -131,15 +132,17 @@ export class ProjectionRepository {
     if (!force) {
       // readOnly so the skip CHECK never creates an empty DB file as a
       // side effect — a refused rebuild must leave no db artifact.
+      let existingDb = null;
       try {
-        const existingDb = new DatabaseSync(dbPath, { readOnly: true });
+        existingDb = new DatabaseSync(dbPath, { readOnly: true });
         const row = existingDb.prepare("SELECT value FROM _meta WHERE key = 'jsonl_fingerprint'").get();
-        existingDb.close();
         if (row && row.value === fingerprint) {
           return { status: 'skipped', fingerprint };
         }
       } catch {
         // DB missing or corrupt — rebuild
+      } finally {
+        existingDb?.close();
       }
     }
 
@@ -207,20 +210,24 @@ export class ProjectionRepository {
       let recordsImported = 0;
       const unresolved = [];
       for (const entry of staged.product) {
-        this.#insertRecord(tmpDb, entry.record);
-        recordsImported++;
+        const result = this.#insertRecord(tmpDb, entry.record);
+        if (result === true) recordsImported++;
+        else unresolved.push({ ...entry, reason: result });
       }
       for (const entry of staged.store) {
-        this.#insertRecord(tmpDb, entry.record);
-        recordsImported++;
+        const result = this.#insertRecord(tmpDb, entry.record);
+        if (result === true) recordsImported++;
+        else unresolved.push({ ...entry, reason: result });
       }
       for (const entry of staged.offer) {
-        if (this.#insertRecord(tmpDb, entry.record)) recordsImported++;
-        else unresolved.push(entry);
+        const result = this.#insertRecord(tmpDb, entry.record);
+        if (result === true) recordsImported++;
+        else unresolved.push({ ...entry, reason: result });
       }
       for (const entry of staged.snapshot) {
-        if (this.#insertRecord(tmpDb, entry.record)) recordsImported++;
-        else unresolved.push(entry);
+        const result = this.#insertRecord(tmpDb, entry.record);
+        if (result === true) recordsImported++;
+        else unresolved.push({ ...entry, reason: result });
       }
 
       // A record whose store context is defined NOWHERE in this archive
@@ -230,14 +237,11 @@ export class ProjectionRepository {
       if (unresolved.length > 0) {
         for (const entry of unresolved) {
           errors++;
-          errorDetails.push(
-            `Line ${entry.lineNumber}: ${entry.record.type} references store context ` +
-              `${entry.record.storeId}, which has no store revision in this archive`
-          );
+          errorDetails.push(`Line ${entry.lineNumber}: ${entry.reason}`);
         }
         throw new Error(
-          `Projection build failed: ${unresolved.length} record(s) reference store contexts ` +
-            `with no matching store revision. First: ${errorDetails[errorDetails.length - unresolved.length]}. ` +
+          `Projection build failed: ${unresolved.length} unresolved record(s). ` +
+            `First: ${errorDetails[errorDetails.length - unresolved.length]}. ` +
             `No projection was published.`
         );
       }
@@ -319,16 +323,15 @@ export class ProjectionRepository {
     }
   }
 
-  // Returns true when the record was inserted; false when its store
-  // context could not be resolved (caller refuses rather than silently
-  // dropping the record). Unknown types return false as well.
+  // Returns true when the record was inserted; otherwise returns a reason
+  // for the caller to report instead of silently dropping the record.
   #insertRecord(db, record) {
     switch (record.type) {
       case 'product':  this.#insertProduct(db, record); return true;
       case 'store':    this.#insertStore(db, record); return true;
       case 'offer':    return this.#insertOffer(db, record);
       case 'snapshot': return this.#insertSnapshot(db, record);
-      default:         return false;
+      default:         return 'unknown archive record type';
     }
   }
 
@@ -417,10 +420,16 @@ export class ProjectionRepository {
     const storeId = record.storeId;
     const retailerId = storeId.split(':')[0];
 
+    const product = db.prepare("SELECT id FROM products WHERE id = ?").get(record.productId);
+    if (!product) {
+      return `offer ${record.offerId || record.offerKey} references product ${record.productId}, which has no product revision in this archive`;
+    }
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
     // Unresolved context: report false so the caller refuses the build
     // instead of silently dropping this offer (pre-CORE-6-review bug).
-    if (!context) return false;
+    if (!context) {
+      return `offer ${record.offerId || record.offerKey} references store context ${storeId}, which has no store revision in this archive`;
+    }
     db.prepare(`
       INSERT OR IGNORE INTO offer_revisions(
         offer_key, product_id, context_id,
@@ -449,7 +458,17 @@ export class ProjectionRepository {
     const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
     // Unresolved context: report false so the caller refuses the build
     // instead of silently dropping this snapshot.
-    if (!context) return false;
+    if (!context) {
+      return `snapshot for ${storeId} references a store context with no store revision in this archive`;
+    }
+
+    const referencedOffers = [...new Set([...(record.added || []), ...(record.removed || [])])];
+    const missingOffer = referencedOffers.find((offerKey) =>
+      !db.prepare("SELECT offer_key FROM offer_revisions WHERE offer_key = ?").get(offerKey)
+    );
+    if (missingOffer) {
+      return `snapshot for ${storeId} references offer ${missingOffer}, which has no offer revision in this archive`;
+    }
 
     db.prepare(`
       INSERT INTO special_snapshots(context_id, observed_at, offers_hash, offer_count, added, removed)

@@ -27,7 +27,7 @@
  *        --file=<archive.jsonl>) [--dry-run] [--force]
  */
 
-import { open, realpath, rename, rm } from "node:fs/promises";
+import { open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   JsonlObservationRepository,
@@ -251,7 +251,19 @@ try {
       return;
     }
 
-    // ---- apply mode: quarantine → backup → temp+rename rewrite ----
+    // ---- apply mode: backup → quarantine → temp+rename rewrite ----
+
+    // Backup the ORIGINAL BYTES read at scan time (not a re-serialization of
+    // parsed lines), so blank lines, ordering, and the exact final newline
+    // state are preserved byte-for-byte.
+    const originalBytes = await readFile(filePath);
+    const backupPath =
+      `${filePath}.pre-v2-migration-${new Date().toISOString().replaceAll(":", "-")}`;
+    await fsyncFile(backupPath, originalBytes);
+    report.backupFile = backupPath;
+    // Durable BEFORE the live-file rename below: a crash in between must
+    // not lose both the backup and the migrated file together.
+    await fsyncParentDir(backupPath);
 
     if (quarantined.length > 0) {
       const quarantinePath =
@@ -261,15 +273,8 @@ try {
         quarantined.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
       );
       report.quarantineFile = quarantinePath;
-      // Durable BEFORE the live-file rename below: a crash in between must
-      // not lose both the quarantine entry and the original bytes together.
       await fsyncParentDir(quarantinePath);
     }
-
-    const backupPath =
-      `${filePath}.pre-v2-migration-${new Date().toISOString().replaceAll(":", "-")}`;
-    await fsyncFile(backupPath, lines.map((entry) => entry.line).join("\n") + "\n");
-    report.backupFile = backupPath;
 
     const content = outputLines
       .map((entry) =>

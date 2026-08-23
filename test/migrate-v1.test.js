@@ -303,6 +303,35 @@ describe("migrate-v1-archive CLI (CORE-6)", () => {
     assert.notEqual(report.backupFile, filePath);
   });
 
+  it("backup preserves the original bytes EXACTLY — blank lines and missing final newline", async () => {
+    // Blank lines between records + no trailing newline: a re-serialization
+    // of parsed lines would normalize these away; the backup must not.
+    const exact =
+      "\n" +
+      v1({ productId: "prod:1", name: "Milk", sourceId: "s1" }) + "\n" +
+      "\n\n" +
+      v2ProductLine("prod:9", "Seed"); // NO trailing newline
+    await writeFile(filePath, exact);
+
+    const report = JSON.parse(
+      (await run("node", [cli, "--file", filePath])).stdout,
+    );
+    assert.equal(report.v1, 1);
+    assert.ok(report.backupFile);
+    assert.equal(
+      await readFile(report.backupFile, "utf8"),
+      exact,
+      "backup is byte-identical to the original including blank lines and tail",
+    );
+
+    // The migrated file itself stays parseable despite the blank lines.
+    const migrated = await readFile(filePath, "utf8");
+    assert.match(migrated, /\n$/, "rewritten file is newline-terminated");
+    for (const line of migrated.split("\n").filter((entry) => entry !== "")) {
+      JSON.parse(line); // must not throw
+    }
+  });
+
   it("second run is a no-op: no rewrite, no new backup", async () => {
     await writeFile(filePath, [
       v1({ productId: "prod:1", sourceId: "s1" }),

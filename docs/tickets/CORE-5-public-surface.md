@@ -1,5 +1,18 @@
 # CORE-5 — Public surface & types
 
+> **Status: COMPLETE + hostile-reviewed (2026-08-24).** Commits `8161b9f`,
+> `5bc2fb2`, review fixes in `bdf334a`. Grok review: no blocker. Root exports
+> exactly the eight ticket names; domain shapes are single-sourced in
+> `src/domain/observation.d.ts` (root + adapters re-export, no local copies);
+> AgentFeed name fields are optional and runtime-pinned; freshchoice subpath
+> now declares `listStores`/`storeListUrl`/`parseFreshChoiceStoreList`;
+> fixtures import the real module and the exports map is asserted. Suite:
+> **631/631**, pack:check green.
+>
+> Deferred (owner decision, not a defect): `"files"` still ships `scripts/`
+> and app code (`src/app`, `src/sqlite`) inside the tarball — harmless while
+> unpublished, worth trimming before any real npm publish.
+
 ## Summary
 Make the package's public surface coherent and honest: a small root export
 list, `.d.ts` files that match reality, a README quickstart.

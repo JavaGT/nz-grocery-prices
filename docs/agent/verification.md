@@ -19,11 +19,11 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 
 | Touched layer | Run |
 |---|---|
-| `src/adapters/` | `node --test test/adapters/` |
-| `src/sqlite/` | `node --test test/sqlite/` |
-| `src/server/`, `src/app/` | `node --test test/server/ test/app/` |
-| `src/matching/` | `node --test test/matching/` |
-| `public/` (frontend) | `node --test test/frontend/` |
+| `src/adapters/` | `node --test 'test/adapters/*.test.js'` |
+| `src/sqlite/` | `node --test 'test/sqlite/*.test.js'` |
+| `src/server/`, `src/app/` | `node --test 'test/server/*.test.js' 'test/app/*.test.js'` |
+| `src/matching/` | `node --test 'test/matching/*.test.js'` |
+| `public/` (frontend) | `node --test 'test/frontend/*.test.js'` |
 | `scripts/archive-daily-local.sh` | `sh -n scripts/archive-daily-local.sh && node --test test/local-archive-runner.test.js` |
 | `src/archive.js`, `src/analytics.js` | `node --test test/archive.test.js test/analytics.test.js` |
 | `src/index.js` + `.d.ts` public surface | `node --test test/types-surface.test.js`; `npm run pack:check` after any package.json change |

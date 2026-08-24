@@ -1,4 +1,34 @@
-import type { PriceObservation, Store } from "../index.js";
+/**
+ * Public contract for nz-grocery-prices/warehouse. Hand-maintained like
+ * src/index.d.ts; domain shapes are local copies (see that file).
+ */
+export interface Store {
+  id: string;
+  retailer: string;
+  name?: string;
+  address?: string;
+  region?: string;
+  [key: string]: unknown;
+}
+
+export interface PriceObservation {
+  product: Record<string, unknown> & { id: string };
+  store: Store;
+  price: {
+    regularCents: number;
+    promoCents?: number;
+    memberCents?: number;
+    [key: string]: unknown;
+  };
+  observedAt: string;
+  lastSeenAt?: string;
+  isOnSpecial?: boolean;
+  promotion?: Record<string, unknown>;
+  source: {
+    retailerProductId: string;
+    [key: string]: unknown;
+  };
+}
 
 export interface WarehouseClientOptions {
   origin?: string;

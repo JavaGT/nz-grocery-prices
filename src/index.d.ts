@@ -1,48 +1,80 @@
+/**
+ * Hand-maintained public type contract for nz-grocery-prices (CORE-5).
+ *
+ * Declares exactly the runtime exports of ./index.js — nothing else is
+ * public. Retailer client contracts live beside their implementations
+ * (src/adapters/*.d.ts) behind the package's subpath exports. The agent-feed
+ * shape (AgentFeed) is an intentionally stable contract.
+ *
+ * Kept honest by test/types-surface.test.js: the runtime export-name set,
+ * these declarations, and consumer fixtures must all agree.
+ */
+
+// ---- Domain data shapes ----
+
+/** A collected store (price scope). Unknown extra fields are preserved. */
 export interface Store {
   id: string;
-  name: string;
-  banner?: string;
+  retailer: string;
+  name?: string;
   address?: string;
   region?: string;
   [key: string]: unknown;
 }
 
+/** A collected product. Unknown extra fields are preserved. */
+export interface ProductInfo {
+  id: string;
+  name?: string;
+  brand?: string;
+  gtin?: string;
+  categories?: string[];
+  images?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+/**
+ * Retailer-reported promotion metadata. startsAt/endsAt bound when promo
+ * cents count as active (boundaries inclusive); savePercent is advisory.
+ */
+export interface PromotionInfo {
+  startsAt?: string;
+  endsAt?: string;
+  savePercent?: number;
+  [key: string]: unknown;
+}
+
+/** One recorded price observation (canonical v2 domain shape). */
 export interface PriceObservation {
-  product: {
-    id: string;
-    name: string;
-    brand?: string;
-    gtin?: string;
-    categories?: string[];
-    images?: Record<string, string>;
-  };
-  store: {
-    id: string;
-    retailer: string;
-    name: string;
-    address?: string;
-    region?: string;
-  };
+  product: ProductInfo;
+  store: Store;
   price: {
-    currency: "NZD";
     regularCents: number;
     promoCents?: number;
     memberCents?: number;
-    comparative?: Record<string, unknown>;
+    currency?: "NZD";
+    [key: string]: unknown;
   };
-  promotion?: Record<string, unknown>;
   observedAt: string;
   /** Last full specials snapshot in which this offer was present. */
   lastSeenAt?: string;
-  /** True/false when a full specials snapshot is available; absent for legacy data. */
+  /** True/false when a full specials snapshot is available. */
   isOnSpecial?: boolean;
+  promotion?: PromotionInfo;
   source: {
     retailerProductId: string;
-    adapter: string;
-    url: string;
+    adapter?: string;
+    url?: string;
+    [key: string]: unknown;
   };
 }
 
+/** Which candidate price an evaluation selected. */
+export type EffectivePriceKind = "regular" | "promo" | "member";
+
+// ---- Query shapes ----
+
+/** Repository/history filter: predicate match plus inclusive observedAt window. */
 export interface ObservationQuery {
   productId?: string;
   storeId?: string;
@@ -51,40 +83,96 @@ export interface ObservationQuery {
   to?: string;
 }
 
-export interface SaleQuery {
-  at?: string;
-  retailer?: string;
-  storeId?: string;
+/** Tuning knobs shared by the sale analytics. */
+export interface SaleTuning {
+  /** Restrict to these product IDs. */
   productIds?: string[];
+  /** How recent the newest observation must be, in days (default 7). */
   freshWithinDays?: number;
-  baselineDays?: number;
-  minSamples?: number;
-  minDropPercent?: number;
-  includeAllTimeLows?: boolean;
+  /** "member" admits member-only cents (default "public"). */
   pricePolicy?: "public" | "member";
 }
 
+/** Options for history-backed sale detection. */
+export interface HistorySaleOptions extends SaleTuning {
+  /** Baseline look-back window in days (default 90). */
+  baselineDays?: number;
+  /** Minimum baseline samples required (default 2). */
+  minSamples?: number;
+  /** Smallest drop from baseline to report, in percent (default 0). */
+  minDropPercent?: number;
+  /** Report strict new all-time lows regardless of drop size (default true). */
+  includeAllTimeLows?: boolean;
+}
+
+/**
+ * Query for the PriceArchive sale methods: same tuning knobs plus optional
+ * scoping. `at` defaults to the archive's injected clock when omitted.
+ */
+export interface ArchiveSaleQuery extends HistorySaleOptions {
+  at?: string;
+  retailer?: string;
+  storeId?: string;
+}
+
+// ---- Results ----
+
+/** A history-backed price drop for one offer. */
 export interface Sale {
-  product: PriceObservation["product"];
-  store: PriceObservation["store"];
-  current: { cents: number; kind: "regular" | "promo" | "member"; observedAt: string };
+  product: ProductInfo;
+  store: Store;
+  current: { cents: number; kind: EffectivePriceKind; observedAt: string };
   baseline: { averageCents: number; sampleCount: number; days: number };
   dropPercent: number;
   previousLowCents: number;
   isAllTimeLow: boolean;
-  promotion?: Record<string, unknown>;
+  promotion?: PromotionInfo;
 }
 
+/** A currently-advertised promotion for one offer. */
 export interface OngoingSale {
-  product: PriceObservation["product"];
-  store: PriceObservation["store"];
-  current: { cents: number; kind: "regular" | "promo" | "member"; observedAt: string };
+  product: ProductInfo;
+  store: Store;
+  current: { cents: number; kind: EffectivePriceKind; observedAt: string };
   regularCents: number;
   savePercent?: number;
-  promotion: Record<string, unknown>;
+  promotion: PromotionInfo;
 }
 
-export interface AgentFeedSale {
+/** One effective-price point of a buildPriceSeries series. */
+export interface PriceSeriesPoint {
+  observedAt: string;
+  cents: number;
+  kind: EffectivePriceKind;
+}
+
+/** Per-offer effective-price history, sorted ascending by observedAt. */
+export interface PriceSeries {
+  productId: string;
+  storeId: string;
+  points: PriceSeriesPoint[];
+}
+
+/** Stable agent-feed entry: a history-backed sale. */
+export interface AgentFeedHistorySale {
+  productId: string;
+  productName: string;
+  brand?: string;
+  storeId: string;
+  storeName: string;
+  retailer: string;
+  currentCents: number;
+  priceKind: EffectivePriceKind;
+  baselineAverageCents: number;
+  baselineSampleCount: number;
+  dropPercent: number;
+  isAllTimeLow: boolean;
+  observedAt: string;
+  promotion?: PromotionInfo;
+}
+
+/** Stable agent-feed entry: a currently-advertised promotion. */
+export interface AgentFeedOngoingSale {
   productId: string;
   productName: string;
   brand?: string;
@@ -93,131 +181,167 @@ export interface AgentFeedSale {
   storeName: string;
   retailer: string;
   currentCents: number;
-  priceKind: "regular" | "promo" | "member";
-  observedAt: string;
-  promotion?: Record<string, unknown>;
-  regularCents?: number;
+  regularCents: number;
+  priceKind: EffectivePriceKind;
   savePercent?: number;
-  baselineAverageCents?: number;
-  baselineSampleCount?: number;
-  dropPercent?: number;
-  isAllTimeLow?: boolean;
+  observedAt: string;
+  promotion: PromotionInfo;
 }
 
+/**
+ * The agent-oriented feed. Deliberately two separate lists — advertised
+ * promotions (no history required) and history-backed drops — so consumers
+ * never guess which evidence backs an entry.
+ */
 export interface AgentFeed {
   generatedAt: string;
   currency: "NZD";
-  ongoingSales: AgentFeedSale[];
-  sales: AgentFeedSale[];
+  ongoingSales: AgentFeedOngoingSale[];
+  sales: AgentFeedHistorySale[];
 }
 
+// ---- Repositories ----
+
+/** Options for appending observations. */
+export interface AppendOptions {
+  /** Listing scope for snapshot records (e.g. "specials"). */
+  snapshotScope?: string;
+}
+
+/** A content revision of one product, oldest first within productHistory. */
+export interface ProductRevision {
+  hash: string;
+  observedAt: string;
+  product: ProductInfo;
+}
+
+/**
+ * Storage seam for observations. PriceArchive depends on this interface, so
+ * alternative backends can replace the supplied implementations.
+ */
 export interface ObservationRepository {
-  append(observations: PriceObservation[], options?: { snapshotScope?: string }): Promise<number>;
+  append(
+    observations: readonly PriceObservation[],
+    options?: AppendOptions,
+  ): Promise<number>;
   query(query?: ObservationQuery): Promise<PriceObservation[]>;
   productHistory?(productId: string): Promise<ProductRevision[]>;
 }
 
-export interface ProductRevision {
-  hash: string;
-  observedAt: string;
-  product: PriceObservation["product"];
+/** Hash mismatch found while loading an archive (non-fatal damage report). */
+export interface ArchiveLoadDefect {
+  line: number;
+  type: "product" | "store" | "offer";
+  id: string;
+  stored: string;
+  recomputed: string;
 }
 
-export class MemoryObservationRepository implements ObservationRepository {
-  append(observations: PriceObservation[], options?: { snapshotScope?: string }): Promise<number>;
+/** Summary of indexed archive state. Null dates when empty. */
+export interface ArchiveStats {
+  records: { product: number; store: number; offer: number; snapshot: number };
+  retailers: string[];
+  firstObservedAt: string | null;
+  lastObservedAt: string | null;
+}
+
+/** In-memory repository: deduplicates, keeps insertion order, holds no files. */
+export declare class MemoryObservationRepository implements ObservationRepository {
+  append(
+    observations: readonly PriceObservation[],
+    options?: AppendOptions,
+  ): Promise<number>;
   query(query?: ObservationQuery): Promise<PriceObservation[]>;
   productHistory(productId: string): Promise<ProductRevision[]>;
 }
 
-export class JsonlObservationRepository implements ObservationRepository {
+/**
+ * Durable append-only JSONL archive: cross-process locking, fsynced appends,
+ * atomic compaction, tail-tolerant loading, v1-record refusal.
+ */
+export declare class JsonlObservationRepository implements ObservationRepository {
   constructor(filePath?: string);
-  filePath: string;
-  append(observations: PriceObservation[], options?: { snapshotScope?: string }): Promise<number>;
+  readonly filePath: string;
+  append(
+    observations: readonly PriceObservation[],
+    options?: AppendOptions,
+  ): Promise<number>;
   query(query?: ObservationQuery): Promise<PriceObservation[]>;
+  /** Deduplicate repeated revisions/snapshots via atomic file replacement. */
   compact(): Promise<{ records: number; file: string }>;
   productHistory(productId: string): Promise<ProductRevision[]>;
+  /** Record counts by type, distinct retailers, and the observedAt span. */
+  stats(): Promise<ArchiveStats>;
+  /** Hash mismatches from the most recent load (empty when undamaged). */
+  getLoadDefects(): ArchiveLoadDefect[];
 }
 
-export class PriceArchive {
-  constructor(repository: ObservationRepository);
-  repository: ObservationRepository;
-  record(observations: PriceObservation[], options?: { snapshotScope?: string }): Promise<number>;
+// ---- Facade ----
+
+/**
+ * Repository-backed facade adding analytics queries. The optional clock
+ * (default wall clock) is the ONLY time source: queries omitting `at`
+ * derive it here, keeping the analytics functions pure.
+ */
+export declare class PriceArchive {
+  constructor(
+    repository: ObservationRepository,
+    options?: { clock?: () => Date },
+  );
+  readonly repository: ObservationRepository;
+  record(
+    observations: readonly PriceObservation[],
+    options?: AppendOptions,
+  ): Promise<number>;
   history(query?: ObservationQuery): Promise<PriceObservation[]>;
   productHistory(productId: string): Promise<ProductRevision[]>;
-  findSales(query?: SaleQuery): Promise<Sale[]>;
-  ongoingSales(query?: SaleQuery): Promise<OngoingSale[]>;
-  agentFeed(query?: SaleQuery): Promise<AgentFeed>;
+  findSales(query?: ArchiveSaleQuery): Promise<Sale[]>;
+  ongoingSales(query?: ArchiveSaleQuery): Promise<OngoingSale[]>;
+  agentFeed(query?: ArchiveSaleQuery): Promise<AgentFeed>;
 }
 
-export function calculateSales(observations: PriceObservation[], query?: SaleQuery): Sale[];
+// ---- Pure functions ----
+
+/**
+ * Validates one observation, throwing a TypeError naming every problem
+ * (field paths joined by "; "); returns the input unchanged when valid.
+ */
+export function parseObservation<Observation extends PriceObservation>(
+  observation: Observation,
+): Observation;
+
+/**
+ * History-backed sale detection across all offers in `observations`.
+ * Requires an explicit `at` (ISO string) — evaluation is deterministic,
+ * never wall-clock. Baseline samples evaluate at their own observedAt.
+ */
+export function calculateSales(
+  observations: readonly PriceObservation[],
+  query: HistorySaleOptions & { at: string },
+): Sale[];
+
+/**
+ * Currently-advertised promotions: latest observation per offer, still
+ * listed, promotion active at `at`. Requires an explicit `at` (ISO string).
+ */
 export function calculateOngoingSales(
-  observations: PriceObservation[],
-  query?: SaleQuery,
+  observations: readonly PriceObservation[],
+  query: SaleTuning & { at: string; retailer?: string; storeId?: string },
 ): OngoingSale[];
+
+/**
+ * One series per productId+storeId pair, points ascending by observedAt,
+ * each priced with promotion activity evaluated at that point. Series sort
+ * by productId then storeId; empty input yields [].
+ */
+export function buildPriceSeries(
+  observations: readonly PriceObservation[],
+  options?: { pricePolicy?: "public" | "member" },
+): PriceSeries[];
+
+/** Renders sales into the stable agent-feed shape. */
 export function toAgentFeed(
-  sales: Sale[],
+  sales: readonly Sale[],
   generatedAt: string,
-  ongoingSales?: OngoingSale[],
+  ongoingSales?: readonly OngoingSale[],
 ): AgentFeed;
-
-export interface FoodstuffsClientOptions {
-  banner?: "paknsave" | "newworld";
-  webOrigin?: string;
-  apiOrigin?: string;
-  userAgent?: string;
-  fingerprint?: string;
-  fetch?: typeof fetch;
-}
-
-export interface CollectOptions {
-  storeId: string;
-  store?: Store;
-  page?: number;
-  maxPages?: number;
-  hitsPerPage?: number;
-  query?: string;
-  region?: string;
-  onPromotion?: boolean;
-  observedAt?: string;
-}
-
-export class FoodstuffsClient {
-  constructor(options?: FoodstuffsClientOptions);
-  banner: string;
-  retailer: string;
-  apiBanner: string;
-  webOrigin: string;
-  apiOrigin: string;
-  userAgent: string;
-  listStores(options?: { query?: string }): Promise<Store[]>;
-  getStore(storeId: string): Promise<Store>;
-  searchProducts(options: CollectOptions): Promise<Record<string, any>>;
-  listDeals(options: CollectOptions): Promise<Record<string, any>>;
-  listMobileDeals(options: CollectOptions): Promise<Record<string, any>>;
-  collectProducts(options: CollectOptions): Promise<PriceObservation[]>;
-  collectDeals(options: CollectOptions): Promise<PriceObservation[]>;
-}
-
-export class PaknsaveClient extends FoodstuffsClient {}
-export class NewWorldClient extends FoodstuffsClient {}
-
-export function toPriceObservation(
-  product: Record<string, any>,
-  store: Store,
-  options?: { retailer?: string; observedAt?: string },
-): PriceObservation | undefined;
-
-export {
-  WoolworthsClient,
-  toWoolworthsObservation,
-} from "./adapters/woolworths.js";
-export {
-  FreshChoiceClient,
-  parseFreshChoiceProducts,
-  toFreshChoiceObservation,
-} from "./adapters/freshchoice.js";
-export {
-  WarehouseClient,
-  parseWarehouseProducts,
-  toWarehouseObservation,
-} from "./adapters/warehouse.js";

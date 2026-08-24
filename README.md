@@ -296,40 +296,71 @@ output and error logs are in `/tmp` as named by the template.
 
 ## Library API
 
+The package root (`nz-grocery-prices`) exports a small, stable surface:
+`PriceArchive`, `JsonlObservationRepository`, `MemoryObservationRepository`,
+`parseObservation`, `calculateSales`, `calculateOngoingSales`,
+`buildPriceSeries`, and `toAgentFeed`. Types live in `src/index.d.ts`.
+
+### Quickstart
+
+Record observations into an archive, then query history, sales, and the
+agent feed:
+
 ```js
 import {
   JsonlObservationRepository,
-  PaknsaveClient,
+  MemoryObservationRepository,
   PriceArchive,
+  parseObservation,
 } from "nz-grocery-prices";
 
-const client = new PaknsaveClient();
-const [store] = await client.listStores({ query: "Royal Oak" });
-const observations = await client.collectDeals({
-  storeId: store.id,
-  store,
-});
+// Pick a repository: durable JSONL file, or in-memory for tests.
+const repository = process.env.ARCHIVE
+  ? new JsonlObservationRepository(process.env.ARCHIVE)
+  : new MemoryObservationRepository();
+const archive = new PriceArchive(repository);
 
-const archive = new PriceArchive(
-  new JsonlObservationRepository("data/prices.jsonl"),
-);
-await archive.record(observations, { snapshotScope: "specials" });
-
-const currentPromotions = await archive.ongoingSales({
-  retailer: "paknsave",
-  freshWithinDays: 7,
+// Record: validate, then persist (deduplicated per offer revision).
+const observation = parseObservation({
+  product: { id: "foodstuffs:5226969-ea-000", name: "Butter 500g", brand: "Anchor" },
+  store: { id: "paknsave:001", retailer: "paknsave", name: "Royal Oak" },
+  price: { currency: "NZD", regularCents: 500, promoCents: 350 },
+  observedAt: new Date().toISOString(),
+  promotion: { savePercent: 30 },
+  source: { retailerProductId: "5226969-ea-000", adapter: "foodstuffs-paknsave" },
 });
+await archive.record([observation], { snapshotScope: "specials" });
 
-const agentFeed = await archive.agentFeed({
-  productIds: ["foodstuffs:5226969-ea-000"],
-  minDropPercent: 20,
-  baselineDays: 90,
-  minSamples: 4,
-  includeAllTimeLows: true,
-});
+// Query.
+const history = await archive.history({ productId: observation.product.id });
+const revisions = await archive.productHistory(observation.product.id);
+const sales = await archive.findSales({ minDropPercent: 20 });   // vs baseline
+const ongoing = await archive.ongoingSales({ retailer: "paknsave" }); // advertised
+const feed = await archive.agentFeed({});                        // agent JSON
+
+// Or call the pure functions directly (deterministic: pass at explicitly):
+// calculateSales(observations, { at }), calculateOngoingSales(...),
+// buildPriceSeries(observations), toAgentFeed(sales, generatedAt).
 ```
 
-Retailer clients are exported from the package root and as subpath exports: `nz-grocery-prices/foodstuffs`, `/woolworths`, `/freshchoice`, and `/warehouse`. Collection and storage are separate, so another repository implementation can replace the supplied memory and JSONL repositories.
+### API
+
+| Export | Purpose |
+| --- | --- |
+| `PriceArchive` | Facade over a repository: `record`, `history`, `productHistory`, `findSales`, `ongoingSales`, `agentFeed`. Injects time so analytics stay pure. |
+| `JsonlObservationRepository` | Durable append-only JSONL archive: locking, fsynced appends, atomic compaction, tail-tolerant load, v1 refusal. |
+| `MemoryObservationRepository` | In-memory repository for tests; same interface. |
+| `parseObservation` | Validates one observation or throws `TypeError` naming every problem. |
+| `calculateSales` | History-backed drops from the recent baseline (needs explicit `at`). |
+| `calculateOngoingSales` | Currently-advertised promotions (needs explicit `at`). |
+| `buildPriceSeries` | Per-offer effective-price histories with promotion-aware points. |
+| `toAgentFeed` | Renders sales into the stable two-list agent feed. |
+
+Retailer clients are not at the root; import them from the subpath exports
+`nz-grocery-prices/foodstuffs`, `/woolworths`, `/freshchoice`, and
+`/warehouse` (see each `src/adapters/*.d.ts`). Collection and storage are
+separate, so another repository implementation can replace the supplied
+memory and JSONL repositories.
 
 Foodstuffs product IDs use the shared `foodstuffs:` namespace, allowing one favourite ID to match that product at both PAK'nSAVE and New World when their source SKU agrees. Other product IDs remain retailer-namespaced; cross-chain matching can use GTINs where retailers publish them. Every collected store is retained as a separate offer for that product, so a favourite can be compared across stores without copying its product metadata.
 

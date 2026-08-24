@@ -27,6 +27,7 @@ are refused by all hot paths and handled only by
 | **server** | HTTP routing | `src/server/server.js`, `handlers/public.js`, `handlers/private.js` | framework-free `node:http`. Dependencies passed by closure, not globals. |
 | **app** | auth + startup composition | `src/app/auth.js`, `src/app/server.js` | the **only** place that opens both DBs. Owns startup order. |
 | **SPA frontend** | browser UI | `public/` | no framework, no build step. Served by `src/app/server.js`. |
+| **public surface** | root exports + type contract | `src/index.js`, `src/index.d.ts` | exactly 8 exports (PriceArchive, 2 repositories, parseObservation, 4 analytics). No adapters or internals at root; adapter `.d.ts` files are self-contained. Drift gate: `test/types-surface.test.js`. |
 | **collectors / scripts** | CLI entry points | `scripts/` | collection, `build-db`, `matching-cli`, `compact`, `migrate-v1-archive`, HAR capture. |
 
 ## Key directories

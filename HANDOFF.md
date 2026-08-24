@@ -121,6 +121,16 @@ repository is now clean with respect to the legacy dashboard; local scheduling
 work is confined to the runner, daemon template, focused runner test, README,
 and this handoff.
 
+CORE-5 (2026-08-24) shrank the package root to exactly 8 exports:
+`PriceArchive`, `JsonlObservationRepository`, `MemoryObservationRepository`,
+`parseObservation`, `calculateSales`, `calculateOngoingSales`,
+`buildPriceSeries`, `toAgentFeed`. Retailer clients moved to subpath exports
+only (`nz-grocery-prices/foodstuffs` etc.); ArchiveIndex, record codecs,
+locking, and repair helpers are internal. `src/index.d.ts` and the adapter
+`.d.ts` files are hand-maintained contracts, gated by
+`test/types-surface.test.js` (no TS compiler exists). README's "Library API"
+section documents the new surface.
+
 ## Deferred unknowns (resolved 2026-07-17)
 
 ### FTS5 full-text search

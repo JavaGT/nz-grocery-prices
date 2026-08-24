@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toPriceObservation } from "../../src/adapters/foodstuffs.js";
+import { FoodstuffsClient, toPriceObservation } from "../../src/adapters/foodstuffs.js";
 
 const store = { id: "royaloak", name: "PAK'nSAVE Royal Oak", address: "1 Main St", region: "Auckland" };
 
@@ -145,6 +145,89 @@ describe("toPriceObservation (foodstuffs)", () => {
     };
     const result = toPriceObservation(product, store, { observedAt: "2026-07-17T12:00:00.000Z" });
     assert.equal(result.observedAt, "2026-07-17T12:00:00.000Z");
+  });
+
+});
+
+const searchEnvelope = {
+  tobaccoProducts: [],
+  products: [{ productId: "5004821-EA-000", name: "Anchor Blue Milk", price: 860 }],
+  algoliaSearchResult: {
+    facets: { tobacco: { false: 9445 }, category0NI: { "Chilled & Dairy": 1204 } },
+  },
+  totalHits: 1000,
+  page: 0,
+  totalPages: 20,
+  hitsPerPage: 50,
+};
+
+function stubFetchForClient() {
+  const requests = [];
+  const fetch = async (url, init) => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    async json() {
+      if (String(url).endsWith("/api/user/get-current-user")) {
+        return { access_token: "test-token", expires_time: new Date(Date.now() + 3_600_000).toISOString() };
+      }
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return { ...searchEnvelope };
+    },
+  });
+  return { fetch, requests };
+}
+
+describe("FoodstuffsClient.searchProducts", () => {
+
+  it("appends extraFilters to the request filters with AND", async () => {
+    const { fetch, requests } = stubFetchForClient();
+    const client = new FoodstuffsClient({ fetch });
+    await client.searchProducts({
+      storeId: "royaloak",
+      extraFilters: [`category0NI:"Chilled & Dairy"`, `brand:"Pams"`],
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(
+      requests[0].body.algoliaQuery.filters,
+      `stores:royaloak AND category0NI:"Chilled & Dairy" AND brand:"Pams"`,
+    );
+  });
+
+  it("keeps filters unchanged when extraFilters is empty", async () => {
+    const { fetch, requests } = stubFetchForClient();
+    const client = new FoodstuffsClient({ fetch });
+    await client.searchProducts({ storeId: "royaloak", extraFilters: [] });
+    assert.equal(requests[0].body.algoliaQuery.filters, "stores:royaloak");
+  });
+
+  it("throws TypeError on non-string and blank extraFilters entries", async () => {
+    const { fetch } = stubFetchForClient();
+    const client = new FoodstuffsClient({ fetch });
+    await assert.rejects(
+      () => client.searchProducts({ storeId: "royaloak", extraFilters: [42] }),
+      TypeError,
+    );
+    await assert.rejects(
+      () => client.searchProducts({ storeId: "royaloak", extraFilters: ["   "] }),
+      TypeError,
+    );
+    await assert.rejects(
+      () => client.searchProducts({ storeId: "royaloak", extraFilters: "category0NI:\"Frozen\"" }),
+      TypeError,
+    );
+  });
+
+  it("passes the response envelope (facets, totalHits, totalPages) through unmodified", async () => {
+    const { fetch, requests } = stubFetchForClient();
+    const client = new FoodstuffsClient({ fetch });
+    const result = await client.searchProducts({ storeId: "royaloak" });
+    assert.deepEqual(result.algoliaSearchResult.facets,
+      searchEnvelope.algoliaSearchResult.facets);
+    assert.equal(result.totalHits, 1000);
+    assert.equal(result.totalPages, 20);
+    assert.equal(result.page, 0);
+    assert.equal(requests[0].body.algoliaQuery.filters, "stores:royaloak");
   });
 
 });

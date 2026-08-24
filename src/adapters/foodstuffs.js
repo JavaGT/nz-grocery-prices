@@ -50,6 +50,22 @@ function bestPromotion(product) {
   );
 }
 
+// Facet-driven catalogue crawls append raw Algolia filter strings (e.g.
+// `category0NI:"Chilled & Dairy"`); they join the search conjunction
+// verbatim, so a non-string or blank entry is a caller bug.
+function validatedExtraFilters(extraFilters) {
+  if (extraFilters === undefined) return [];
+  if (!Array.isArray(extraFilters)) {
+    throw new TypeError("searchProducts extraFilters must be an array of filter strings");
+  }
+  extraFilters.forEach((filter, index) => {
+    if (typeof filter !== "string" || filter.trim() === "") {
+      throw new TypeError(`searchProducts extraFilters[${index}] must be a non-empty string`);
+    }
+  });
+  return extraFilters;
+}
+
 export function toPriceObservation(product, store, options = {}) {
   const currentCents = centsFromProduct(product);
   if (currentCents === undefined) return undefined;
@@ -219,6 +235,24 @@ export class FoodstuffsClient {
     return store;
   }
 
+  /**
+   * POST /v1/edge/search/paginated/products for one store.
+   *
+   * @param {object} options
+   * @param {string} options.storeId Store to scope the search to.
+   * @param {number} [options.page] Zero-based page index (default 0).
+   * @param {number} [options.hitsPerPage] Page size, max 50 server-side.
+   * @param {string} [options.region] "NI" or "SI" sort-order prefix.
+   * @param {boolean} [options.onPromotion] Scope to on-promotion products.
+   * @param {string} [options.query] Free-text query.
+   * @param {string[]} [options.extraFilters] Raw Algolia filter strings
+   *   (e.g. `category0NI:"Chilled & Dairy"`) appended verbatim to the
+   *   filter conjunction with AND. Each entry must be a non-empty string;
+   *   otherwise a TypeError is thrown. Facet totals in the response
+   *   (`algoliaSearchResult.facets`, `totalHits`, `totalPages`) pass
+   *   through unmodified.
+   * @returns {Promise<object>} The search envelope as returned by the API.
+   */
   async searchProducts(options) {
     if (!options?.storeId) throw new TypeError("searchProducts requires storeId");
     const page = options.page ?? 0;
@@ -227,6 +261,7 @@ export class FoodstuffsClient {
     const filters = [
       `stores:${options.storeId}`,
       ...(options.onPromotion ? [`onPromotion:${options.storeId}`] : []),
+      ...validatedExtraFilters(options.extraFilters),
     ].join(" AND ");
 
     return this.#request("/v1/edge/search/paginated/products", {

@@ -331,6 +331,14 @@ const observation = parseObservation({
 });
 await archive.record([observation], { snapshotScope: "specials" });
 
+// Sales detection compares against history, so record a cheaper follow-up:
+const cheaper = parseObservation({
+  ...observation,
+  price: { currency: "NZD", regularCents: 500, promoCents: 299 },
+  observedAt: new Date(Date.now() + 86_400_000).toISOString(),
+});
+await archive.record([cheaper], { snapshotScope: "specials" });
+
 // Query.
 const history = await archive.history({ productId: observation.product.id });
 const revisions = await archive.productHistory(observation.product.id);
@@ -349,7 +357,7 @@ const feed = await archive.agentFeed({});                        // agent JSON
 | --- | --- |
 | `PriceArchive` | Facade over a repository: `record`, `history`, `productHistory`, `findSales`, `ongoingSales`, `agentFeed`. Injects time so analytics stay pure. |
 | `JsonlObservationRepository` | Durable append-only JSONL archive: locking, fsynced appends, atomic compaction, tail-tolerant load, v1 refusal. |
-| `MemoryObservationRepository` | In-memory repository for tests; same interface. |
+| `MemoryObservationRepository` | In-memory repository for tests; same query interface. (`append()` returns observations stored, vs archive records written for the JSONL repository.) |
 | `parseObservation` | Validates one observation or throws `TypeError` naming every problem. |
 | `calculateSales` | History-backed drops from the recent baseline (needs explicit `at`). |
 | `calculateOngoingSales` | Currently-advertised promotions (needs explicit `at`). |

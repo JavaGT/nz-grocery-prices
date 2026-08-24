@@ -111,6 +111,22 @@ test("root export set is exactly the CORE-5 list", () => {
   assert.deepEqual(Object.keys(publicSurface).sort(), [...ROOT_EXPORTS].sort());
 });
 
+test("package exports map publishes the declared contract for every subpath", async () => {
+  const pkg = JSON.parse(await readFile(join(ROOT_DIR, "package.json"), "utf8"));
+  assert.equal(pkg.name, "nz-grocery-prices");
+  // Root: types must sit next to the runtime module the exports map names.
+  assert.equal(pkg.exports["."].types, "./src/index.d.ts");
+  assert.equal(pkg.exports["."].import, "./src/index.js");
+  // Each adapter subpath pairs its declaration with its implementation.
+  for (const relative of ADAPTER_DTS_FILES) {
+    const name = `./${relative.replace(/^src\/adapters\//, "").replace(/\.d\.ts$/, "")}`;
+    const entry = pkg.exports[name];
+    assert.ok(entry, `exports map must expose ${name}`);
+    assert.equal(entry.types, `./${relative}`);
+    assert.equal(entry.import, `./${relative.replace(/\.d\.ts$/, ".js")}`);
+  }
+});
+
 test("index.d.ts declares every runtime export and nothing forbidden", async () => {
   const source = await readIndexDts();
   const declared = declaredExportNames(source);
@@ -216,13 +232,81 @@ test("adapter contracts no longer import types from the root", async () => {
   }
 });
 
+test("adapter declarations share the single domain source — no local copies", async () => {
+  for (const relative of ADAPTER_DTS_FILES) {
+    const source = await readFile(join(ROOT_DIR, relative), "utf8");
+    assert.ok(
+      source.includes('from "../domain/observation.js"'),
+      `${relative} must import the shared domain contract`,
+    );
+    assert.match(
+      source,
+      /export type \{ PriceObservation, Store \};/,
+      `${relative} must re-export the shared shapes`,
+    );
+    assert.doesNotMatch(
+      source,
+      /export interface (Store|PriceObservation) \{/,
+      `${relative} must not redeclare domain shapes (drift risk)`,
+    );
+  }
+});
+
+test("agent-feed name fields are optional in .d.ts AND undefined at runtime without names", async () => {
+  const source = await readIndexDts();
+  for (const name of ["AgentFeedHistorySale", "AgentFeedOngoingSale"]) {
+    const block = source.match(
+      new RegExp(`export interface ${name} \\{[\\s\\S]*?\\n\\}`),
+    )?.[0];
+    assert.ok(block, `index.d.ts must declare ${name}`);
+    assert.match(block, /productName\?: string/, `${name}.productName must be optional`);
+    assert.match(block, /storeName\?: string/, `${name}.storeName must be optional`);
+  }
+
+  // Runtime truth: an observation whose product/store carry no names must
+  // produce feed entries where those fields are present-but-undefined.
+  const indexUrl = pathToFileURL(join(ROOT_DIR, "src", "index.js")).href;
+  const result = await runConsumerFixture(
+    "consumer-agentfeed-names.mjs",
+    `
+import { calculateOngoingSales, toAgentFeed } from "${indexUrl}";
+
+// No product.name, no store.name — only the required identity fields.
+const observations = [{
+  product: { id: "foodstuffs:nameless" },
+  store: { id: "paknsave:001", retailer: "paknsave" },
+  price: { regularCents: 500, promoCents: 350 },
+  promotion: {
+    startsAt: "2026-08-19T00:00:00.000Z",
+    endsAt: "2026-08-25T00:00:00.000Z",
+  },
+  observedAt: "2026-08-20T00:00:00.000Z",
+  source: { retailerProductId: "5226969-ea-000" },
+}];
+const AT = "2026-08-21T00:00:00.000Z";
+const ongoing = calculateOngoingSales(observations, { at: AT });
+const feed = toAgentFeed([], AT, ongoing);
+const item = feed.ongoingSales[0];
+export default {
+  hasOngoing: ongoing.length === 1 && item !== undefined,
+  productNameUndefined: item?.productName === undefined,
+  storeNameUndefined: item?.storeName === undefined,
+};
+`,
+  );
+  assert.equal(result.hasOngoing, true, "fixture must produce one ongoing sale entry");
+  assert.equal(result.productNameUndefined, true);
+  assert.equal(result.storeNameUndefined, true);
+});
+
 // ---- Consumer fixtures ----
 
 /**
  * Writes a fixture module that consumes the library exactly as the .d.ts
  * documents it, runs it, and returns its exported result. Fixtures live in
- * a temp dir and import via absolute file URLs, like a real downstream
- * package would import the published root.
+ * a temp dir and import src/index.js by absolute file URL — the same module
+ * the package exports map publishes. (Package self-reference can't be used
+ * from outside the package directory.)
  */
 async function runConsumerFixture(fixtureName, fixtureSource) {
   const dir = await mkdtemp(join(tmpdir(), "nzgp-types-"));

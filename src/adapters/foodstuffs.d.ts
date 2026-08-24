@@ -4,33 +4,13 @@
  */
 
 /** Local copy of the public domain shapes (see src/index.d.ts). */
-export interface Store {
-  id: string;
-  retailer: string;
-  name?: string;
-  address?: string;
-  region?: string;
-  [key: string]: unknown;
-}
-
-export interface PriceObservation {
-  product: Record<string, unknown> & { id: string };
-  store: Store;
-  price: {
-    regularCents: number;
-    promoCents?: number;
-    memberCents?: number;
-    [key: string]: unknown;
-  };
-  observedAt: string;
-  lastSeenAt?: string;
-  isOnSpecial?: boolean;
-  promotion?: Record<string, unknown>;
-  source: {
-    retailerProductId: string;
-    [key: string]: unknown;
-  };
-}
+/**
+ * Domain shapes come from the SHARED public contract —
+ * src/domain/observation.d.ts is the single source; importing it here
+ * (instead of copying) is what keeps the copies from drifting.
+ */
+import type { PriceObservation, Store } from "../domain/observation.js";
+export type { PriceObservation, Store };
 
 export interface FoodstuffsClientOptions {
   banner?: "paknsave" | "newworld";

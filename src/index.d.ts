@@ -11,63 +11,17 @@
  */
 
 // ---- Domain data shapes ----
+// Single source of truth lives in src/domain/observation.d.ts; the root
+// re-exports it so adapters and consumers share one declaration.
 
-/** A collected store (price scope). Unknown extra fields are preserved. */
-export interface Store {
-  id: string;
-  retailer: string;
-  name?: string;
-  address?: string;
-  region?: string;
-  [key: string]: unknown;
-}
+import type {
+  PriceObservation,
+  ProductInfo,
+  PromotionInfo,
+  Store,
+} from "./domain/observation.js";
 
-/** A collected product. Unknown extra fields are preserved. */
-export interface ProductInfo {
-  id: string;
-  name?: string;
-  brand?: string;
-  gtin?: string;
-  categories?: string[];
-  images?: Record<string, string>;
-  [key: string]: unknown;
-}
-
-/**
- * Retailer-reported promotion metadata. startsAt/endsAt bound when promo
- * cents count as active (boundaries inclusive); savePercent is advisory.
- */
-export interface PromotionInfo {
-  startsAt?: string;
-  endsAt?: string;
-  savePercent?: number;
-  [key: string]: unknown;
-}
-
-/** One recorded price observation (canonical v2 domain shape). */
-export interface PriceObservation {
-  product: ProductInfo;
-  store: Store;
-  price: {
-    regularCents: number;
-    promoCents?: number;
-    memberCents?: number;
-    currency?: "NZD";
-    [key: string]: unknown;
-  };
-  observedAt: string;
-  /** Last full specials snapshot in which this offer was present. */
-  lastSeenAt?: string;
-  /** True/false when a full specials snapshot is available. */
-  isOnSpecial?: boolean;
-  promotion?: PromotionInfo;
-  source: {
-    retailerProductId: string;
-    adapter?: string;
-    url?: string;
-    [key: string]: unknown;
-  };
-}
+export type { PriceObservation, ProductInfo, PromotionInfo, Store };
 
 /** Which candidate price an evaluation selected. */
 export type EffectivePriceKind = "regular" | "promo" | "member";
@@ -156,10 +110,12 @@ export interface PriceSeries {
 /** Stable agent-feed entry: a history-backed sale. */
 export interface AgentFeedHistorySale {
   productId: string;
-  productName: string;
+  /** Absent when the source observation's product had no name. */
+  productName?: string;
   brand?: string;
   storeId: string;
-  storeName: string;
+  /** Absent when the source observation's store had no name. */
+  storeName?: string;
   retailer: string;
   currentCents: number;
   priceKind: EffectivePriceKind;
@@ -174,11 +130,13 @@ export interface AgentFeedHistorySale {
 /** Stable agent-feed entry: a currently-advertised promotion. */
 export interface AgentFeedOngoingSale {
   productId: string;
-  productName: string;
+  /** Absent when the source observation's product had no name. */
+  productName?: string;
   brand?: string;
   gtin?: string;
   storeId: string;
-  storeName: string;
+  /** Absent when the source observation's store had no name. */
+  storeName?: string;
   retailer: string;
   currentCents: number;
   regularCents: number;
@@ -218,6 +176,12 @@ export interface ProductRevision {
 /**
  * Storage seam for observations. PriceArchive depends on this interface, so
  * alternative backends can replace the supplied implementations.
+ *
+ * append() resolves to an IMPLEMENTATION-DEFINED count: the JSONL repository
+ * returns archive records written (product/store/offer revisions, so one
+ * observation may count several), while the in-memory repository returns
+ * observations stored. Treat the number as opaque progress, never as an
+ * observation count.
  */
 export interface ObservationRepository {
   append(
@@ -247,6 +211,7 @@ export interface ArchiveStats {
 
 /** In-memory repository: deduplicates, keeps insertion order, holds no files. */
 export declare class MemoryObservationRepository implements ObservationRepository {
+  /** Returns the number of OBSERVATIONS stored (dedup may shrink it). */
   append(
     observations: readonly PriceObservation[],
     options?: AppendOptions,
@@ -262,6 +227,7 @@ export declare class MemoryObservationRepository implements ObservationRepositor
 export declare class JsonlObservationRepository implements ObservationRepository {
   constructor(filePath?: string);
   readonly filePath: string;
+  /** Returns the number of ARCHIVE RECORDS written (revisions, not observations). */
   append(
     observations: readonly PriceObservation[],
     options?: AppendOptions,
@@ -289,6 +255,8 @@ export declare class PriceArchive {
     options?: { clock?: () => Date },
   );
   readonly repository: ObservationRepository;
+  /** The injected time source (default wall clock); queries omitting `at` use it. */
+  readonly clock: () => Date;
   record(
     observations: readonly PriceObservation[],
     options?: AppendOptions,

@@ -28,6 +28,12 @@ Blocked by BREADTH-0. Pilot-gated before estate rollout.
 > (Luna): no blocker; all five concerns fixed pre-pilot. Pilot: 2 stores →
 > `data/breadth-pilot.jsonl`, gate = 7 days of reconciliation within 0.5%,
 > zero rate-limit responses, growth within ±30% of model.
+>
+> **Day-1 finding:** 1s pacing tarpits the Foodstuffs API — after a burst
+> of ~13 discovery requests the server hangs >15s per call (timeouts, not
+> 429s); slower-spaced requests before/after succeeded. Run aborted at
+> 298/11111 + 310/13858 coverage. Resume machinery worked as designed.
+> Iteration 2: --delay-ms 5000.
 
 ## Goal
 Every product at every PAK'nSAVE/New World store daily (~2.5M points).

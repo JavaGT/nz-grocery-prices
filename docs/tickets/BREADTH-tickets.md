@@ -22,6 +22,13 @@ budget stops cleanly. No live requests in CI.
 
 Blocked by BREADTH-0. Pilot-gated before estate rollout.
 
+> **Status: PILOT RUNNING (2026-08-25).** Kit (`a4436f5`), adapter
+> (`ce04180`), collector (`09fc3a0`), manifest race fix (`c0c8e61`), and
+> review hardening (`f512c54`) landed — suite 667/667. Hostile review
+> (Luna): no blocker; all five concerns fixed pre-pilot. Pilot: 2 stores →
+> `data/breadth-pilot.jsonl`, gate = 7 days of reconciliation within 0.5%,
+> zero rate-limit responses, growth within ±30% of model.
+
 ## Goal
 Every product at every PAK'nSAVE/New World store daily (~2.5M points).
 

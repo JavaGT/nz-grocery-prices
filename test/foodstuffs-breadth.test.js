@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_PILOT_BUDGET,
   absorbHits,
+  assertNotLiveArchive,
   categoryFilters,
   categoryKey,
   continuationPages,
@@ -264,8 +266,11 @@ describe("crawlStore planning", () => {
       }),
       ...Object.fromEntries(
         [...Array(7).keys(), ...Array(5).keys()].flatMap((page) => [
-          [`store-1:cat0=Pantry|cat1=Breakfast:page${page + 1}`, envelope({ hits: [], totalHits: 400 })],
-          [`store-1:cat0=Pantry|cat1=Snacks:page${page + 1}`, envelope({ hits: [], totalHits: 300 })],
+          // Continuation pages re-list earlier products (popularity order
+          // repeats); they are never EMPTY in reality — an empty page means
+          // the API over-reported totalPages and the collector warns.
+          [`store-1:cat0=Pantry|cat1=Breakfast:page${page + 1}`, envelope({ hits: [hit("4")], totalHits: 400 })],
+          [`store-1:cat0=Pantry|cat1=Snacks:page${page + 1}`, envelope({ hits: [hit("5")], totalHits: 300 })],
         ]),
       ),
       "store-1:cat0=Featured:page0": envelope({
@@ -274,7 +279,7 @@ describe("crawlStore planning", () => {
         totalPages: 2,
       }),
       "store-1:cat0=Featured:page1": envelope({
-        hits: [],
+        hits: [hit("2")],
         totalHits: 90,
       }),
       "store-1:cat0=Household:page0": envelope({
@@ -617,8 +622,7 @@ describe("end-to-end runCollection (fake transport)", () => {
     }
   });
 
-  it("resume skips recorded continuation pages on a second run", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "breadth-resume-"));
+  it("resume skips recorded continuation pages on a second run", async () => {    const dir = await mkdtemp(join(tmpdir(), "breadth-resume-"));
     try {
       const file = join(dir, "breadth-pilot.jsonl");
       const transport = fakeFoodstuffsTransport({
@@ -689,6 +693,80 @@ describe("end-to-end runCollection (fake transport)", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("a lost manifest re-crawls safely — archive dedupes, nothing duplicates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "breadth-lost-manifest-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      const manifestPath = `${file}.breadth-manifest.json`;
+      const transport = fakeFoodstuffsTransport({
+        paknsaveStores: [{ id: "pns-a", name: "PAK'nSAVE Alpha" }],
+        newworldStores: [{ id: "nw-a", name: "New World Omega" }],
+      });
+      transport.searchScript["pns:pns-a"] = pilotScript("5");
+      transport.searchScript["nw:nw-a"] = (filters) =>
+        envelope({ hits: [hit("9-r")], facets: { tobacco: { false: 1 }, category0NI: {} } });
+      const common = {
+        transport,
+        file,
+        delayMs: 0,
+        observedAt: "2026-08-25T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      };
+
+      const first = await runCollection(common);
+      assert.equal(first.healthy, true);
+      const linesAfterFirst = (await readFile(file, "utf8")).trim().split("\n").length;
+
+      // Crash-between-append-and-persist, worst case: the manifest is GONE
+      // while the archive keeps every record. The next run must re-crawl
+      // everything and land zero duplicate records (content-hash dedup).
+      await rm(manifestPath);
+      const second = await runCollection(common);
+      assert.equal(second.healthy, true);
+      assert.equal(second.observationsRecorded, 0, "dedup swallows the re-crawl");
+      const linesAfterSecond = (await readFile(file, "utf8")).trim().split("\n").length;
+      assert.equal(linesAfterSecond, linesAfterFirst);
+
+      // And the recreated manifest again checkpoints continuation pages.
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      assert.deepEqual(Object.keys(manifest.completed), [
+        "pns-a:cat0=Pantry:page1",
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("pilot defaults are bounded and the live archive is refused", async () => {
+    assert.equal(DEFAULT_PILOT_BUDGET, 2000);
+    assert.equal(parseArgs(["--force-live"]).forceLive, true);
+
+    let networkTouched = false;
+    const transport = () => {
+      networkTouched = true;
+      throw new Error("must not be reached");
+    };
+    await assert.rejects(
+      () =>
+        runCollection({
+          transport,
+          file: "data/prices.jsonl",
+          delayMs: 0,
+          log: () => {},
+          collectWarning: () => {},
+        }),
+      /Refusing to breadth-collect/,
+    );
+    assert.equal(networkTouched, false, "guard must fire before any request");
+    // The API-level guard is directly usable and env-aware.
+    assert.throws(
+      () => assertNotLiveArchive("data/prices.jsonl"),
+      /Refusing to breadth-collect/,
+    );
+    assert.doesNotThrow(() => assertNotLiveArchive("data/breadth-pilot.jsonl"));
   });
 
   it("explicit --store queries select stores per selected banner", async () => {

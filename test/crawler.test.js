@@ -276,6 +276,38 @@ test("crashed run resumes where it stopped via manifest", async () => {
   }
 });
 
+test("concurrent completions all land in the manifest (no lost updates)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawler-concurrent-"));
+  try {
+    const manifestPath = join(dir, "crawl-manifest.json");
+    // concurrency > tasks so every fetch completes near-simultaneously:
+    // persists overlap and must serialize without losing any completion.
+    const crawler = createCrawler({
+      fetch: makeFetch(() => response(200)),
+      minHostDelayMs: 0,
+      clock: fakeClock(),
+      sleep: fakeSleep(fakeClock()),
+      manifest: { path: manifestPath },
+      concurrency: 4,
+    });
+    const tasks = Array.from({ length: 5 }, (_, i) => ({
+      id: `p${i + 1}`,
+      url: `https://s.example/${i + 1}`,
+    }));
+    const { summary } = await crawler.run(tasks);
+
+    assert.equal(summary.succeeded, 5);
+    assert.equal(summary.manifestErrors, 0);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    assert.deepEqual(
+      Object.keys(manifest.completed).sort(),
+      ["p1", "p2", "p3", "p4", "p5"],
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("error taxonomy separates fatal HTTP, retry-exhausted, network-fatal", async () => {
   const clock = fakeClock();
   const plan = {

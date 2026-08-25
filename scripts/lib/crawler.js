@@ -14,7 +14,10 @@
  *   Exhaustion halts cleanly: remaining tasks resolve as `budget-skipped`.
  * - Resume: optional JSON manifest (loadManifest/saveManifest) records
  *   completed task ids after each success, atomically, so a crashed run
- *   skips work that already landed.
+ *   can resume. ONE crawler instance per manifest file: persistence is
+ *   serialized per instance only — two concurrent processes sharing a
+ *   manifest would lose updates. (Breadth collectors run one-at-a-time
+ *   under the archive lock, which upholds this.)
  * - Observability: structured events on `crawler.events`. Callers decide
  *   what to persist (e.g. data/collection-health.jsonl); this module never
  *   writes health files.
@@ -177,6 +180,7 @@ export function createCrawler(options = {}) {
       resumed: 0,
       failed: 0,
       skippedBudget: 0,
+      manifestErrors: 0,
     };
   }
 
@@ -431,6 +435,7 @@ export function createCrawler(options = {}) {
     manifestQueue = chained.catch(() => {});
     return chained.catch((error) => {
       // Non-fatal: the crawl continues, but health consumers must see it.
+      stats.manifestErrors += 1;
       events.emit("manifest-error", {
         path: manifestConfig.path,
         error: error.message,
@@ -524,6 +529,7 @@ export function createCrawler(options = {}) {
       resumed: stats.resumed,
       failed: stats.failed,
       skippedBudget: stats.skippedBudget,
+      manifestErrors: stats.manifestErrors,
       budgetLimit: budget,
     };
     events.emit("run-end", { summary });

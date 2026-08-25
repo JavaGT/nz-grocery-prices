@@ -56,6 +56,26 @@ import { resolve } from "node:path";
 const { BUDGET_SKIPPED } = OUTCOME_CATEGORIES;
 
 export const DEFAULT_FILE = "data/breadth-pilot.jsonl";
+/**
+ * Finite default request cap for pilot runs. Explicit --budget overrides.
+ * A planner regression must surface as budget-skipped outcomes, never as
+ * an unbounded crawl against the retailer API.
+ */
+export const DEFAULT_PILOT_BUDGET = 2000;
+const LIVE_ARCHIVE_FALLBACK = "data/prices.jsonl";
+
+/** The breadth path may never write the authoritative archive by accident. */
+export function assertNotLiveArchive(file, { forceLive = false } = {}) {
+  const candidate = resolve(file);
+  const live = resolve(process.env.ARCHIVE_FILE ?? LIVE_ARCHIVE_FALLBACK);
+  if (candidate === live && !forceLive) {
+    throw new Error(
+      `Refusing to breadth-collect into ${file}: that resolves to the live ` +
+        `archive. Breadth pilots write data/breadth-pilot.jsonl; pass ` +
+        `--force-live only with an explicit owner decision.`,
+    );
+  }
+}
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 const PAGE_SIZE = 50;
@@ -333,6 +353,7 @@ export async function crawlStore({
   };
   let rootTarget;
   let pagesFetched = 0;
+  const emptyPages = [];
 
   // Region is a sort-order prefix ("NI"/"SI"); anything else falls back to
   // the adapter default rather than producing an invalid sortOrder (400).
@@ -382,6 +403,17 @@ export async function crawlStore({
       }
       const { envelope } = result.value;
       pagesFetched += 1;
+      // An empty continuation page means the API over-reported totalPages;
+      // stop trusting further planning from this signal (reconciliation
+      // remains the completeness guard for under-reporting).
+      if (
+        thunk.kind === "leaf" &&
+        thunk.page >= 1 &&
+        (envelope.products?.length ?? 0) === 0
+      ) {
+        emptyPages.push(thunk.id);
+        warn(`${thunk.id}: page beyond catalogue end (0 hits)`);
+      }
       const fresh = absorbHits(seen, envelope.products);
       for (const product of fresh) {
         const observation = toPriceObservation(product, store, {
@@ -490,6 +522,7 @@ export async function crawlStore({
     retailer: client.retailer,
     uniqueCount: seen.size,
     pagesFetched,
+    emptyPages,
     rootFound: rootTarget !== undefined,
     warnings,
     budgetExhausted,
@@ -563,6 +596,9 @@ export function parseArgs(argv) {
       case "--budget":
         options.budget = Number(value());
         break;
+      case "--force-live":
+        options.forceLive = true;
+        break;
       case "--help":
       case "-h":
         options.help = true;
@@ -605,7 +641,10 @@ export async function runCollection(options = {}) {
     storeQueries = [],
     file = DEFAULT_FILE,
     delayMs = 1000,
-    budget = Number.POSITIVE_INFINITY,
+    // Finite pilot cap (2 stores × ~275 requests ≈ 550; 2000 leaves ~3×
+    // headroom while bounding a planner regression). Override with --budget.
+    budget = DEFAULT_PILOT_BUDGET,
+    forceLive = false,
     transport = globalThis.fetch,
     storesByRetailer = null,
     observedAt = new Date().toISOString(),
@@ -617,6 +656,7 @@ export async function runCollection(options = {}) {
   const retailers = retailer === "both"
     ? ["paknsave", "newworld"]
     : [retailer];
+  assertNotLiveArchive(file, { forceLive });
   const manifestPath = `${resolve(file)}${MANIFEST_SUFFIX}`;
 
   const crawler = createCrawler({
@@ -671,15 +711,28 @@ export async function runCollection(options = {}) {
 
   const archive = new PriceArchive(new JsonlObservationRepository(file), { clock });
   let addedTotal = 0;
+  let manifestPersistFailures = 0;
   const commitWave = async (observations, continuationIds) => {
     if (observations.length > 0) {
       addedTotal += await archive.record(observations);
     }
     // Mark-after-record: ids land in the manifest only once the wave's
-    // observations are durably appended.
+    // observations are durably appended. A failed persist is SAFE (manifest
+    // lags archive → next run re-crawls and content-hash-dedupes) but must
+    // be visible: it is counted and flips summary.healthy.
     const now = new Date().toISOString();
     for (const id of continuationIds) completed.set(id, now);
-    if (continuationIds.length > 0) await persistManifest();
+    if (continuationIds.length > 0) {
+      try {
+        await persistManifest();
+      } catch (error) {
+        manifestPersistFailures += 1;
+        collectWarning(
+          `manifest persist failed (${continuationIds.length} page(s) ` +
+            `will re-crawl next run): ${error.message}`,
+        );
+      }
+    }
   };
 
   // Search-request metering ahead of the bridge's hard cap (which also
@@ -722,18 +775,20 @@ export async function runCollection(options = {}) {
     }
   }
 
-  const unhealthy = storeResults.some(
-    (result) =>
-      !result.rootFound ||
-      result.budgetExhausted ||
-      !result.reconciliation.withinTolerance ||
-      result.error,
-  );
+  const unhealthy =
+    storeResults.some(
+      (result) =>
+        !result.rootFound ||
+        result.budgetExhausted ||
+        !result.reconciliation.withinTolerance ||
+        result.error,
+    ) || manifestPersistFailures > 0;
   const summary = {
     file,
     manifestPath,
     observedAt,
     healthy: !unhealthy,
+    manifestPersistFailures,
     stores: storeResults.map((result) => ({
       retailer: result.retailer,
       id: result.store.id,
@@ -743,6 +798,7 @@ export async function runCollection(options = {}) {
       delta: result.reconciliation.delta,
       coverageOk: result.reconciliation.withinTolerance,
       pagesFetched: result.pagesFetched,
+    emptyPages: result.emptyPages,
       budgetExhausted: result.budgetExhausted,
       ...(result.error ? { error: result.error } : {}),
       warnings: result.warnings,
@@ -781,7 +837,9 @@ Options:
   --delay-ms N       minimum gap between requests to the same host
                      (default: 1000)
   --budget N         hard cap on HTTP calls this run (auth included);
-                     unfinished work resumes on the next run
+                     default 2000 (pilot-sized); unfinished work resumes on
+                     the next run
+  --force-live       DANGEROUS: allow --file to point at the live archive
 
 Resume: continuation pages are checkpointed in <file>.breadth-manifest.json
 after their records are appended; re-running skips recorded pages. Discovery

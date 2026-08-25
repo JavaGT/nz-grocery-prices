@@ -27,7 +27,8 @@
  */
 
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 /** Terminal classifications for a task. Consumers switch on these. */
@@ -89,13 +90,21 @@ export async function loadManifest(path) {
 
 /**
  * Persist manifest data atomically (write sibling tmp file, then rename) so
- * a crash mid-write can never leave a torn checkpoint behind.
+ * a crash mid-write can never leave a torn checkpoint behind. The tmp name
+ * is unique per call: concurrent workers persisting at the same moment must
+ * never share a tmp file (pid alone is NOT enough — two overlapping saves
+ * from one process would interleave into the same path and corrupt it).
  */
 export async function saveManifest(path, data) {
   await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  await writeFile(tmp, `${JSON.stringify(data ?? null, null, 2)}\n`);
-  await rename(tmp, path);
+  const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(data ?? null, null, 2)}\n`);
+    await rename(tmp, path);
+  } catch (error) {
+    await rm(tmp, { force: true });
+    throw error;
+  }
 }
 
 /**
@@ -403,20 +412,30 @@ export function createCrawler(options = {}) {
     return outcome;
   }
 
-  async function persistManifest() {
-    try {
+  // Manifest persistence is serialized through this queue AND snapshot data
+  // is captured INSIDE the chained call, so two workers finishing at the
+  // same moment can never write stale views out of order (last-rename-wins
+  // would otherwise resurrect an older completion set — lost update).
+  let manifestQueue = Promise.resolve();
+
+  function persistManifest() {
+    if (!manifestConfig) return Promise.resolve();
+    const chained = manifestQueue.then(async () => {
       await saveManifest(manifestConfig.path, {
         version: MANIFEST_VERSION,
         updatedAt: new Date().toISOString(),
         completed: Object.fromEntries(completed),
       });
-    } catch (error) {
+    });
+    // The queue must survive a failed persist: log and continue.
+    manifestQueue = chained.catch(() => {});
+    return chained.catch((error) => {
       // Non-fatal: the crawl continues, but health consumers must see it.
       events.emit("manifest-error", {
         path: manifestConfig.path,
         error: error.message,
       });
-    }
+    });
   }
 
   async function hydrateManifest() {
@@ -493,6 +512,9 @@ export function createCrawler(options = {}) {
       }
     });
     await Promise.all(workers);
+    // Flush any in-flight manifest persist so run() resolving guarantees the
+    // checkpoint on disk reflects every completion it reported.
+    if (manifestConfig) await manifestQueue;
 
     const summary = {
       tasks: stats.tasks,

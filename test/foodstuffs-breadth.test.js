@@ -350,6 +350,57 @@ describe("crawlStore planning", () => {
     assert.ok(warnings.some((message) => message.includes("tobacco:false")));
   });
 
+  it("opens the circuit after repeated failures instead of crawling into a block", async () => {
+    // Root succeeds (seeds two small leaves → 4 continuation pages), then
+    // EVERY request times out. The breaker must abort well before all 6
+    // continuations burn attempts against a tarpitting server.
+    let calls = 0;
+    const client = {
+      retailer: "paknsave",
+      async searchProducts(options) {
+        calls += 1;
+        if (calls === 1) {
+          return envelope({
+            hits: [hit("1")],
+            facets: {
+              tobacco: { false: 10 },
+              category0NI: { A: 2, B: 2, C: 2, D: 2, E: 2 },
+            },
+          });
+        }
+        if (calls <= 6) {
+          // Five small categories succeed and each spawns one continuation
+          // page — filling the pipeline the breaker must then halt.
+          const name = ["A", "B", "C", "D", "E"][calls - 2];
+          return envelope({
+            hits: [hit(name)],
+            totalHits: 2,
+            totalPages: 2,
+          });
+        }
+        const error = new Error("Request timed out");
+        throw error;
+      },
+    };
+    const recordedWaves = [];
+    const result = await crawlStore({
+      client,
+      store: { id: "s1", name: "S1", region: "NI" },
+      observedAt: "2026-08-25T00:00:00.000Z",
+      commitWave: async (_observations, ids) => recordedWaves.push(ids),
+      completed: new Map(),
+      log: () => {},
+      collectWarning: () => {},
+    });
+    assert.ok(recordedWaves.every((ids) => Array.isArray(ids)));
+
+    assert.match(result.error, /circuit opened after 5 consecutive/);
+    // Exactly bounded: 1 root + 5 category successes + 5 failures to trip
+    // the threshold — and NOT one request more (pre-fix this crawled on).
+    assert.equal(calls, 11);
+    assert.equal(result.budgetExhausted, false);
+  });
+
   it("stops cleanly when the search budget runs out mid-crawl", async () => {
     const scripted = {
       "store-1:all:page0": envelope({

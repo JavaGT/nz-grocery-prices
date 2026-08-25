@@ -81,6 +81,8 @@ const MANIFEST_VERSION = 1;
 const PAGE_SIZE = 50;
 /** Facet counts above this exceed the 1,000-hit pagination clamp → split. */
 const SPLIT_THRESHOLD = 900;
+/** Consecutive failed requests before the circuit opens (see crawlStore). */
+export const BREAKER_THRESHOLD = 5;
 /** Reconciliation tolerance: warn when |delta| > 0.5% of the target. */
 const RECONCILE_TOLERANCE = 0.005;
 /** Algolia index caps: totalHits clamps at 1,000 across 20 pages. */
@@ -355,6 +357,13 @@ export async function crawlStore({
   let pagesFetched = 0;
   const emptyPages = [];
 
+  // Circuit breaker: the Foodstuffs API answers rate abuse by hanging
+  // (15s+ tarpits), and hammering through it deepens the block. After
+  // BREAKER_THRESHOLD consecutive failed requests, abort the store run —
+  // resume continues from the manifest on a later, cooler attempt.
+  let consecutiveFailures = 0;
+  let circuitOpenedAt = null;
+
   // Region is a sort-order prefix ("NI"/"SI"); anything else falls back to
   // the adapter default rather than producing an invalid sortOrder (400).
   const region = ["NI", "SI"].includes(store.region) ? store.region : undefined;
@@ -398,9 +407,14 @@ export async function crawlStore({
       const thunk = batch[index];
       if (result.status === "rejected") {
         if (result.reason?.code === "EBREADTHBUDGET") budgetStop = true;
+        consecutiveFailures += 1;
         warn(`${thunk.id} failed: ${result.reason?.message ?? String(result.reason)}`);
+        if (consecutiveFailures >= BREAKER_THRESHOLD) {
+          circuitOpenedAt = thunk.id;
+        }
         continue;
       }
+      consecutiveFailures = 0;
       const { envelope } = result.value;
       pagesFetched += 1;
       // An empty continuation page means the API over-reported totalPages;
@@ -489,16 +503,26 @@ export async function crawlStore({
     }
 
     await commitWave(observations, continuationIds);
-    return { spawned, carried, budgetStop };
+    return { spawned, carried, budgetStop, circuitOpen: circuitOpenedAt !== null };
   }
 
   let pending = [{ kind: "root", id: taskId(store.id, [], 0), categoryPath: [], page: 0 }];
   let budgetExhausted = false;
+  let circuitError;
   while (pending.length > 0) {
     const wave = await runWave(pending);
     if (wave.budgetStop) {
       budgetExhausted = true;
       warn("request budget exhausted before the catalogue was fully crawled");
+      break;
+    }
+    if (wave.circuitOpen) {
+      circuitError =
+        `circuit opened after ${consecutiveFailures} consecutive failed ` +
+        `requests (first: ${circuitOpenedAt}) — the API is blocking this ` +
+        `client; aborting the run. Resume from the manifest after a ` +
+        `cooldown (suggest ≥30 min), then re-run with wider --delay-ms.`;
+      warn(circuitError);
       break;
     }
     pending = wave.spawned.concat(wave.carried);
@@ -526,6 +550,7 @@ export async function crawlStore({
     rootFound: rootTarget !== undefined,
     warnings,
     budgetExhausted,
+    ...(circuitError ? { error: circuitError } : {}),
     reconciliation,
   };
 }
@@ -665,8 +690,14 @@ export async function runCollection(options = {}) {
     budget,
   });
   const bridge = createCrawlerBridge({ crawler, budget });
+  // retry:false — the CRAWLER owns retry policy for breadth (single retry
+  // owner). The adapter's internal fetchWithRetry retries would stack on
+  // top and hammer a tarpitting server with multiplied attempts.
   const clients = Object.fromEntries(
-    retailers.map((name) => [name, new BANNER_CLIENTS[name]({ fetch: bridge.fetch })]),
+    retailers.map((name) => [
+      name,
+      new BANNER_CLIENTS[name]({ fetch: bridge.fetch, retry: false }),
+    ]),
   );
 
   // Resolve stores: explicit objects > queries > pilot default.

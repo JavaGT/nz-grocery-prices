@@ -33,7 +33,16 @@ Blocked by BREADTH-0. Pilot-gated before estate rollout.
 > of ~13 discovery requests the server hangs >15s per call (timeouts, not
 > 429s); slower-spaced requests before/after succeeded. Run aborted at
 > 298/11111 + 310/13858 coverage. Resume machinery worked as designed.
-> Iteration 2: --delay-ms 5000.
+>
+> **Iteration 2 (5s):** WORSE — only 2 requests/store succeeded before
+> hard rejection. Conclusion: the block escalates with recent request
+> history (cooldown window), and retries were STACKED (adapter
+> fetchWithRetry ×4 on top of crawler ×3 ≈ up to 16 attempts/task).
+> Fixed in `2f12425`: breadth disables adapter-internal retries (crawler
+> solely owns policy) and a circuit breaker aborts a store run after 5
+> consecutive failures with a ≥30-min-cooldown message. Also proven live:
+> unchanged prices recorded ZERO duplicate records (content-hash dedup).
+> Next attempt: after a multi-hour cooldown, one store, --delay-ms 10000.
 
 ## Goal
 Every product at every PAK'nSAVE/New World store daily (~2.5M points).

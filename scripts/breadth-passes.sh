@@ -60,9 +60,11 @@ while [ "$pass" -lt "$max_passes" ]; do
   echo "=== pass $pass/$max_passes at ${stamp} ==="
 
   set +e
+  # ${arr[@]+"${arr[@]}"}: macOS bash 3.2 treats empty-array expansion as
+  # unbound under set -u; this idiom expands to nothing when empty.
   node "$repo_root/scripts/foodstuffs-breadth.js" \
     --retailer "$retailer" --delay-ms "$delay_ms" \
-    "${extra_args[@]}" > "/tmp/breadth-pass-$stamp.log" 2>&1
+    ${extra_args[@]+"${extra_args[@]}"} > "/tmp/breadth-pass-$stamp.log" 2>&1
   exit_code=$?
   set -e
 

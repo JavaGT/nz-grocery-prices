@@ -35,14 +35,22 @@ Blocked by BREADTH-0. Pilot-gated before estate rollout.
 > 298/11111 + 310/13858 coverage. Resume machinery worked as designed.
 >
 > **Iteration 2 (5s):** WORSE — only 2 requests/store succeeded before
-> hard rejection. Conclusion: the block escalates with recent request
-> history (cooldown window), and retries were STACKED (adapter
-> fetchWithRetry ×4 on top of crawler ×3 ≈ up to 16 attempts/task).
-> Fixed in `2f12425`: breadth disables adapter-internal retries (crawler
-> solely owns policy) and a circuit breaker aborts a store run after 5
-> consecutive failures with a ≥30-min-cooldown message. Also proven live:
-> unchanged prices recorded ZERO duplicate records (content-hash dedup).
-> Next attempt: after a multi-hour cooldown, one store, --delay-ms 10000.
+> hard rejection. Found retries STACKED (adapter fetchWithRetry ×4 on top
+> of crawler ×3 ≈ up to 16 attempts/task). Fixed in `2f12425`: breadth
+> disables adapter-internal retries (crawler solely owns policy) and a
+> circuit breaker aborts a store run after 5 consecutive failures with a
+> ≥30-min-cooldown message. Also proven live: unchanged prices recorded
+> ZERO duplicate records (content-hash dedup).
+>
+> **Iteration 3 (next day, 10s, single store):** identical 2-then-block
+> pattern after a ~26h cooldown — kills cooldown/pacing/signature/session/
+> cache theories. Bisect with live probes: bare client sequential =
+> **14/14 OK in-process**; crawler+bridge topology same hour = 13/14 with
+> one random 45s hang (Pantry). Conclusion: a persistent INTERMITTENT
+> server-side hang (varies by hour; ~0% to ~100% of requests), independent
+> of category, session, body, headers, and our code. Strategy: repeated
+> resumable passes — breaker caps damage, manifest banks progress — until
+> the catalogue completes; measure hang-rate by hour from pass logs.
 
 ## Goal
 Every product at every PAK'nSAVE/New World store daily (~2.5M points).

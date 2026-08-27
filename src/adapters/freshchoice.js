@@ -43,6 +43,8 @@ function pageCount(html) {
   return Math.max(1, ...pages);
 }
 
+export { pageCount };
+
 function titleCaseSlug(slug) {
   return slug
     .split("-")

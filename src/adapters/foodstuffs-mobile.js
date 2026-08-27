@@ -164,16 +164,13 @@ export class MobileFoodstuffsClient {
 
   /**
    * List all physical stores for this banner.
-   * POST /mobile/store/physical?banner=PNS|MNW  body []
+   * GET /mobile/store/physical?banner=PNS|MNW — live-verified 200; the
+   * server answers POST with 405 allowedMethods:["GET"].
+   * Envelope: {stores:[…]} (normalized by normalizeStoreList).
    */
   async listStores() {
     const raw = await this.#request(
       `/mobile/store/physical?banner=${this.#banner}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "[]",
-      },
     );
     return normalizeStoreList(raw);
   }

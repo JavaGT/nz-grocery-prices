@@ -156,6 +156,17 @@ export async function runCollection(options = {}) {
       `(delay=${delayMs}ms, budget=${budget})`,
   );
 
+  // BLOCKER 1 — wire the checkpoint callback so crawlCgid persists the
+  // manifest after every successfully processed offset window.
+  const checkpoint = (taskId) => {
+    persistManifest().catch((error) => {
+      manifestPersistFailures += 1;
+      collectWarning(
+        `checkpoint persist failed for ${taskId}: ${error.message}`,
+      );
+    });
+  };
+
   // Run the cgid walk.
   const result = await crawlCgid({
     transport,
@@ -169,15 +180,14 @@ export async function runCollection(options = {}) {
     collectWarning,
     clock,
     sleep,
+    checkpoint,
   });
 
   // Commit observations for the entire cgid walk.
   await commitWave(result.observations);
 
-  // Persist the manifest with all completed offsets.
-  for (const [key] of completed) {
-    // Already set by the outer loop; we just persist.
-  }
+  // Final manifest persist (catches any offsets that were checkpointed
+  // during the walk but the async persist is still settling).
   if (completed.size > 0) {
     try {
       await persistManifest();
@@ -192,6 +202,8 @@ export async function runCollection(options = {}) {
   const unhealthy =
     result.budgetExhausted ||
     result.circuitOpen ||
+    result.driftDetected ||
+    result.maxWindowsReached ||
     manifestPersistFailures > 0;
 
   const summary = {
@@ -210,6 +222,8 @@ export async function runCollection(options = {}) {
     ...(result.circuitOpen
       ? { circuitOpen: true, circuitReason: result.circuitReason }
       : {}),
+    ...(result.driftDetected ? { driftDetected: true } : {}),
+    ...(result.maxWindowsReached ? { maxWindowsReached: true } : {}),
     warnings: result.warnings,
   };
   return summary;

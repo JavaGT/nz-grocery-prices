@@ -320,7 +320,6 @@ export async function crawlCgid({
     }
 
     // --- success: parse tiles ---
-    consecutiveFailures = 0;
     const products = parseWarehouseProducts(response.body);
     pagesFetched += 1;
 
@@ -347,10 +346,14 @@ export async function crawlCgid({
       }
 
       // 0-tile page with recognisable grid HTML → catalogue end.
+      consecutiveFailures = 0;
       pagesWith0Tiles += 1;
       log(`${id}: 0 tiles — terminating cgid walk (end of catalogue)`);
       break;
     }
+
+    // Reset consecutive failures only when we have actual products.
+    consecutiveFailures = 0;
 
     // CONCERN 4 — exclude marketplace products unless opted in.
     const filteredProducts = includeMarketplace

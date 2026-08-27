@@ -16,8 +16,10 @@ const STORE = { id: "warehouse:national-online", retailer: "warehouse", name: "T
 const OBSERVED_AT = "2026-08-27T12:00:00.000Z";
 const ORIGIN = "https://www.thewarehouse.co.nz";
 
-function tileHtml(id, price = 5.99) {
-  return `<div class="product-tile" data-gtm-product="{&quot;id&quot;:&quot;${id}&quot;,&quot;name&quot;:&quot;Product ${id}&quot;,&quot;brand&quot;:&quot;Brand&quot;,&quot;price&quot;:${price},&quot;productThenPrice&quot;:null,&quot;productEAN&quot;:&quot;&quot;,&quot;category&quot;:&quot;Grocery&quot;}">
+function tileHtml(id, price = 5.99, extraFields = "") {
+  const jsonFields = `&quot;id&quot;:&quot;${id}&quot;,&quot;name&quot;:&quot;Product ${id}&quot;,&quot;brand&quot;:&quot;Brand&quot;,&quot;price&quot;:${price},&quot;productThenPrice&quot;:null,&quot;productEAN&quot;:&quot;&quot;,&quot;category&quot;:&quot;Grocery&quot;`;
+  const suffix = extraFields ? `,${extraFields}` : "";
+  return `<div class="product-tile" data-gtm-product="{${jsonFields}${suffix}}">
   <a href="/p/product-${id}/${id}" class="embed-responsive item-link"><img class="tile-image" src="https://example.com/img.jpg"></a>
 </div>`;
 }
@@ -63,7 +65,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 3000, sleep: () => Promise.resolve(),
     });
 
     assert.deepEqual(offsets, [0, 32, 64]);
@@ -87,7 +89,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 3000, sleep: () => Promise.resolve(),
     });
 
     assert.equal(result.uniqueCount, 47);
@@ -101,7 +103,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.circuitOpen, true);
@@ -116,7 +118,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.circuitOpen, true);
@@ -132,7 +134,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.circuitOpen, true);
@@ -140,7 +142,7 @@ describe("crawlCgid", () => {
     assert.equal(result.consecutiveFailures, 5);
   });
 
-  it("stops when budget is exhausted", async () => {
+  it("stops when budget is exhausted (all attempts counted)", async () => {
     const transport = fakeTransport((url) => {
       const start = Number(new URL(url).searchParams.get("start"));
       if (start < 96) return { status: 200, body: pageHtml(32, start * 10 + 1) };
@@ -150,7 +152,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, budget: 3, sleep: () => Promise.resolve(),
+      delayMs: 0, budget: 3, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.requestsMade, 3);
@@ -171,7 +173,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.observations.length, 2);
@@ -203,7 +205,7 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, completed, sleep: () => Promise.resolve(),
+      delayMs: 0, completed, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.deepEqual(offsets, [64]);
@@ -228,15 +230,354 @@ describe("crawlCgid", () => {
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
-      delayMs: 0, sleep: () => Promise.resolve(),
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
     assert.equal(result.pagesFetched, 2); // offset 0 page + offset 32 0-tile page
     assert.equal(result.uniqueCount, 32);
     assert.equal(result.circuitOpen, false);
     // 4 transport calls: 2 failures + 1 success for offset 0, then 1 for offset 32 (0-tile).
-    // requestsMade counts only successful/failed responses, not thrown transport errors.
-    assert.equal(result.requestsMade, 2); // offset 0 success + offset 32 0-tile
+    // requestsMade now counts ALL transport attempts (BLOCKER 2 fix).
+    assert.equal(result.requestsMade, 4);
+  });
+
+  // ---- BLOCKER 1 — checkpoint resume ----------------------------------------
+
+  it("checkpoints each offset as completed and calls checkpoint callback", async () => {
+    const checkpoints = [];
+    const completed = new Map();
+
+    const transport = fakeTransport((url) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      if (start === 0) return { status: 200, body: pageHtml(32, 1) };
+      if (start === 32) return { status: 200, body: pageHtml(32, 33) };
+      return { status: 200, body: pageHtml(0) };
+    });
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, completed, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+      checkpoint: (id) => { checkpoints.push(id); },
+    });
+
+    // Both data-bearing offsets should be checkpointed.
+    assert.ok(checkpoints.includes("food:off0"));
+    assert.ok(checkpoints.includes("food:off32"));
+    // The 0-tile page (offset 64) is NOT checkpointed — it terminated the walk.
+    assert.ok(!checkpoints.includes("food:off64"));
+    // completed map should also be populated.
+    assert.equal(completed.has("food:off0"), true);
+    assert.equal(completed.has("food:off32"), true);
+    assert.equal(completed.has("food:off64"), false);
+  });
+
+  it("resume skips checkpointed offsets with zero HTTP", async () => {
+    // First run: collect 1 page, checkpoint offset 0.
+    const completed = new Map();
+    const transport1 = fakeTransport((url) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      if (start === 0) return { status: 200, body: pageHtml(32, 1) };
+      return { status: 200, body: pageHtml(0) };
+    });
+
+    await crawlCgid({
+      transport: transport1, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, completed, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+      checkpoint: () => {},
+    });
+
+    // Completed should have offset 0.
+    assert.equal(completed.has("food:off0"), true);
+
+    // Second run: offset 0 is already in completed, should skip it.
+    const offsets = [];
+    const transport2 = fakeTransport((url) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      offsets.push(start);
+      if (start >= 32) return { status: 200, body: pageHtml(0) };
+      return { status: 200, body: pageHtml(32, 33) };
+    });
+
+    const result2 = await crawlCgid({
+      transport: transport2, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, completed, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+      checkpoint: () => {},
+    });
+
+    // Should NOT have fetched offset 0 — skipped via completed Map.
+    assert.deepEqual(offsets, [32]);
+    assert.equal(result2.pagesFetched, 1);
+  });
+
+  // ---- BLOCKER 2 — budget includes curl failures ---------------------------
+
+  it("stops at exactly budget attempts when transport always throws", async () => {
+    const transport = fakeTransport(() => { throw new Error("ENOTFOUND"); });
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, budget: 3, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+
+    // Exactly 3 attempts made (budget consumed), then stopped.
+    assert.equal(result.requestsMade, 3);
+    assert.equal(result.budgetExhausted, true);
+    assert.equal(result.circuitOpen, false); // breaker is 5, budget hit first
+  });
+
+  it("budget counts transport errors and HTTP errors equally", async () => {
+    // Alternate: throw, 500, throw, 500...
+    let call = 0;
+    const transport = fakeTransport(() => {
+      call += 1;
+      if (call % 2 === 1) throw new Error("ENOTFOUND");
+      return { status: 500, body: "error" };
+    });
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, budget: 4, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+
+    assert.equal(result.requestsMade, 4);
+    assert.equal(result.budgetExhausted, true);
+  });
+
+  // ---- BLOCKER 3 — fingerprint drift + max ceiling -------------------------
+
+  it("detects repeated window fingerprint and stops as drift", async () => {
+    // Every page returns the same 32 product IDs → fingerprint repeats.
+    const transport = fakeTransport(() => ({
+      status: 200,
+      body: pageHtml(32, 1), // always ids 1–32
+    }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+
+    assert.equal(result.driftDetected, true);
+    assert.equal(result.unhealthyTermination, true);
+    assert.ok(result.warnings.some((w) => w.includes("repeated product fingerprint")));
+    // Should have processed exactly 1 page (second hit repeated fp and stopped).
+    assert.equal(result.pagesFetched, 2); // first fetch (ok), second repeated → stop
+  });
+
+  it("stops at maxWindows ceiling", async () => {
+    // Return 1 product per page so we can fit many pages in budget.
+    function oneTilePage(id) {
+      return { status: 200, body: `<html><body>${tileHtml(String(id))}</body></html>` };
+    }
+    let callIdx = 0;
+    const transport = fakeTransport(() => {
+      callIdx += 1;
+      return oneTilePage(callIdx);
+    });
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+      maxWindows: 3,
+      budget: 100,
+    });
+
+    assert.equal(result.maxWindowsReached, true);
+    assert.equal(result.pagesFetched, 3);
+  });
+
+  // ---- CONCERN 4 — marketplace exclusion -----------------------------------
+
+  it("excludes marketplace products by default", async () => {
+    // Page has 2 regular products and 1 marketplace product.
+    const regularTiles = tileHtml("1", 5.99) + "\n" + tileHtml("2", 3.50);
+    const marketplaceTile = tileHtml("3", 10.0, '&quot;marketplaceProduct&quot;:true');
+    const body = `<html><body>${regularTiles}\n${marketplaceTile}</body></html>`;
+
+    const transport = fakeTransport(() => ({ status: 200, body }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
+    assert.equal(result.uniqueCount, 2);
+    // Product 3 should be excluded.
+    assert.ok(!result.observations.some((o) => o.product.id === "warehouse:3"));
+  });
+
+  it("includes marketplace products when includeMarketplace is true", async () => {
+    const regularTiles = tileHtml("1", 5.99);
+    const marketplaceTile = tileHtml("3", 10.0, '&quot;marketplaceProduct&quot;:true');
+    const body = `<html><body>${regularTiles}\n${marketplaceTile}</body></html>`;
+
+    const transport = fakeTransport(() => ({ status: 200, body }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, includeMarketplace: true,
+      sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
+    assert.equal(result.uniqueCount, 2);
+    assert.ok(result.observations.some((o) => o.product.id === "warehouse:3"));
+  });
+
+  // ---- CONCERN 5 — pacing floor -------------------------------------------
+
+  it("throws when delayMs < 3000 without unsafeFastPacing", async () => {
+    await assert.rejects(
+      crawlCgid({
+        transport: () => {}, cgid: "food",
+        store: STORE, observedAt: OBSERVED_AT,
+        delayMs: 500, sleep: () => Promise.resolve(),
+      }),
+      /pacing floor/,
+    );
+  });
+
+  it("accepts delayMs < 3000 with unsafeFastPacing", async () => {
+    // Just validates it doesn't throw; the actual walk needs a real transport.
+    // We'll pass a transport that immediately returns 0 tiles.
+    const transport = fakeTransport(() => ({ status: 200, body: pageHtml(0) }));
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 500, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+    assert.equal(result.pagesWith0Tiles, 1);
+  });
+
+  // ---- CONCERN 6 — zero-parse legitimacy -----------------------------------
+
+  it("treats empty-grid HTML as clean termination", async () => {
+    // Genuine empty grid page (HTML structure, no product tiles).
+    const body = '<html><body><div class="product-grid"></div></body></html>';
+    const transport = fakeTransport(() => ({ status: 200, body }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
+    // Clean termination: no circuit open, no warnings about non-grid.
+    assert.equal(result.pagesWith0Tiles, 1);
+    assert.equal(result.circuitOpen, false);
+    assert.equal(result.consecutiveFailures, 0);
+  });
+
+  it("treats Cloudflare challenge body as failure (counts toward breaker)", async () => {
+    // Cloudflare challenge page (no product tiles).
+    const body = '<html><body><h1>Attention Required!</h1><p>cf-browser-verification</p></body></html>';
+    const transport = fakeTransport(() => ({ status: 200, body }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
+    // Should treat it as a failure — it will retry 5 times, then open the
+    // circuit since consecutive non-grid failures accumulate.
+    assert.equal(result.circuitOpen, true);
+    assert.ok(result.circuitReason.includes("5 consecutive non-grid responses"));
+    assert.ok(result.warnings.some((w) => w.includes("non-grid")));
+  });
+
+  it("opens breaker after 5 consecutive non-grid responses", async () => {
+    const body = '<html><body><h1>Attention Required!</h1></body></html>';
+    const transport = fakeTransport(() => ({ status: 200, body }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
+    assert.equal(result.circuitOpen, true);
+    assert.ok(result.circuitReason.includes("5 consecutive non-grid responses"));
+    assert.equal(result.requestsMade, 5);
+  });
+
+  // ---- NIT 7 — execFile + hostile strings -----------------------------------
+
+  it("createCurlTransport passes args as an array (no shell:true)", async () => {
+    const capturedArgs = [];
+    const ef = async (_cmd, args, _opts) => {
+      capturedArgs.push(...args);
+      return { stdout: "<html>OK</html>\n200" };
+    };
+    const t = createCurlTransport({ execFile: ef, curlPath: "curl", userAgent: "test" });
+    await t("https://example.com/t");
+
+    // Must be passed as array elements, never a concatenated shell string.
+    assert.ok(Array.isArray(capturedArgs));
+    // The URL should be a single argv element.
+    const urlArg = capturedArgs[capturedArgs.length - 1];
+    assert.equal(urlArg, "https://example.com/t");
+  });
+
+  it("handles hostile cgid strings without shell injection", async () => {
+    // Create a transport that captures args and passes through
+    const capturedArgs = [];
+    const ef = async (_cmd, args, _opts) => {
+      capturedArgs.push(...args);
+      return { stdout: "<html>OK</html>\n200" };
+    };
+    const t = createCurlTransport({ execFile: ef, curlPath: "curl", userAgent: "test" });
+
+    await t("https://example.com/updategrid?cgid=foo'bar&start=0");
+
+    // The URL must be a single argv element, not split on injected chars.
+    const urlArg = capturedArgs[capturedArgs.length - 1];
+    assert.equal(urlArg, "https://example.com/updategrid?cgid=foo'bar&start=0");
+    assert.ok(Array.isArray(capturedArgs));
+  });
+
+  it("hostile cgid strings produce correct gridUrl via crawlCgid", async () => {
+    // Setup: hostile cgid with spaces, quotes, semicolons
+    const allArgs = [];
+    const ef = async (_cmd, args, _opts) => {
+      allArgs.push(...args);
+      return { stdout: "page\n200" };
+    };
+    const transport = createCurlTransport({ execFile: ef, curlPath: "curl", userAgent: "test" });
+
+    await crawlCgid({
+      transport,
+      cgid: "foo'bar; rm -rf /",
+      store: STORE,
+      observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+
+    // The URL should be one unbroken argv element despite the hostile chars.
+    const urlArg = allArgs[allArgs.length - 1];
+    // URLSearchParams encodes spaces as +, not %20 — just check for key
+    // encoded characters and that the URL isn't split.
+    assert.ok(urlArg.includes("cgid=foo%27bar"));
+    assert.ok(urlArg.includes("start=0"));
+    // No shell-escape chars should break the array.
+    assert.equal(allArgs.filter((a) => a.includes("rm -rf")).length, 0);
   });
 
 });

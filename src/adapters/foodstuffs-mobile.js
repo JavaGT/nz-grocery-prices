@@ -48,6 +48,8 @@ export class MobileFoodstuffsClient {
   #banner;
   #config;
   #timeout;
+  #delayMs;
+  #lastCompletedAt = 0;
 
   constructor(options = {}) {
     const banner = options.banner ?? "PNS";
@@ -64,6 +66,20 @@ export class MobileFoodstuffsClient {
     );
     this.#userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#timeout = options.timeout ?? 20000;
+    // Politeness floor between COMPLETED requests on this client instance.
+    // Pacing lives here rather than in a transport wrapper because the
+    // pilot proved every wrapper-layer (crawler host slots) hung against
+    // this backend while bare sequential fetches flowed fine.
+    this.#delayMs = options.delayMs ?? 0;
+  }
+
+  /** Enforce the minimum gap since the last completed request. */
+  async #pace() {
+    if (this.#delayMs <= 0) return;
+    const gap = Date.now() - this.#lastCompletedAt;
+    if (gap < this.#delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, this.#delayMs - gap));
+    }
   }
 
   /** Returns the canonical retailer name for the banner. */
@@ -93,6 +109,7 @@ export class MobileFoodstuffsClient {
     if (this.#authPromise) return this.#authPromise;
 
     this.#authPromise = (async () => {
+      await this.#pace();
       const response = await this.#fetch(
         `${this.#apiOrigin}/mobile/user/login/guest`,
         {
@@ -105,6 +122,7 @@ export class MobileFoodstuffsClient {
           body: JSON.stringify({ banner: this.#banner }),
         },
       );
+      this.#lastCompletedAt = Date.now();
 
       if (!response.ok) {
         throw new Error(
@@ -145,21 +163,27 @@ export class MobileFoodstuffsClient {
    * user-agent; passes through all other init fields (method, body, headers).
    */
   async #request(path, init = {}) {
+    await this.#pace();
     const token = await this.#authenticate();
-    const response = await this.#fetch(`${this.#apiOrigin}${path}`, {
-      ...init,
-      // Hard per-request ceiling: the backend intermittently accepts a
-      // connection and then never answers (observed in pilot runs). Without
-      // this, hung sockets stall the crawl forever AND starve the circuit
-      // breaker, which can only count completed-but-failed requests.
-      signal: AbortSignal.timeout(this.#timeout),
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${token}`,
-        "user-agent": this.#userAgent,
-        ...init.headers,
-      },
-    });
+    let response;
+    try {
+      response = await this.#fetch(`${this.#apiOrigin}${path}`, {
+        ...init,
+        // Hard per-request ceiling: the backend intermittently accepts a
+        // connection and then never answers (observed in pilot runs). Without
+        // this, hung sockets stall the crawl forever AND starve the circuit
+        // breaker, which can only count completed-but-failed requests.
+        signal: AbortSignal.timeout(this.#timeout),
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          "user-agent": this.#userAgent,
+          ...init.headers,
+        },
+      });
+    } finally {
+      this.#lastCompletedAt = Date.now();
+    }
 
     if (!response.ok) {
       throw new Error(

@@ -19,7 +19,8 @@
  * Records through PriceArchive.record as offer revisions only (no
  * snapshotScope). Resume via checkpointed continuation pages.
  *
- * Requests flow through scripts/lib/crawler.js via the same bridge pattern
+ * Requests are paced INSIDE MobileFoodstuffsClient (delayMs) and flow
+ * over a bare injected transport — see the transport note in runCollection.
  * as foodstuffs-breadth.js — the injected fetch is the crawler bridge, so
  * every HTTP call (auth included) becomes a crawler task sharing one
  * per-host pacing slot.
@@ -662,15 +663,23 @@ export async function runCollection(options = {}) {
   assertNotLiveArchive(file, { forceLive });
   const manifestPath = `${resolve(file)}${MANIFEST_SUFFIX}`;
 
-  const crawler = createCrawler({
-    fetch: transport,
-    minHostDelayMs: delayMs,
-    budget,
-  });
-  const bridge = createCrawlerBridge({ crawler, budget });
+  // Direct transport with client-side pacing: the pilot proved every
+  // wrapper-layer (crawler host slots) hung against this backend while
+  // bare sequential fetches flowed fine, so pacing lives in the client
+  // (delayMs) and the crawl engine stays untouched.
+  let wireRequests = 0;
+  const pacingTransport =
+    delayMs > 0
+      ? undefined // pacing is enforced inside the client via delayMs
+      : transport;
+  void pacingTransport;
   const client = new MobileFoodstuffsClient({
     banner: retailer === "newworld" ? "MNW" : "PNS",
-    fetch: bridge.fetch,
+    fetch: (...args) => {
+      wireRequests += 1;
+      return transport(...args);
+    },
+    delayMs,
   });
 
   // Resolve stores.
@@ -730,7 +739,7 @@ export async function runCollection(options = {}) {
   };
 
   const claimBudget = (want) =>
-    Math.max(0, Math.min(want, budget - bridge.admittedCount()));
+    Math.max(0, Math.min(want, budget - wireRequests));
 
   log(
     `foodstuffs-mobile-breadth: ${Array.isArray(stores) ? stores.map((s) => s.name).join(", ") : stores.name} → ${file}`,
@@ -797,7 +806,7 @@ export async function runCollection(options = {}) {
       warnings: result.warnings,
     })),
     observationsRecorded: addedTotal,
-    httpRequestsAdmitted: bridge.admittedCount(),
+    httpRequestsAdmitted: wireRequests,
   };
   return summary;
 }

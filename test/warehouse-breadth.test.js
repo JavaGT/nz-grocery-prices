@@ -81,7 +81,7 @@ describe("crawlCgid", () => {
       const start = Number(new URL(url).searchParams.get("start"));
       if (start === 0) return { status: 200, body: pageHtml(32, 1) };
       if (start === 32) return { status: 200, body: pageHtml(32, 16) };
-      return { status: 200, body: pageHtml(0) };
+      return { status: 200, body: pageHtml(0) }; // offset 64 → terminate
     });
 
     const result = await crawlCgid({
@@ -161,7 +161,12 @@ describe("crawlCgid", () => {
   });
 
   it("produces valid observations matching expected shape", async () => {
-    const transport = fakeTransport(() => ({ status: 200, body: pageHtml(2, 1) }));
+    let count = 0;
+    const transport = fakeTransport((url) => {
+      count += 1;
+      if (count <= 1) return { status: 200, body: pageHtml(2, 1) };
+      return { status: 200, body: pageHtml(0) };
+    });
 
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,

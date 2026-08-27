@@ -57,11 +57,12 @@ At the observed ~150–350 ms and polite 3–5 s spacing: **~12–25 min/store**
 
 ## Open questions (next probes)
 
+- ~~Whether prices differ per store for identical productId~~ **RESOLVED
+  2026-08-27:** Kilbirnie (NI) vs Dunedin (SI) Pantry page — 20 shared SKUs,
+  **14 priced differently** (UHT milk 209¢ vs 235¢). storeId scoping
+  confirmed; closes the reviewer prerequisite before estate rollout.
 - New World via `banner=MNW` / path segment `MNW` + its 148 stores.
 - Full `sortOrder` enum (only `Popularity` verified).
-- Whether prices differ per store for identical productId across two PNS
-  stores (Kaitaia vs Kilbirnie returned the same price for the one shared
-  product probed; web-edge data already proved per-store pricing generally).
 - Long-run rate tolerance of THIS host (single evening probe set only; the
   specials path has months of evidence it is block-free).
 

@@ -86,6 +86,18 @@ Snapshot scope stays "specials"; breadth writes offer revisions only.
 
 Blocked by BREADTH-0. Pilot: Queenstown + Avondale.
 
+> **Status: IMPLEMENTATION VALIDATED (2026-08-28).** Collector
+> (`feat(breadth2)`), Luna review → no blockers but 10 findings fixed in two
+> rounds (`93bc861` implementer, `9966dd2` coordinator rewrite: strictly
+> sequential single-flight dispatch, lazy one-page-ahead spawning so empty
+> pages terminate categories, breaker counts completion-order failures;
+> verified clean by Luna verification round).
+> **Live smoke:** FreshChoice Avondale (pilot default) — **3,092 unique
+> products** (matches research estimate ~3,193 incl. site drift), 696
+> pages / 699 requests / **0 failures**, 6,185 records (~35 min at 3s
+> pacing). Sitemap → 607 category walks with zero-card termination working
+> throughout.
+
 ## Goal
 Full catalogue across all 76 storefronts (~530k points).
 

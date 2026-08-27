@@ -18,6 +18,10 @@ import { toPriceObservation } from "./foodstuffs.js";
 const DEFAULT_API_ORIGIN = "https://api-prod.prod.fsniwaikato.kiwi/prod";
 const DEFAULT_USER_AGENT = "PAKnSAVEApp/4.32.0 (App Version)";
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+/** Extra attempts for network errors / 5xx on top of the first try. */
+const RETRYABLE_ATTEMPTS = 2;
+/** Backoff between retries, scaled by attempt number. */
+const RETRY_BACKOFF_MS = 3000;
 
 /** Banner → query-param casing + URL path segment mapping. */
 const BANNER_CONFIG = Object.freeze({
@@ -50,7 +54,6 @@ export class MobileFoodstuffsClient {
   #timeout;
   #delayMs;
   #lastCompletedAt = 0;
-
   constructor(options = {}) {
     const banner = options.banner ?? "PNS";
     const config = BANNER_CONFIG[banner];
@@ -163,35 +166,54 @@ export class MobileFoodstuffsClient {
    * user-agent; passes through all other init fields (method, body, headers).
    */
   async #request(path, init = {}) {
-    await this.#pace();
     const token = await this.#authenticate();
-    let response;
-    try {
-      response = await this.#fetch(`${this.#apiOrigin}${path}`, {
-        ...init,
-        // Hard per-request ceiling: the backend intermittently accepts a
-        // connection and then never answers (observed in pilot runs). Without
-        // this, hung sockets stall the crawl forever AND starve the circuit
-        // breaker, which can only count completed-but-failed requests.
-        signal: AbortSignal.timeout(this.#timeout),
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
-          "user-agent": this.#userAgent,
-          ...init.headers,
-        },
-      });
-    } finally {
-      this.#lastCompletedAt = Date.now();
+    // Bounded retries: ONE owner (this client — nothing wraps mobile
+    // fetches). Transient connect blips and 5xx must not kill a nightly
+    // pass; pacing applies between attempts. Timeout ceiling still caps
+    // each attempt so silent hangs become counted failures.
+    const maxAttempts = 1 + RETRYABLE_ATTEMPTS;
+    let lastError;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (attempt > 0) await this.#pace();
+      try {
+        const response = await this.#fetch(`${this.#apiOrigin}${path}`, {
+          ...init,
+          signal: AbortSignal.timeout(this.#timeout),
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${token}`,
+            "user-agent": this.#userAgent,
+            ...init.headers,
+          },
+        });
+        this.#lastCompletedAt = Date.now();
+        if (
+          response.status >= 500 &&
+          response.status <= 599 &&
+          attempt < maxAttempts - 1
+        ) {
+          lastError = new Error(`Mobile request ${path} failed: 5xx`);
+          await new Promise((resolve) =>
+            setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)),
+          );
+          continue;
+        }
+        if (!response.ok) {
+          throw new Error(
+            `Mobile request ${path} failed: ${response.status} ${response.statusText}`,
+          );
+        }
+        return response.json();
+      } catch (error) {
+        this.#lastCompletedAt = Date.now();
+        lastError = error;
+        if (attempt >= maxAttempts - 1) throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)),
+        );
+      }
     }
-
-    if (!response.ok) {
-      throw new Error(
-        `Mobile request ${path} failed: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    return response.json();
+    throw lastError ?? new Error(`Mobile request ${path} failed`);
   }
 
   /**

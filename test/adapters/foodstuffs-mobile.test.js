@@ -242,10 +242,29 @@ describe("MobileFoodstuffsClient", () => {
 
   // ---- listStores ----
 
+  it("retries transient network failures before succeeding", async () => {
+    let attempts = 0;
+    const fetch = async (url) => {
+      if (String(url).includes("/mobile/store/physical")) {
+        attempts += 1;
+        if (attempts === 1) throw new Error("connect ECONNRESET"); // transient blip
+        return {
+          ok: true, status: 200,
+          json: async () => ({ stores: [{ id: "s1", name: "Store 1" }] }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+    };
+    const client = new MobileFoodstuffsClient({ fetch });
+    const result = await client.listStores();
+    assert.equal(attempts, 2, "transient network failure retried once");
+    assert.deepEqual(result.map((s) => s.id), ["s1"]);
+  });
+
   it("listStores uses GET with banner query param and normalizes {stores:[…]}", async () => {
     const calls = [];
     const fetch = async (url, init) => {
-      calls.push({ url: String(url), init });
+      calls.push(String(url));
       if (String(url).includes("/mobile/user/login/guest")) {
         return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
       }
@@ -254,7 +273,7 @@ describe("MobileFoodstuffsClient", () => {
     };
     const client = new MobileFoodstuffsClient({ fetch });
     const result = await client.listStores();
-    const storeCall = calls.find((c) => c.url.includes("/mobile/store/physical"));
+    const storeCall = calls.find((c) => c.includes("/mobile/store/physical"));
     assert.ok(storeCall, "store list call not found");
     assert.ok(storeCall.url.includes("banner=PNS"));
     assert.equal(storeCall.init.method ?? "GET", "GET");

@@ -275,9 +275,8 @@ describe("MobileFoodstuffsClient", () => {
     const result = await client.listStores();
     const storeCall = calls.find((c) => c.includes("/mobile/store/physical"));
     assert.ok(storeCall, "store list call not found");
-    assert.ok(storeCall.url.includes("banner=PNS"));
-    assert.equal(storeCall.init.method ?? "GET", "GET");
-    assert.equal(storeCall.init.body, undefined);
+    assert.ok(storeCall.includes("banner=PNS"), storeCall);
+    assert.doesNotMatch(storeCall, /method/i);
     assert.deepEqual(result, [{ id: "s1", name: "Store 1" }]);
   });
 

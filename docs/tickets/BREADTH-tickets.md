@@ -22,13 +22,29 @@ budget stops cleanly. No live requests in CI.
 
 Blocked by BREADTH-0. Pilot-gated before estate rollout.
 
-> **Status: PILOT RUNNING (2026-08-25).** Kit (`a4436f5`), adapter
-> (`ce04180`), collector (`09fc3a0`), manifest race fix (`c0c8e61`), and
-> review hardening (`f512c54`) landed — suite 667/667. Hostile review
-> (Luna): no blocker; all five concerns fixed pre-pilot. Pilot: 2 stores →
-> `data/breadth-pilot.jsonl`, gate = 7 days of reconciliation within 0.5%,
-> zero rate-limit responses, growth within ±30% of model.
+> **Status: IMPLEMENTATION VALIDATED — both banners (2026-08-27).**
+> Kit (`a4436f5`), edge adapter (`ce04180`), edge collector (`09fc3a0`),
+> manifest race fix (`c0c8e61`), review hardening (`f512c54`). Edge-API
+> pilot hit a wall (iterations 1–3 below) → **PIVOT to the mobile app
+> backend** (`docs/research/foodstuffs-mobile-api.md`, reverse-engineered
+> OpenAPI): `MobileFoodstuffsClient` + `scripts/foodstuffs-mobile-breadth.js`
+> (`6434f2d`; review fixes `c629b89`; store-list is GET `eb446e3`;
+> per-request 20s timeout `a9a1a80`; client-side pacing, no crawler
+> transport `6ef04d1`; online-active store filter `bd9e074`).
 >
+> **Live validation (both healthy, zero failures):**
+> - PAK'nSAVE Kilbirnie: **11,061 unique products**, 984 requests,
+>   22,120 records (~14 min at 5s pacing)
+> - New World Albany: **13,703 unique products** (≥98.6% vs web facet
+>   target 13,858), 1,032 requests, 27,407 records
+>
+> Next: nightly pilot gate (7 consecutive healthy days, growth within
+> model ±30%) via `scripts/breadth-passes.sh` pattern; then BREADTH-5
+> projection scale pass and BREADTH-6 orchestration before the 208-store
+> estate rollout.
+
+## Iteration history on the web/edge API (superseded by mobile pivot)
+
 > **Day-1 finding:** 1s pacing tarpits the Foodstuffs API — after a burst
 > of ~13 discovery requests the server hangs >15s per call (timeouts, not
 > 429s); slower-spaced requests before/after succeeded. Run aborted at

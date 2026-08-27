@@ -56,3 +56,18 @@ measured.
 
 Specials snapshots continue unchanged throughout — history continuity for
 existing sales detection is never broken.
+
+## Confirmation review (GLM 5.3 Flash, 2026-08-27)
+
+GO for BREADTH-2/3/4. Highlights:
+- Foodstuffs mobile pivot CONFIRMED (edge tarpit evidence strong; live
+  validation 11,061 PNS / 13,703 NW, zero failures).
+- CONCERN resolved with evidence: per-store pricing on the mobile backend
+  confirmed — Kilbirnie vs Dunedin Pantry page, 20 shared SKUs, **14 priced
+  differently**. Estate rollout of BREADTH-1 unblocked.
+- Woolworths: no separate app API exists (Apigee X serves web+app+rewards);
+  BREADTH-4 proceeds on the web API as plan B, gated on a cookie jar,
+  dasFilter format verification, and Akamai signals feeding the breaker.
+- Ops note: reserve ≥2× baseline disk before the first full estate pass.
+
+Per-store pricing evidence: docs/research/foodstuffs-mobile-api.md.

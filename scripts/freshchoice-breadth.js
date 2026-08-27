@@ -147,105 +147,135 @@ export async function crawlStore({
       page,
     );
     const products = parseFreshChoiceProducts(html);
-    const maxPage = page === 0 ? pageCount(html) : 0; // only parse on root
+    const maxPage = pageCount(html);
     return { products, maxPage, html };
   }
 
+  /**
+   * STRICTLY SEQUENTIAL request execution: one request in flight at a
+   * time, processed completion→completion so the client's pacing floor
+   * holds between every dispatch (waves + Promise.all bypassed it), the
+   * circuit breaker counts true consecutive failures in completion order,
+   * and an empty page terminates a category lazily — continuations are
+   * spawned ONE PAGE AHEAD, never batched, so nothing beyond catalogue
+   * end is ever requested.
+   */
   async function runWave(thunks) {
-    const granted = claimBudget(thunks.length);
-    if (granted <= 0) return { spawned: [], carried: thunks, budgetStop: true };
-    const batch = thunks.slice(0, granted);
-    const carried = thunks.slice(granted);
-
-    const settled = await Promise.allSettled(
-      batch.map((thunk) =>
-        fetchAndParse(thunk.categoryPath, thunk.page).then((result) => ({
-          thunk,
-          result,
-        })),
-      ),
-    );
-
     const spawned = [];
     const observations = [];
     const continuationIds = [];
     let budgetStop = false;
 
-    for (const [index, outcome] of settled.entries()) {
-      const thunk = batch[index];
-      if (outcome.status === "rejected") {
-        const reason = outcome.reason;
-        if (reason?.code === "EBREADTHBUDGET") budgetStop = true;
-        consecutiveFailures += 1;
-        warn(`${thunk.id} failed: ${reason?.message ?? String(reason)}`);
-        if (consecutiveFailures >= BREAKER_THRESHOLD) {
-          circuitOpenedAt = thunk.id;
+    let index = 0;
+    while (index < thunks.length) {
+      // Budget admission happens per request, exactly when it goes out.
+      if (claimBudget(1) <= 0) {
+        budgetStop = true;
+        return {
+          spawned,
+          carried: thunks.slice(index),
+          budgetStop,
+          circuitOpen: circuitOpenedAt !== null,
+        };
+      }
+
+      const thunk = thunks[index];
+      index += 1;
+      try {
+        const result = await fetchAndParse(thunk.categoryPath, thunk.page);
+        consecutiveFailures = 0;
+        pagesFetched += 1;
+        const { products } = result;
+
+        if (
+          thunk.kind === "leaf" &&
+          thunk.page >= 1 &&
+          products.length === 0
+        ) {
+          // Past catalogue end: nothing further is spawned for this path.
+          emptyPages.push(thunk.id);
+          continue;
         }
-        continue;
-      }
-      consecutiveFailures = 0;
-      const { result } = outcome.value;
-      pagesFetched += 1;
 
-      const { products } = result;
-
-      // Empty page past catalogue end → stop scheduling more for this category.
-      if (thunk.kind === "leaf" && thunk.page >= 1 && products.length === 0) {
-        emptyPages.push(thunk.id);
-        warn(
-          `${thunk.id}: page beyond catalogue end (0 products) — stopped scheduling further pages for this category`,
+        const fresh = absorbProducts(seen, products);
+        for (const product of fresh) {
+          const observation = toFreshChoiceObservation(product, store, {
+            observedAt,
+            origin: store.origin,
+          });
+          if (observation) observations.push(observation);
+        }
+        log(
+          `${thunk.id}: +${fresh.length} new (${seen.size} unique, ` +
+            `${observations.length} priced this crawl)`,
         );
-        continue;
-      }
 
-      const fresh = absorbProducts(seen, products);
-      for (const product of fresh) {
-        const observation = toFreshChoiceObservation(product, store, {
-          observedAt,
-          origin: store.origin,
-        });
-        if (observation) observations.push(observation);
-      }
-      log(
-        `${thunk.id}: +${fresh.length} new (${seen.size} unique, ` +
-          `${observations.length} priced this crawl)`,
-      );
+        const nextPage = thunk.page + 1;
+        const hasNext =
+          thunk.maxPage === undefined || nextPage < thunk.maxPage;
 
-      if (thunk.kind === "drill") {
-        // Page 0 of a category: decide whether there are more pages.
-        const { maxPage } = result;
-        if (maxPage > 1) {
-          for (let p = 1; p < maxPage; p += 1) {
-            const id = taskId(store.slug, thunk.categoryPath, p);
+        if (thunk.kind === "drill") {
+          if (result.maxPage > 1 && products.length > 0) {
+            const id = taskId(store.slug, thunk.categoryPath, 1);
             if (!completed.has(id) && !planned.has(id)) {
               planned.add(id);
               spawned.push({
                 kind: "leaf",
                 id,
                 categoryPath: thunk.categoryPath,
-                page: p,
+                page: 1,
+                maxPage: result.maxPage,
               });
             }
           }
-          // If page 0 had zero products and maxPage is 1, nothing to do.
-          if (products.length === 0 && maxPage === 1) {
-            warn(
-              `${thunk.id}: category page 0 returned 0 products — skipping`,
-            );
+        } else if (thunk.kind === "leaf" && hasNext) {
+          const id = taskId(store.slug, thunk.categoryPath, nextPage);
+          if (!completed.has(id) && !planned.has(id)) {
+            planned.add(id);
+            spawned.push({
+              kind: "leaf",
+              id,
+              categoryPath: thunk.categoryPath,
+              page: nextPage,
+              maxPage: thunk.maxPage,
+            });
           }
         }
-      } else if (thunk.kind === "leaf" && thunk.page >= 1) {
-        continuationIds.push(thunk.id);
+
+        // Only committed continuation pages checkpoint; discovery reruns.
+        if (thunk.kind === "leaf" && thunk.page >= 1) {
+          continuationIds.push(thunk.id);
+        }
+      } catch (error) {
+        if (error?.code === "EBREADTHBUDGET") {
+          budgetStop = true;
+          return {
+            spawned,
+            carried: thunks.slice(index - 1),
+            budgetStop,
+            circuitOpen: circuitOpenedAt !== null,
+          };
+        }
+        consecutiveFailures += 1;
+        warn(`${thunk.id} failed: ${error?.message ?? String(error)}`);
+        if (consecutiveFailures >= BREAKER_THRESHOLD) {
+          circuitOpenedAt = thunk.id;
+          warn(
+            `circuit opened after ${BREAKER_THRESHOLD} consecutive failed ` +
+              `requests — aborting; resume from the manifest later.`,
+          );
+          return {
+            spawned,
+            carried: [],
+            budgetStop,
+            circuitOpen: true,
+          };
+        }
       }
     }
 
     await commitWave(observations, continuationIds);
-    return {
-      spawned,
-      carried,
-      budgetStop,
-      circuitOpen: circuitOpenedAt !== null,
-    };
+    return { spawned, carried: [], budgetStop, circuitOpen: circuitOpenedAt !== null };
   }
 
   // ---- entry point -------------------------------------------------------

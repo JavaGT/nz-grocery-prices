@@ -483,15 +483,15 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       assert.equal(second.healthy, true);
 
       // Assert: run 2 issues ZERO continuation URLs that were in run 1's manifest.
-      const run2CategoryUrls = urls2.filter((u) => u.includes("/category/"));
-      for (const url of run2CategoryUrls) {
-        const matched = continuationIds.some((id) => url.includes(id.replace(":", "/category/")));
-        assert.equal(
-          matched,
-          false,
-          `run 2 should not fetch continuation URL: ${url}`,
-        );
-      }
+      const run2ContinuationUrls = urls2.filter((u) =>
+        // Real shape per the adapter: /category/<slug>?page=<n>
+        /\/category\/bakery\?page=(1|2)([&/]|$)/.test(u),
+      );
+      assert.deepEqual(
+        run2ContinuationUrls,
+        [],
+        `run 2 refetched recorded pages: ${run2ContinuationUrls.join(", ")}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

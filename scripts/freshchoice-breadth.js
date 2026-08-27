@@ -171,6 +171,10 @@ export async function crawlStore({
       // Budget admission happens per request, exactly when it goes out.
       if (claimBudget(1) <= 0) {
         budgetStop = true;
+        // Luna fix: commit observations already collected before aborting —
+        // never discard fetched data; unprocessed thunks stay in `carried`
+        // so the next run resumes exactly here.
+        await commitWave(observations, continuationIds);
         return {
           spawned,
           carried: thunks.slice(index),
@@ -264,6 +268,10 @@ export async function crawlStore({
             `circuit opened after ${BREAKER_THRESHOLD} consecutive failed ` +
               `requests — aborting; resume from the manifest later.`,
           );
+          // Luna fix: this failure yields no observation, but every
+          // SUCCESSFUL request earlier in this wave collected data — archive
+          // it before aborting, checkpointing exactly those committed ids.
+          await commitWave(observations, continuationIds);
           return {
             spawned,
             carried: [],

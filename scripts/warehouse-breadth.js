@@ -145,9 +145,20 @@ export async function runCollection(options = {}) {
   let addedTotal = 0;
   let manifestPersistFailures = 0;
 
-  const commitWave = async (obs) => {
-    if (obs.length > 0) {
-      addedTotal += await archive.record(obs);
+  // mark-after-RECORD: archive the window's observations, and only then
+  // checkpoint its manifest entry (Luna blocker 1 — checkpoint-before-record
+  // could permanently skip windows whose data never landed).
+  const onWindow = async (taskId, observations) => {
+    if (observations.length > 0) {
+      addedTotal += await archive.record(observations);
+    }
+    try {
+      await persistManifest();
+    } catch (error) {
+      manifestPersistFailures += 1;
+      collectWarning(
+        `checkpoint persist failed for ${taskId}: ${error.message}`,
+      );
     }
   };
 
@@ -156,18 +167,8 @@ export async function runCollection(options = {}) {
       `(delay=${delayMs}ms, budget=${budget})`,
   );
 
-  // BLOCKER 1 — wire the checkpoint callback so crawlCgid persists the
-  // manifest after every successfully processed offset window.
-  const checkpoint = (taskId) => {
-    persistManifest().catch((error) => {
-      manifestPersistFailures += 1;
-      collectWarning(
-        `checkpoint persist failed for ${taskId}: ${error.message}`,
-      );
-    });
-  };
-
-  // Run the cgid walk.
+  // Run the cgid walk. Per-window recording + checkpointing happens via
+  // onWindow (mark-after-record); the legacy checkpoint hook is dropped.
   const result = await crawlCgid({
     transport,
     cgid,
@@ -180,11 +181,8 @@ export async function runCollection(options = {}) {
     collectWarning,
     clock,
     sleep,
-    checkpoint,
+    onWindow,
   });
-
-  // Commit observations for the entire cgid walk.
-  await commitWave(result.observations);
 
   // Final manifest persist (catches any offsets that were checkpointed
   // during the walk but the async persist is still settling).

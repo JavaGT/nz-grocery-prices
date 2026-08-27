@@ -142,7 +142,12 @@ function fingerprintProductIds(products) {
  * @param {(msg: string) => void} [options.collectWarning]
  * @param {() => number} [options.clock]  — returns ms timestamp
  * @param {(ms: number) => Promise<void>} [options.sleep]
- * @param {(taskId: string) => void} [options.checkpoint]  — called after each
+ * @param {(taskId: string) => void} [options.checkpoint]  — legacy sync hook;
+ *   prefer `onWindow` which enforces mark-AFTER-record ordering.
+ * @param {AsyncFunction} [options.onWindow]  — `async (taskId, observations)`
+ *   invoked after each window's products are mapped. The CALLER must archive
+ *   the observations and only then checkpoint the manifest — a crash between
+ *   the two must leave the offset un-checkpointed so it is re-fetched.
  *   successfully processed offset (the callee persists the manifest)
  * @param {boolean} [options.includeMarketplace=false]  — when true, marketplace
  *   products are NOT excluded
@@ -164,6 +169,7 @@ export async function crawlCgid({
   clock = Date.now,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   checkpoint,
+  onWindow,
   includeMarketplace = false,
   unsafeFastPacing = false,
   maxWindows = DEFAULT_MAX_WINDOWS,
@@ -364,9 +370,11 @@ export async function crawlCgid({
       // All products were marketplace-excluded; still treat the page as
       // processed so we don't loop, but log the skip.
       log(`${id}: all ${products.length} products were marketplace — skipping window`);
-      // Mark as completed anyway to avoid re-fetching this offset.
+      // Nothing to archive for this window; still mark it processed via the
+      // same onWindow hook so the manifest stays uniform.
       completed.set(id, new Date().toISOString());
-      if (checkpoint) checkpoint(id);
+      if (onWindow) await onWindow(id, []);
+      else if (checkpoint) checkpoint(id);
       start += TILE_STEP;
       await sleep(delayMs);
       continue;
@@ -385,8 +393,9 @@ export async function crawlCgid({
     }
     fingerprints.add(fp);
 
-    // Dedupe by product.id; map fresh ones to observations.
+    // Dedupe by product.id; map fresh ones to observations for THIS window.
     let freshCount = 0;
+    const windowObservations = [];
     for (const product of filteredProducts) {
       if (!product.id || seen.has(product.id)) continue;
       seen.set(product.id, product);
@@ -395,7 +404,10 @@ export async function crawlCgid({
         observedAt,
         origin,
       });
-      if (observation) observations.push(observation);
+      if (observation) {
+        observations.push(observation);
+        windowObservations.push(observation);
+      }
     }
 
     log(
@@ -403,9 +415,13 @@ export async function crawlCgid({
         `${observations.length} observations)`,
     );
 
-    // BLOCKER 1 — checkpoint this offset as completed.
+    // BLOCKER 1 — mark-after-RECORD: the caller archives this window's
+    // observations via onWindow and only then checkpoints the manifest.
+    // Checkpointing before the archive commit would let a crash permanently
+    // skip windows whose data never landed (Luna blocker 1).
     completed.set(id, new Date().toISOString());
-    if (checkpoint) checkpoint(id);
+    if (onWindow) await onWindow(id, windowObservations);
+    else if (checkpoint) checkpoint(id);
 
     // Advance offset for next page.
     start += TILE_STEP;

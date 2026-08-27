@@ -48,6 +48,9 @@ export const DEFAULT_PILOT_BUDGET = 800;
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 
+/** Cap on pilot-storefront verification probes per run. */
+const PILOT_PROBE_CAP = 12;
+
 // ---- stable task id helpers -----------------------------------------------
 
 /**
@@ -307,6 +310,42 @@ export async function crawlStore({
   };
 }
 
+/**
+ * Verify a storefront is crawlable by probing its sitemap. Returns the
+ * store if it responds with ≥1 category URL, null if not.
+ */
+async function probeStorefront(store, client) {
+  try {
+    const urls = await client.fetchSitemap(store.origin);
+    return urls.length > 0 ? store : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pick the first alphabetically-sorted storefront whose sitemap responds
+ * with at least one category URL. Logs skipped storefronts as
+ * non-crawlable. Caps attempts at PILOT_PROBE_CAP.
+ */
+export async function pickCrawlableStore(stores, client, log) {
+  const sorted = [...stores].sort((a, b) =>
+    a.name.localeCompare(b.name, "en-NZ"),
+  );
+  let attempts = 0;
+  for (const candidate of sorted) {
+    if (attempts >= PILOT_PROBE_CAP) break;
+    attempts += 1;
+    const result = await probeStorefront(candidate, client);
+    if (result) {
+      log(`Pilot selected: ${result.name} (verified crawlable)`);
+      return result;
+    }
+    log(`Pilot skipped ${candidate.name}: not crawlable (sitemap unreachable or empty)`);
+  }
+  throw new Error("No crawlable storefront found among all FreshChoice stores");
+}
+
 // ---- orchestration --------------------------------------------------------
 
 /**
@@ -378,14 +417,22 @@ export async function runCollection(options = {}) {
   assertNotLiveArchive(file, { forceLive: false });
   const manifestPath = `${resolve(file)}${MANIFEST_SUFFIX}`;
 
-  // Client-side pacing — no transport wrapper.
+  // Wire-request counter shared across all transports (store list, sitemap,
+  // category pages — all counted against the same budget).
+  let wireRequests = 0;
+  const countingTransport = async (url, init) => {
+    wireRequests += 1;
+    return transport(url, init);
+  };
+
+  // Single intentional FreshChoiceBreadthClient per run (finding 6).
   const client = new FreshChoiceBreadthClient({
-    fetch: transport,
+    fetch: countingTransport,
     delayMs,
   });
 
-  // Resolve stores.
-  const fcClient = new FreshChoiceClient({ fetch: transport });
+  // Resolve stores. listStores() goes through countingTransport (finding 4).
+  const fcClient = new FreshChoiceClient({ fetch: countingTransport });
   const allStores = await fcClient.listStores();
   if (!Array.isArray(allStores) || allStores.length === 0) {
     throw new Error("No FreshChoice stores returned by the store list API");
@@ -394,11 +441,7 @@ export async function runCollection(options = {}) {
   const stores =
     storeQueries.length > 0
       ? resolveStores(storeQueries, allStores)
-      : [
-          [...allStores].sort((a, b) =>
-            a.name.localeCompare(b.name, "en-NZ"),
-          )[0],
-        ];
+      : [await pickCrawlableStore(allStores, client, log)];
 
   // Resume state.
   const stored = await loadManifest(manifestPath);
@@ -416,13 +459,6 @@ export async function runCollection(options = {}) {
   );
   let addedTotal = 0;
   let manifestPersistFailures = 0;
-  let wireRequests = 0;
-
-  // Count fetch calls through our transport wrapper.
-  const countingTransport = async (url, init) => {
-    wireRequests += 1;
-    return transport(url, init);
-  };
 
   const commitWave = async (observations, continuationIds) => {
     if (observations.length > 0) {
@@ -454,21 +490,8 @@ export async function runCollection(options = {}) {
 
   for (const store of stores) {
     try {
-      // Use the counting transport for this store's crawl.
-      const storeClient = countingTransport === transport
-        ? client
-        : new FreshChoiceBreadthClient({
-            fetch: countingTransport,
-            delayMs,
-          });
-      // Actually we need to rebuild the client with the counting transport.
-      const storeBrowsing = new FreshChoiceBreadthClient({
-        fetch: countingTransport,
-        delayMs,
-      });
-
       const result = await crawlStore({
-        client: storeBrowsing,
+        client,
         store,
         observedAt,
         commitWave,

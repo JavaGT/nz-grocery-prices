@@ -93,7 +93,7 @@ function categoryHtml(cards) {
     .map(
       (c, i) =>
         `<div class="talker special" data-talker id="line_${c.id}">
-          <a href="/product/${c.slug}"><figure><img src="https://img.example.com/${c.id}.jpg"></figure></a>
+          <a href="/lines/${c.slug}"><figure><img src="https://img.example.com/${c.id}.jpg"></figure></a>
           <div class="talker__name" title="${c.name}"><span class="talker__product-name">${c.name}</span></div>
           <strong class="price__sell">$ ${(c.sell / 100).toFixed(2)}</strong>
           ${c.was ? `<span class="talker__prices__was">$ ${(c.was / 100).toFixed(2)}</span>` : ""}

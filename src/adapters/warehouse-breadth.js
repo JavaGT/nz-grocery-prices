@@ -12,6 +12,7 @@
  * the existing adapter.
  */
 
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseWarehouseProducts, toWarehouseObservation } from "./warehouse.js";
@@ -26,6 +27,23 @@ const CURL_DEFAULT_HEADERS = {
   accept: "text/html,application/xhtml+xml",
   referer: `${DEFAULT_ORIGIN}/c/food-pets-household/food-drink`,
 };
+
+/** Minimum pacing floor in ms enforced unless unsafeFastPacing is true. */
+const MIN_DELAY_MS = 3000;
+
+/** Hard max windows to catch offset drift (200 × 32 = 6400 tiles max). */
+const DEFAULT_MAX_WINDOWS = 200;
+
+/**
+ * Challenge/error-page patterns that indicate the response body is NOT
+ * a genuine Warehouse grid page.
+ */
+const NON_GRID_PATTERNS = [
+  "Attention Required",
+  "cf-browser-verification",
+  "challenge-platform",
+  "Just a moment",
+];
 
 /**
  * Create a transport async function backed by `execFile` + `curl`.
@@ -85,6 +103,29 @@ export function createCurlTransport(options = {}) {
 }
 
 /**
+ * Check whether a response body looks like a genuine Warehouse grid page
+ * (as opposed to a Cloudflare challenge, error page, or malformed body).
+ * Returns true when the body is plausible HTML grid content.
+ */
+function looksLikeGridBody(body) {
+  if (!body || typeof body !== "string") return false;
+  for (const pattern of NON_GRID_PATTERNS) {
+    if (body.includes(pattern)) return false;
+  }
+  // Must contain HTML structure — a real grid response has content.
+  return body.includes("<") && body.includes(">");
+}
+
+/**
+ * Fingerprint a set of product IDs for drift detection.
+ * Uses a sorted join so identical product sets produce identical hashes.
+ */
+function fingerprintProductIds(products) {
+  const ids = products.map((p) => p.id).filter(Boolean).sort().join(",");
+  return createHash("sha256").update(ids).digest("hex");
+}
+
+/**
  * Walk one `cgid` by stepping `start` in increments of 32 until a page
  * returns zero product tiles or the budget/breaker terminates the walk.
  *
@@ -94,13 +135,20 @@ export function createCurlTransport(options = {}) {
  * @param {string} [options.origin=DEFAULT_ORIGIN]
  * @param {object} options.store  — store object passed to toWarehouseObservation
  * @param {string} options.observedAt
- * @param {number} [options.delayMs=3000]
+ * @param {number} [options.delayMs=3000]  — clamped to 3000 minimum unless unsafeFastPacing
  * @param {number} [options.budget=Infinity]
  * @param {Map<string, string>} [options.completed]  — manifest-checkpointed task IDs
  * @param {(msg: string) => void} [options.log]
  * @param {(msg: string) => void} [options.collectWarning]
  * @param {() => number} [options.clock]  — returns ms timestamp
  * @param {(ms: number) => Promise<void>} [options.sleep]
+ * @param {(taskId: string) => void} [options.checkpoint]  — called after each
+ *   successfully processed offset (the callee persists the manifest)
+ * @param {boolean} [options.includeMarketplace=false]  — when true, marketplace
+ *   products are NOT excluded
+ * @param {boolean} [options.unsafeFastPacing=false]  — bypass the 3s pacing floor
+ * @param {number} [options.maxWindows=200]  — hard ceiling on windows before
+ *   stopping the walk as unhealthy-complete
  */
 export async function crawlCgid({
   transport,
@@ -108,13 +156,17 @@ export async function crawlCgid({
   origin = DEFAULT_ORIGIN,
   store,
   observedAt,
-  delayMs = 3000,
+  delayMs = MIN_DELAY_MS,
   budget = Number.POSITIVE_INFINITY,
   completed = new Map(),
   log = () => {},
   collectWarning = () => {},
   clock = Date.now,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  checkpoint,
+  includeMarketplace = false,
+  unsafeFastPacing = false,
+  maxWindows = DEFAULT_MAX_WINDOWS,
 } = {}) {
   if (typeof transport !== "function") {
     throw new TypeError("crawlCgid requires an injectable transport function");
@@ -127,6 +179,15 @@ export async function crawlCgid({
   }
   if (!observedAt || typeof observedAt !== "string") {
     throw new TypeError("crawlCgid requires an observedAt ISO string");
+  }
+
+  // CONCERN 5 — Enforce pacing floor unless explicitly bypassed.
+  if (!unsafeFastPacing && delayMs < MIN_DELAY_MS) {
+    throw new TypeError(
+      `delayMs (${delayMs}) is below the ${MIN_DELAY_MS}ms pacing floor. ` +
+        "The Warehouse aggressively rate-limits; values below 3000ms risk " +
+        "immediate 403 blocks. Set unsafeFastPacing=true to bypass this guard.",
+    );
   }
 
   const TILE_STEP = 32;
@@ -162,10 +223,19 @@ export async function crawlCgid({
   let circuitOpen = false;
   let circuitReason = "";
   let budgetExhausted = false;
+  let driftDetected = false;
+  let maxWindowsReached = false;
+
+  // BLOCKER 2 — budget is a remaining counter decremented BEFORE every
+  // transport invocation (including failed/retried calls).
+  let remainingBudget = budget;
+
+  // BLOCKER 3 — fingerprint set for drift detection (hash of sorted product IDs).
+  const fingerprints = new Set();
 
   for (;;) {
-    // Budget check before each request.
-    if (requestsMade >= budget) {
+    // BLOCKER 2 — budget check: stop if budget exhausted.
+    if (remainingBudget <= 0) {
       budgetExhausted = true;
       warn(
         `request budget exhausted (limit ${budget}) after ${pagesFetched} ` +
@@ -174,9 +244,19 @@ export async function crawlCgid({
       break;
     }
 
+    // BLOCKER 3 — hard ceiling on number of windows.
+    if (pagesFetched >= maxWindows) {
+      maxWindowsReached = true;
+      warn(
+        `max windows (${maxWindows}) reached at offset ${start}; ` +
+          `stopping walk as unhealthy-complete. ${seen.size} unique products collected`,
+      );
+      break;
+    }
+
     const id = taskId(start);
 
-    // Skip already-checkpointed offsets (manifest resume).
+    // BLOCKER 1 — Skip already-checkpointed offsets (manifest resume).
     if (completed.has(id)) {
       start += TILE_STEP;
       continue;
@@ -184,11 +264,14 @@ export async function crawlCgid({
 
     const url = gridUrl(start);
 
+    // BLOCKER 2 — decrement budget BEFORE transport call (every attempt counts).
+    remainingBudget -= 1;
+    requestsMade += 1;
+
     // --- fetch ---
     let response;
     try {
       response = await transport(url);
-      requestsMade += 1;
     } catch (error) {
       // Network/transport error (curl not found, DNS failure, execFile reject).
       consecutiveFailures += 1;
@@ -242,15 +325,66 @@ export async function crawlCgid({
     pagesFetched += 1;
 
     if (products.length === 0) {
-      // 0-tile page → catalogue end.
+      // CONCERN 6 — Distinguish genuine empty grid from challenge/error/malformed body.
+      if (!looksLikeGridBody(response.body)) {
+        consecutiveFailures += 1;
+        warn(
+          `${id}: body does not look like a grid response (products=0, ` +
+            `non-grid patterns detected or non-HTML) — treating as failure`,
+        );
+        if (consecutiveFailures >= BREAKER_THRESHOLD) {
+          circuitOpen = true;
+          circuitReason =
+            `circuit opened after ${BREAKER_THRESHOLD} consecutive non-grid ` +
+            `responses (last: ${id}); aborting the cgid walk`;
+          warn(circuitReason);
+        } else {
+          log(`${id}: ${consecutiveFailures}/${BREAKER_THRESHOLD} non-grid responses, will retry`);
+          await sleep(delayMs);
+        }
+        if (circuitOpen) break;
+        continue; // re-try same offset
+      }
+
+      // 0-tile page with recognisable grid HTML → catalogue end.
       pagesWith0Tiles += 1;
       log(`${id}: 0 tiles — terminating cgid walk (end of catalogue)`);
       break;
     }
 
+    // CONCERN 4 — exclude marketplace products unless opted in.
+    const filteredProducts = includeMarketplace
+      ? products
+      : products.filter((p) => !p.marketplaceProduct);
+
+    if (filteredProducts.length === 0 && products.length > 0) {
+      // All products were marketplace-excluded; still treat the page as
+      // processed so we don't loop, but log the skip.
+      log(`${id}: all ${products.length} products were marketplace — skipping window`);
+      // Mark as completed anyway to avoid re-fetching this offset.
+      completed.set(id, new Date().toISOString());
+      if (checkpoint) checkpoint(id);
+      start += TILE_STEP;
+      await sleep(delayMs);
+      continue;
+    }
+
+    // BLOCKER 3 — fingerprint drift detection.
+    const fp = fingerprintProductIds(filteredProducts);
+    if (fingerprints.has(fp)) {
+      driftDetected = true;
+      warn(
+        `${id}: repeated product fingerprint detected — the catalogue may ` +
+          `have wrapped or the offset is drifting. Treating walk as ` +
+          `unhealthy-complete. cgid=${cgid}, offset=${start}`,
+      );
+      break;
+    }
+    fingerprints.add(fp);
+
     // Dedupe by product.id; map fresh ones to observations.
     let freshCount = 0;
-    for (const product of products) {
+    for (const product of filteredProducts) {
       if (!product.id || seen.has(product.id)) continue;
       seen.set(product.id, product);
       freshCount += 1;
@@ -266,12 +400,18 @@ export async function crawlCgid({
         `${observations.length} observations)`,
     );
 
+    // BLOCKER 1 — checkpoint this offset as completed.
+    completed.set(id, new Date().toISOString());
+    if (checkpoint) checkpoint(id);
+
     // Advance offset for next page.
     start += TILE_STEP;
 
     // Pacing between requests (the 3s floor).
     await sleep(delayMs);
   }
+
+  const unhealthyTermination = budgetExhausted || circuitOpen || driftDetected || maxWindowsReached;
 
   return {
     cgid,
@@ -285,5 +425,9 @@ export async function crawlCgid({
     circuitOpen,
     circuitReason,
     consecutiveFailures: circuitOpen ? consecutiveFailures : 0,
+    // BLOCKER 3 additions
+    driftDetected,
+    maxWindowsReached,
+    unhealthyTermination,
   };
 }

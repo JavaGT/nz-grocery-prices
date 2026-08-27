@@ -10,6 +10,7 @@ import {
   crawlStore,
   parseArgs,
   runCollection,
+  pickCrawlableStore,
   DEFAULT_DELAY_MS,
   DEFAULT_FILE,
   DEFAULT_PILOT_BUDGET,
@@ -29,7 +30,7 @@ function catHtml(products) {
     .map(
       (p) =>
         `<div class="talker special" data-talker id="line_${p.id}">
-          <a href="/product/${p.id}"><figure><img src="https://img.example.com/${p.id}.jpg"></figure></a>
+          <a href="/lines/${p.id}"><figure><img src="https://img.example.com/${p.id}.jpg"></figure></a>
           <div class="talker__name" title="${p.name}"><span class="talker__product-name">${p.name}</span></div>
           <strong class="price__sell">$ ${(p.sellCents / 100).toFixed(2)}</strong>
           ${p.wasCents != null ? `<span class="talker__prices__was">$ ${(p.wasCents / 100).toFixed(2)}</span>` : ""}
@@ -380,7 +381,11 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       assert.equal(summary.stores[0].name, "FreshChoice Testville");
       assert.equal(summary.stores[0].uniqueProducts, 3);
 
-      // Verify archive structure: offer revisions only, no snapshots
+      // Finding 10: exact expected request-set.
+      // Expected: 1 store-list fetch + 1 probe-sitemap + 1 crawl-sitemap + 2 category page-0 fetches = 5
+      assert.equal(summary.httpRequestsAdmitted, 5);
+
+      // Finding 9: source URL uses /lines/<id> family.
       const raw = await readFile(file, "utf8");
       const lines = raw.trim().split("\n").map((l) => JSON.parse(l));
       assert.equal(lines.some((r) => r.type === "snapshot"), false);
@@ -388,6 +393,16 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       assert.equal(lines.filter((r) => r.type === "offer").length, 3);
       assert.equal(lines.filter((r) => r.type === "product").length, 3);
       assert.equal(lines.filter((r) => r.type === "store").length, 1);
+
+      // Assert every source.url contains /lines/.
+      for (const line of lines) {
+        if (line.type === "offer" && line.source?.url) {
+          assert.ok(
+            line.source.url.includes("/lines/"),
+            `source.url should contain /lines/: ${line.source.url}`,
+          );
+        }
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -406,7 +421,8 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       };
 
       function makeTransport() {
-        return fakeTransport({
+        const urls = [];
+        const transport = fakeTransport({
           stores: storeCardHtml([
             {
               name: "Testville",
@@ -416,6 +432,13 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
           sitemapCategories: ["bakery"],
           pageScript: { ...scriptPages },
         });
+        return {
+          transport: async (url, init) => {
+            urls.push(String(url));
+            return transport(url, init);
+          },
+          urls,
+        };
       }
 
       const common = {
@@ -427,7 +450,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       };
 
       // First run
-      const transport1 = makeTransport();
+      const { transport: transport1, urls: urls1 } = makeTransport();
       const first = await runCollection({
         ...common,
         transport: transport1,
@@ -440,24 +463,35 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       const manifest = JSON.parse(
         await readFile(`${file}.breadth-manifest.json`, "utf8"),
       );
-      assert.deepEqual(Object.keys(manifest.completed).sort(), [
+      const continuationIds = Object.keys(manifest.completed).sort();
+      assert.deepEqual(continuationIds, [
         "testville:cat=bakery:page1",
         "testville:cat=bakery:page2",
       ]);
 
-      // Second run — recorded pages must be SKIPPED.
-      const transport2 = makeTransport();
+      // Record which URLs were hit in run 1 (for cross-check)
+      const run1ContinuationUrls = urls1.filter((u) => u.includes("/category/bakery?page="));
+      assert.equal(run1ContinuationUrls.length, 2);
 
+      // Second run — recorded pages must be SKIPPED.
+      const { transport: transport2, urls: urls2 } = makeTransport();
       const second = await runCollection({
         ...common,
         transport: transport2,
         file,
       });
-      // Page 0 reruns but no new observations (products already recorded);
-      // continuation pages are skipped via manifest.
-      // The observations may have 2 from page 0 (product "1") re-recorded, or 0 if
-      // content-hash dedup absorbs them. Let's just verify no crash and healthy=true.
       assert.equal(second.healthy, true);
+
+      // Assert: run 2 issues ZERO continuation URLs that were in run 1's manifest.
+      const run2CategoryUrls = urls2.filter((u) => u.includes("/category/"));
+      for (const url of run2CategoryUrls) {
+        const matched = continuationIds.some((id) => url.includes(id.replace(":", "/category/")));
+        assert.equal(
+          matched,
+          false,
+          `run 2 should not fetch continuation URL: ${url}`,
+        );
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -492,9 +526,64 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         log: () => {},
         collectWarning: () => {},
       });
-      // Alphabetically Avondale comes before Zanytown
+      // Pilot should pick Avondale (alphabetically first, verified crawlable)
       assert.equal(summary.stores.length, 1);
       assert.ok(summary.stores[0].name.includes("Avondale"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("pilot skips unreachable storefronts and picks the next", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-pilot-skip-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      // Avondale's sitemap will fail; Zanytown's will succeed.
+      let callIndex = 0;
+      const transport = fakeTransport({
+        stores: storeCardHtml([
+          {
+            name: "Avondale",
+            origin: "https://avondale.store.freshchoice.co.nz",
+          },
+          {
+            name: "Zanytown",
+            origin: "https://zanytown.store.freshchoice.co.nz",
+          },
+        ]),
+        sitemapCategories: ["bakery"],
+        pageScript: {
+          "bakery:0": catHtmlWithPages([product("7")], 1),
+        },
+      });
+      // Wrap to make Avondale's sitemap return non-OK on first attempt
+      const failFirstTransport = async (url, init) => {
+        const str = String(url);
+        if (str.includes("avondale") && str.includes("sitemap.xml")) {
+          return { ok: false, status: 500, text: async () => "err", headers: new Headers() };
+        }
+        return transport(url, init);
+      };
+      const observedUrls = [];
+      const countingWrap = async (url, init) => {
+        observedUrls.push(String(url));
+        return failFirstTransport(url, init);
+      };
+      const summary = await runCollection({
+        transport: countingWrap,
+        file,
+        delayMs: 0,
+        budget: 100,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+      // Pilot should skip Avondale and pick Zanytown
+      assert.equal(summary.stores.length, 1);
+      assert.ok(summary.stores[0].name.includes("Zanytown"));
+      // Verify probe happened for Avondale first
+      const probeUrl = observedUrls.find((u) => u.includes("avondale") && u.includes("sitemap.xml"));
+      assert.ok(probeUrl, "Avondale sitemap should have been probed");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

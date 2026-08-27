@@ -98,6 +98,15 @@ ProductCards; parser already handles markup) → map via existing
 
 Blocked by BREADTH-0.
 
+> **Status: IMPLEMENTATION VALIDATED (2026-08-28).** Walker (`feat(breadth3)`),
+> Luna review → 3 blockers fixed (`ce6b7d4`: mark-after-record
+> checkpointing via `onWindow`, budget counts failed curl attempts,
+> fingerprint-drift + maxWindows guards), verification round clean.
+> **Live smoke:** grocery tree fully crawled — **1,015 unique products**,
+> 37 requests / 0 failures / 2,011 records (~3 min at 3s pacing), clean
+> 0-tile termination, marketplace-only windows skipped. National-flat
+> pricing = one crawl covers the whole estate.
+
 ## Goal
 Grocery tree (1,123 products) nationally; flat pricing = one crawl.
 

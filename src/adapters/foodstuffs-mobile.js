@@ -47,6 +47,7 @@ export class MobileFoodstuffsClient {
   #userAgent;
   #banner;
   #config;
+  #timeout;
 
   constructor(options = {}) {
     const banner = options.banner ?? "PNS";
@@ -62,6 +63,7 @@ export class MobileFoodstuffsClient {
       "",
     );
     this.#userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+    this.#timeout = options.timeout ?? 20000;
   }
 
   /** Returns the canonical retailer name for the banner. */
@@ -95,6 +97,7 @@ export class MobileFoodstuffsClient {
         `${this.#apiOrigin}/mobile/user/login/guest`,
         {
           method: "POST",
+          signal: AbortSignal.timeout(this.#timeout),
           headers: {
             "content-type": "application/json",
             "user-agent": this.#userAgent,
@@ -145,6 +148,11 @@ export class MobileFoodstuffsClient {
     const token = await this.#authenticate();
     const response = await this.#fetch(`${this.#apiOrigin}${path}`, {
       ...init,
+      // Hard per-request ceiling: the backend intermittently accepts a
+      // connection and then never answers (observed in pilot runs). Without
+      // this, hung sockets stall the crawl forever AND starve the circuit
+      // breaker, which can only count completed-but-failed requests.
+      signal: AbortSignal.timeout(this.#timeout),
       headers: {
         accept: "application/json",
         authorization: `Bearer ${token}`,

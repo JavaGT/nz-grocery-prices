@@ -5,6 +5,7 @@ node_modules/
 data/*.jsonl
 data/*.db
 data/*.sqlite
+*.breadth-manifest.json
 research/*.har
 .worktrees/
 collector.env

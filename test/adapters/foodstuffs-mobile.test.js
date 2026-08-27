@@ -37,6 +37,35 @@ describe("MobileFoodstuffsClient", () => {
     assert.ok(client);
   });
 
+  // NIT 9: trailing slashes stripped from apiOrigin
+  it("strips trailing slashes from apiOrigin", () => {
+    const client = new MobileFoodstuffsClient({
+      apiOrigin: "https://custom.example.com/prod///",
+      fetch: async () => ({ ok: true, json: async () => ({}) }),
+    });
+    // No public accessor for apiOrigin, but the constructor strips
+    // via .replace(/\/+$/, "") — we verify via a side effect: request URL
+    const calls = [];
+    const fetch = async (url, init) => {
+      calls.push(String(url));
+      if (String(url).includes("/mobile/user/login/guest")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+      }
+      return { ok: true, status: 200, json: async () => [] };
+    };
+    const client2 = new MobileFoodstuffsClient({ apiOrigin: "https://x.com/prod/", fetch });
+    // Trigger an auth call to verify the URL has no double slash
+    // force auth by not having a token
+    // Actually just verify the constructor doesn't throw and the URL is sane
+    // by making a request that goes through the origin
+    return client2.listStores().then(() => {
+      const authCall = calls.find(c => c.includes("/mobile/user/login/guest"));
+      assert.ok(authCall, "auth call should exist");
+      // Should be https://x.com/prod/mobile/user/login/guest, not https://x.com/prod//mobile/...
+      assert.equal(authCall, "https://x.com/prod/mobile/user/login/guest");
+    });
+  });
+
   // ---- authentication caching ----
 
   it("caches the token and reuses it within expiry margin", async () => {
@@ -71,8 +100,6 @@ describe("MobileFoodstuffsClient", () => {
 
   it("re-authenticates after token expiry", async () => {
     let authCalls = 0;
-    let clock = 0;
-    // We manipulate time by making expires_in very short.
     const fetch = async (url, init) => {
       if (String(url).includes("/mobile/user/login/guest")) {
         authCalls += 1;
@@ -97,25 +124,57 @@ describe("MobileFoodstuffsClient", () => {
       }
       throw new Error(`unexpected ${url}`);
     };
-    // We can't easily control Date.now, but we can advance past 1s expiry
-    // by stalling. Instead, test the second call forces a new auth by
-    // giving a very short expires_in and waiting.
     const client = new MobileFoodstuffsClient({ fetch });
 
     await client.listStores(); // auth call 1
     assert.equal(authCalls, 1);
 
-    // Wait enough for the token to expire (1s + margin 60s? no, margin is
-    // 60_000ms — but expires_in is 1s so it expires at 1s, margin check is
-    // now+1s-60s < 0... Actually let me use the constructor spy pattern)
-    // This test relies on the 1-second token being expired.
     // The margin is 60_000ms, and expires_in is 1s (1000ms).
     // So expiresAt = now + 1000, margin is 60000.
     // With Date.now() the second call is within the same millisecond,
     // so now < expiresAt (1000) - 60000 → false → force re-auth.
-    // Perfect — the margin check catches it.
     await client.listStores();
     assert.equal(authCalls, 2);
+  });
+
+  // CONCERN 4a: in-flight auth memoization
+  it("shares a single in-flight auth promise across concurrent first calls", async () => {
+    let authCalls = 0;
+    let resolveAuth;
+    let authStarted = false;
+    const fetch = async (url, init) => {
+      if (String(url).includes("/mobile/user/login/guest")) {
+        authCalls += 1;
+        authStarted = true;
+        // Don't resolve until caller waits
+        return new Promise((resolve) => {
+          resolveAuth = () => resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "shared-token", expires_in: 3600 }),
+          });
+        });
+      }
+      if (String(url).includes("/mobile/store/physical")) {
+        return { ok: true, status: 200, json: async () => [{ id: "s1" }] };
+      }
+      throw new Error(`unexpected ${url}`);
+    };
+    const client = new MobileFoodstuffsClient({ fetch });
+
+    // Fire two concurrent calls — they should share one auth
+    const promise1 = client.listStores();
+    const promise2 = client.listStores();
+
+    // Wait a microtask for both to reach the auth gate
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(authCalls, 1, "only one auth should have started");
+    assert.ok(authStarted);
+    resolveAuth();
+    const [r1, r2] = await Promise.all([promise1, promise2]);
+    assert.deepEqual(r1, [{ id: "s1" }]);
+    assert.deepEqual(r2, [{ id: "s1" }]);
+    assert.equal(authCalls, 1, "still only one auth call after both resolve");
   });
 
   it("throws on auth failure", async () => {
@@ -132,6 +191,28 @@ describe("MobileFoodstuffsClient", () => {
     });
     const client = new MobileFoodstuffsClient({ fetch });
     await assert.rejects(() => client.listStores(), /no access token/);
+  });
+
+  // CONCERN 4b: expires_in validation
+  it("throws TypeError when expires_in is not a positive finite number", async () => {
+    for (const badValue of [undefined, null, "3600", -1, 0, Infinity]) {
+      const fetch = async (url, init) => {
+        if (String(url).includes("/mobile/user/login/guest")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "t", expires_in: badValue }),
+          };
+        }
+        return { ok: true, status: 200, json: async () => [] };
+      };
+      const client = new MobileFoodstuffsClient({ fetch });
+      await assert.rejects(
+        () => client.listStores(),
+        TypeError,
+        `expected TypeError for expires_in=${JSON.stringify(badValue)}`,
+      );
+    }
   });
 
   // ---- request header shape ----
@@ -161,7 +242,7 @@ describe("MobileFoodstuffsClient", () => {
 
   // ---- listStores ----
 
-  it("listStores builds the correct URL with banner query param", async () => {
+  it("listStores uses POST with body [] and banner query param", async () => {
     const calls = [];
     const fetch = async (url, init) => {
       calls.push({ url: String(url), init });
@@ -172,7 +253,11 @@ describe("MobileFoodstuffsClient", () => {
     };
     const client = new MobileFoodstuffsClient({ fetch });
     const result = await client.listStores();
-    assert.ok(calls.some((c) => c.url.includes("/mobile/store/physical?banner=PNS")));
+    const storeCall = calls.find((c) => c.url.includes("/mobile/store/physical"));
+    assert.ok(storeCall, "store list call not found");
+    assert.ok(storeCall.url.includes("banner=PNS"));
+    assert.equal(storeCall.init.method, "POST");
+    assert.equal(storeCall.init.body, "[]");
     assert.deepEqual(result, [{ id: "s1", name: "Store 1" }]);
   });
 
@@ -186,6 +271,25 @@ describe("MobileFoodstuffsClient", () => {
     const client = new MobileFoodstuffsClient({ banner: "MNW", fetch });
     const result = await client.listStores();
     assert.deepEqual(result, [{ id: "nw1", name: "NW Store" }]);
+  });
+
+  // CONCERN 8: normalized envelope forms
+  it("listStores normalizes bare array, {stores:[...]}, {items:[...]}", async () => {
+    for (const responseBody of [
+      [{ id: "s1", name: "Store 1" }],
+      { stores: [{ id: "s1", name: "Store 1" }] },
+      { items: [{ id: "s1", name: "Store 1" }] },
+    ]) {
+      const fetch = async (url, init) => {
+        if (String(url).includes("/mobile/user/login/guest")) {
+          return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+        }
+        return { ok: true, status: 200, json: async () => responseBody };
+      };
+      const client = new MobileFoodstuffsClient({ fetch });
+      const result = await client.listStores();
+      assert.deepEqual(result, [{ id: "s1", name: "Store 1" }]);
+    }
   });
 
   // ---- categoryTree ----

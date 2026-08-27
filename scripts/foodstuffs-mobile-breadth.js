@@ -4,12 +4,17 @@
  * using the mobile app backend.
  *
  * Instead of Algolia facet-driven discovery, the planner starts from the
- * category tree (one GET) and walks every top-level node. Nodes that
- * saturate the 1,000-hit pagination clamp drill into their tree children
- * (depth max cat2). Leaves are paginated fully.
+ * category tree (one GET) and walks every node at arbitrary depth.
+ * Nodes that saturate the 1,000-hit pagination clamp drill into tree
+ * children (cat1, cat2 — the API supports cat0/cat1/cat2 query params).
+ * Beyond cat2 the API cannot express deeper names, so saturated nodes
+ * at depth 2 (or childless saturated nodes at any depth) are marked as
+ * incomplete coverage rather than silently paginated.
  *
  * No reconciliation target exists (mobile API lacks tobacco:false facets).
- * Completeness = every tree leaf crawled. Clamp-saturated nodes warn.
+ * Completeness = every tree leaf crawled; clamp-saturated nodes that
+ * cannot be refined emit warnings and set incompleteCoverage on the
+ * per-store result.
  *
  * Records through PriceArchive.record as offer revisions only (no
  * snapshotScope). Resume via checkpointed continuation pages.
@@ -50,7 +55,6 @@ export const BREAKER_THRESHOLD = 5;
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 const HIT_CLAMP = 1000;
-const MAX_TREE_DEPTH = 2; // cat0, cat1, cat2
 
 // ---- stable task id helpers (mobile-specific prefix "mcat") --------------
 
@@ -98,15 +102,14 @@ export function treeNodeChildren(tree, categoryPath) {
 }
 
 /**
- * Flatten the tree to a list of { path, name } for every leaf at or before
- * MAX_TREE_DEPTH (cat2). Top-level nodes with children are NOT leaves — they
- * may be expanded if saturated.
+ * Flatten the tree to a list of { path, name } for every leaf (terminal
+ * node with no children), regardless of depth.
  */
 export function flattenTreeLeaves(tree) {
   const leaves = [];
   function walk(node, depth, path) {
     const currentPath = [...path, node.name];
-    if (depth >= MAX_TREE_DEPTH || !node.children || node.children.length === 0) {
+    if (!node.children || node.children.length === 0) {
       leaves.push({ path: currentPath, name: node.name });
     } else {
       for (const child of node.children) {
@@ -121,6 +124,48 @@ export function flattenTreeLeaves(tree) {
 }
 
 /**
+ * Walk the full tree at arbitrary depth and produce a flat array of plan
+ * objects.  Only nodes at depth 0..2 are expressible via cat0/cat1/cat2
+ * query params; deeper nodes are recorded as saturationChildren of their
+ * parent (depth-2) node so the crawl can detect unreachable sub-categories.
+ *
+ * @param {Array} tree — category tree array from the API
+ * @returns {Array<{path:string[], depth:number, treeChildren:Array,
+ *                   saturationChildren:Array}>}
+ */
+export function buildTreePlans(tree) {
+  const plans = [];
+
+  function walk(node, depth, path) {
+    const currentPath = [...path, node.name];
+    // Every node gets a plan (for completeness tracking even if depth > 2 is
+    // not directly queryable — its parent carries it as saturationChildren).
+    plans.push({
+      path: currentPath,
+      depth,
+      // Children at depth < 2 are drillable (expressible as cat1/cat2).
+      treeChildren:
+        depth < 2 && Array.isArray(node.children) ? node.children : [],
+      // Children at depth >= 2 are unreachable via the API's cat0-2 scheme.
+      saturationChildren:
+        depth >= 2 && Array.isArray(node.children) ? node.children : [],
+    });
+
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child, depth + 1, currentPath);
+      }
+    }
+  }
+
+  for (const node of tree) {
+    walk(node, 0, []);
+  }
+
+  return plans;
+}
+
+/**
  * Check if a category-page response saturates the 1,000-hit clamp.
  * When true, we must drill into tree children to reach the full catalogue.
  */
@@ -130,12 +175,17 @@ export function isSaturated(envelope) {
 
 /**
  * Derive continuation pages (1..numberOfPages-1) from a leaf's response
- * envelope. Returns empty array when the envelope represents a single page.
+ * envelope.  Throws TypeError if numberOfPages is missing or non-numeric.
  */
-export function continuationPages(envelope) {
-  const totalPages = envelope?.numberOfPages ?? 1;
+export function continuationPages(envelope, label = "") {
+  const { numberOfPages } = envelope ?? {};
+  if (typeof numberOfPages !== "number" || !Number.isFinite(numberOfPages)) {
+    throw new TypeError(
+      `Missing or non-numeric numberOfPages in page envelope${label ? ` (${label})` : ""}`,
+    );
+  }
   const pages = [];
-  for (let page = 1; page < totalPages; page += 1) pages.push(page);
+  for (let page = 1; page < numberOfPages; page += 1) pages.push(page);
   return pages;
 }
 
@@ -150,9 +200,14 @@ function budgetError(limit) {
   return error;
 }
 
-export function createCrawlerBridge({ crawler, budget = Number.POSITIVE_INFINITY } = {}) {
+export function createCrawlerBridge({
+  crawler,
+  budget = Number.POSITIVE_INFINITY,
+} = {}) {
   if (!crawler || typeof crawler.run !== "function") {
-    throw new TypeError("createCrawlerBridge requires a crawler from createCrawler()");
+    throw new TypeError(
+      "createCrawlerBridge requires a crawler from createCrawler()",
+    );
   }
   const queue = [];
   let admitted = 0;
@@ -220,13 +275,13 @@ export function createCrawlerBridge({ crawler, budget = Number.POSITIVE_INFINITY
 /**
  * Crawl one store's full catalogue via the mobile API.
  *
- * 1. Fetch the category tree.
- * 2. For every top-level node: fetch page 0.
- *    - If saturated (totalHits >= 1000): drill into tree children.
- *    - Otherwise: paginate fully (leaf).
- * 3. For saturated cat1 children with tree grandchildren: drill to cat2.
- * 4. cat2 is max depth — always paginated fully.
- * 5. Dedupe by productId across overlapping categories.
+ * 1. Fetch the category tree, build plans for every node at arbitrary depth.
+ * 2. For every expressible node (depth 0..2): fetch page 0.
+ *    - If saturated AND has drillable children (depth < 2): drill into them.
+ *    - If saturated AND no drillable children (depth >= 2 or childless):
+ *      mark as incompleteCoverage — the clamp prevents a complete fetch.
+ *    - Otherwise (not saturated): paginate fully (leaf).
+ * 3. Dedupe by productId across overlapping categories.
  *
  * @param {object} options
  * @param {MobileFoodstuffsClient} options.client
@@ -257,6 +312,8 @@ export async function crawlStore({
   };
   let pagesFetched = 0;
   const emptyPages = [];
+  const doneEmpty = new Set(); // CONCERN 6: category paths that ended early
+  const incompleteNodes = [];  // BLOCKER 1+2: saturated non-refinable nodes
 
   // Circuit breaker (same pattern as foodstuffs-breadth).
   let consecutiveFailures = 0;
@@ -271,7 +328,9 @@ export async function crawlStore({
       region: store.region ?? "NI",
     });
     if (!Array.isArray(tree) || tree.length === 0) {
-      throw new Error(`Category tree for ${store.id} is empty or not an array`);
+      throw new Error(
+        `Category tree for ${store.id} is empty or not an array`,
+      );
     }
     return tree;
   }
@@ -289,8 +348,7 @@ export async function crawlStore({
 
   /**
    * Run one wave of planned requests. Thunk kinds:
-   *   "top"     — top-level cat0 page 0 (from tree)
-   *   "drill"   — cat1 or cat2 page 0 (drill-down into tree children)
+   *   "drill"   — page 0 of a category node (from tree plans)
    *   "leaf"    — continuation page (page >= 1)
    */
   async function runWave(thunks) {
@@ -318,7 +376,9 @@ export async function crawlStore({
       if (result.status === "rejected") {
         if (result.reason?.code === "EBREADTHBUDGET") budgetStop = true;
         consecutiveFailures += 1;
-        warn(`${thunk.id} failed: ${result.reason?.message ?? String(result.reason)}`);
+        warn(
+          `${thunk.id} failed: ${result.reason?.message ?? String(result.reason)}`,
+        );
         if (consecutiveFailures >= BREAKER_THRESHOLD) {
           circuitOpenedAt = thunk.id;
         }
@@ -328,14 +388,18 @@ export async function crawlStore({
       const { envelope } = result.value;
       pagesFetched += 1;
 
-      // Empty continuation page beyond catalogue end.
+      // Empty continuation page beyond catalogue end (CONCERN 6).
       if (
         thunk.kind === "leaf" &&
         thunk.page >= 1 &&
         (envelope.products?.length ?? 0) === 0
       ) {
+        doneEmpty.add(mobileKey(thunk.categoryPath));
         emptyPages.push(thunk.id);
-        warn(`${thunk.id}: page beyond catalogue end (0 hits)`);
+        warn(
+          `${thunk.id}: page beyond catalogue end (0 hits) — stopped scheduling further pages for this category`,
+        );
+        continue; // skip absorb — no products
       }
 
       const fresh = absorbHits(seen, envelope.products);
@@ -351,33 +415,55 @@ export async function crawlStore({
           `${observations.length} priced this crawl)`,
       );
 
-      if (thunk.kind === "top" || thunk.kind === "drill") {
+      if (thunk.kind === "drill") {
         // Page 0 of a category: decide whether to drill down or paginate.
-        if (isSaturated(envelope) && thunk.treeChildren?.length > 0) {
-          // Saturated: drill into tree children at the next depth level.
-          const nextDepth = thunk.categoryPath.length; // 1 for cat0->cat1, 2 for cat1->cat2
-          for (const child of thunk.treeChildren) {
-            const childPath = [...thunk.categoryPath, child.name];
-            const childId = `${store.id}:mcat=${mobileKey(childPath)}:page0`;
-            // Pre-mark as planned so we never spawn a duplicate.
-            planned.add(childId);
-            spawned.push({
-              kind: "drill",
-              id: childId,
-              categoryPath: childPath,
-              page: 0,
-              treeChildren: nextDepth < MAX_TREE_DEPTH
-                ? (child.children ?? [])
-                : [],
+        if (isSaturated(envelope)) {
+          if (thunk.treeChildren?.length > 0) {
+            // Saturated + drillable children → spawn children.
+            for (const child of thunk.treeChildren) {
+              const childPath = [...thunk.categoryPath, child.name];
+              const childId = taskId(store.id, childPath, 0);
+              const childDepth = childPath.length - 1; // 0..N
+              // Pre-mark as planned so we never spawn a duplicate.
+              planned.add(childId);
+              spawned.push({
+                kind: "drill",
+                id: childId,
+                categoryPath: childPath,
+                page: 0,
+                treeChildren:
+                  childDepth < 2 ? child.children ?? [] : [],
+                saturationChildren:
+                  childDepth >= 2 ? child.children ?? [] : [],
+              });
+            }
+            warn(
+              `${thunk.id} saturates the clamp (${envelope.totalHits} hits); ` +
+                `drilling into ${thunk.treeChildren.length} child categories`,
+            );
+          } else {
+            // Saturated + no drillable children → incomplete coverage.
+            // This happens when the node is at depth 2 (cat2, max API
+            // expressible depth) or has no children at any depth.
+            incompleteNodes.push({
+              path: thunk.categoryPath.join("/"),
+              depth: thunk.categoryPath.length - 1,
+              totalHits: envelope.totalHits,
+              saturationChildren: thunk.saturationChildren?.length ?? 0,
             });
+            warn(
+              `${thunk.id} saturates the clamp (${envelope.totalHits} hits) ` +
+                `and cannot be refined further: ` +
+                (thunk.saturationChildren?.length > 0
+                  ? `${thunk.saturationChildren.length} sub-categories at unreachable depth (cat3+); ` +
+                    `coverage is incomplete for this path`
+                  : "no child categories to drill into; " +
+                    "coverage is incomplete for this path"),
+            );
           }
-          warn(
-            `${thunk.id} saturates the clamp (${envelope.totalHits} hits); ` +
-              `drilling into ${thunk.treeChildren.length} child categories`,
-          );
         } else {
-          // Not saturated or no children: this node is a leaf → paginate.
-          const pages = continuationPages(envelope);
+          // Not saturated → this node is a leaf: paginate fully.
+          const pages = continuationPages(envelope, thunk.id);
           for (const page of pages) {
             const id = taskId(store.id, thunk.categoryPath, page);
             if (!completed.has(id) && !planned.has(id)) {
@@ -398,32 +484,60 @@ export async function crawlStore({
     }
 
     await commitWave(observations, continuationIds);
-    return { spawned, carried, budgetStop, circuitOpen: circuitOpenedAt !== null };
+    return {
+      spawned,
+      carried,
+      budgetStop,
+      circuitOpen: circuitOpenedAt !== null,
+    };
   }
 
   // ---- entry point -------------------------------------------------------
 
   const tree = await fetchTree();
-  log(`${store.name}: tree has ${tree.length} top-level categories`);
+  const plans = buildTreePlans(tree);
+  log(
+    `${store.name}: tree has ${tree.length} top-level categories, ${plans.length} total nodes`,
+  );
 
-  // Seed initial wave with all top-level categories from the tree.
-  const initial = tree.map((node) => {
-    const path = [node.name];
-    const id = taskId(store.id, path, 0);
-    return {
-      kind: "top",
-      id,
-      categoryPath: path,
-      page: 0,
-      treeChildren: node.children ?? [],
-    };
-  });
+  // Seed initial wave with all expressible nodes (depth 0..2).
+  // (CONCERN 5: seed the planned set with initial task ids.)
+  // Dedupe by task id (a Map) so duplicate sibling names produce one task.
+  const initialMap = new Map();
+  for (const plan of plans) {
+    if (plan.depth > 2) continue;
+    const id = taskId(store.id, plan.path, 0);
+    planned.add(id);
+    if (!initialMap.has(id)) {
+      initialMap.set(id, {
+        kind: "drill",
+        id,
+        categoryPath: plan.path,
+        page: 0,
+        treeChildren: plan.treeChildren,
+        saturationChildren: plan.saturationChildren,
+      });
+    }
+  }
+  const initial = [...initialMap.values()];
 
   let pending = initial;
   let budgetExhausted = false;
   let circuitError;
 
   while (pending.length > 0) {
+    // CONCERN 6: filter out leaf pages for categories that have already ended.
+    pending = pending.filter((t) => {
+      if (t.kind === "leaf" && doneEmpty.has(mobileKey(t.categoryPath))) {
+        log(
+          `${t.id}: skipping — category already ended (empty page detected)`,
+        );
+        return false;
+      }
+      return true;
+    });
+    if (pending.length === 0) break;
+
     const wave = await runWave(pending);
     if (wave.budgetStop) {
       budgetExhausted = true;
@@ -442,6 +556,10 @@ export async function crawlStore({
     pending = wave.spawned.concat(wave.carried);
   }
 
+  // BLOCKER 1+2: mark incomplete coverage when any node was saturated and
+  // could not be refined.
+  const incompleteCoverage = incompleteNodes.length > 0;
+
   // Summary — no reconciliation target in mobile API.
   return {
     store,
@@ -452,6 +570,8 @@ export async function crawlStore({
     treeCategories: tree.length,
     warnings,
     budgetExhausted,
+    incompleteCoverage,
+    incompleteNodes,
     ...(circuitError ? { error: circuitError } : {}),
   };
 }
@@ -560,11 +680,18 @@ export async function runCollection(options = {}) {
   } else {
     const all = await client.listStores();
     if (!Array.isArray(all) || all.length === 0) {
-      throw new Error(`No ${retailer} stores returned by the store list API`);
+      throw new Error(
+        `No ${retailer} stores returned by the store list API`,
+      );
     }
-    stores = storeQueries.length > 0
-      ? resolveStores(storeQueries, all)
-      : [[...all].sort((a, b) => a.name.localeCompare(b.name, "en-NZ"))[0]];
+    stores =
+      storeQueries.length > 0
+        ? resolveStores(storeQueries, all)
+        : [
+            [...all].sort((a, b) =>
+              a.name.localeCompare(b.name, "en-NZ"),
+            )[0],
+          ];
   }
 
   // Resume state.
@@ -577,7 +704,10 @@ export async function runCollection(options = {}) {
       completed: Object.fromEntries(completed),
     });
 
-  const archive = new PriceArchive(new JsonlObservationRepository(file), { clock });
+  const archive = new PriceArchive(
+    new JsonlObservationRepository(file),
+    { clock },
+  );
   let addedTotal = 0;
   let manifestPersistFailures = 0;
   const commitWave = async (observations, continuationIds) => {
@@ -632,14 +762,17 @@ export async function runCollection(options = {}) {
         treeCategories: 0,
         warnings: [`crawl aborted: ${error.message}`],
         budgetExhausted: false,
+        incompleteCoverage: false,
+        incompleteNodes: [],
         error: error.message,
       });
     }
   }
 
   const unhealthy =
-    storeResults.some((result) => result.budgetExhausted || result.error) ||
-    manifestPersistFailures > 0;
+    storeResults.some(
+      (result) => result.budgetExhausted || result.error || result.incompleteCoverage,
+    ) || manifestPersistFailures > 0;
 
   const summary = {
     file,
@@ -656,6 +789,10 @@ export async function runCollection(options = {}) {
       treeCategories: result.treeCategories,
       emptyPages: result.emptyPages,
       budgetExhausted: result.budgetExhausted,
+      incompleteCoverage: result.incompleteCoverage,
+      ...(result.incompleteNodes?.length > 0
+        ? { incompleteNodes: result.incompleteNodes }
+        : {}),
       ...(result.error ? { error: result.error } : {}),
       warnings: result.warnings,
     })),
@@ -674,9 +811,11 @@ function printHelp() {
 
 Foodstuffs full-catalogue breadth collector using the mobile app backend
 (BREADTH-1 mobile pivot). Per store: fetch the category tree, then walk
-every top-level node. Nodes saturating the 1,000-hit pagination clamp drill
-into tree children (depth max cat2). Leaves are paginated fully. Products
-are deduped by productId across overlapping categories.
+every node at arbitrary depth. Nodes saturating the 1,000-hit pagination
+clamp drill into tree children (depth max cat2). Beyond cat2, or childless
+saturated nodes, produce incomplete-coverage warnings rather than silently
+paginating a clamped result. Products are deduped by productId across
+overlapping categories.
 
 Options:
   --retailer <name>  paknsave or newworld (default: paknsave)

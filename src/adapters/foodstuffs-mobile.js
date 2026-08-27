@@ -6,8 +6,11 @@
  * collection (no intermittent tarpits observed).
  *
  * Guest auth via POST /mobile/user/login/guest, token cached until expiry
- * minus 60s margin. Every request goes through the injected `fetch` — the
- * caller (crawler bridge) owns pacing and retry.
+ * minus 60s margin. In-flight auth promise is shared so N concurrent first
+ * calls produce exactly one login request.
+ *
+ * Every request goes through the injected `fetch` — the caller (crawler
+ * bridge) owns pacing and retry.
  */
 
 import { toPriceObservation } from "./foodstuffs.js";
@@ -24,9 +27,21 @@ const BANNER_CONFIG = Object.freeze({
 
 export { toPriceObservation };
 
+/**
+ * Normalise a store-list response envelope into a bare array.
+ * Accepts bare array, {stores:[...]}, or {items:[...]}.
+ */
+function normalizeStoreList(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.stores)) return raw.stores;
+  if (raw && Array.isArray(raw.items)) return raw.items;
+  return raw;
+}
+
 export class MobileFoodstuffsClient {
   #accessToken;
   #expiresAt = 0;
+  #authPromise = null;
   #fetch;
   #apiOrigin;
   #userAgent;
@@ -42,7 +57,10 @@ export class MobileFoodstuffsClient {
     this.#banner = banner;
     this.#config = config;
     this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#apiOrigin = options.apiOrigin ?? DEFAULT_API_ORIGIN;
+    this.#apiOrigin = (options.apiOrigin ?? DEFAULT_API_ORIGIN).replace(
+      /\/+$/,
+      "",
+    );
     this.#userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
   }
 
@@ -59,38 +77,64 @@ export class MobileFoodstuffsClient {
   /**
    * Authenticate as a guest, caching the token until it is within 60s of
    * expiry. Idempotent on repeated calls within the cache window.
+   * Concurrent first calls share a single in-flight auth promise.
    */
   async #authenticate() {
-    if (this.#accessToken && Date.now() < this.#expiresAt - TOKEN_EXPIRY_MARGIN_MS) {
+    if (
+      this.#accessToken &&
+      Date.now() < this.#expiresAt - TOKEN_EXPIRY_MARGIN_MS
+    ) {
       return this.#accessToken;
     }
 
-    const response = await this.#fetch(
-      `${this.#apiOrigin}/mobile/user/login/guest`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "user-agent": this.#userAgent,
+    // Join an in-flight auth if one exists.
+    if (this.#authPromise) return this.#authPromise;
+
+    this.#authPromise = (async () => {
+      const response = await this.#fetch(
+        `${this.#apiOrigin}/mobile/user/login/guest`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": this.#userAgent,
+          },
+          body: JSON.stringify({ banner: this.#banner }),
         },
-        body: JSON.stringify({ banner: this.#banner }),
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Mobile guest auth failed: ${response.status} ${response.statusText}`,
       );
-    }
 
-    const session = await response.json();
-    if (!session.access_token) {
-      throw new Error("Mobile guest auth returned no access token");
-    }
+      if (!response.ok) {
+        throw new Error(
+          `Mobile guest auth failed: ${response.status} ${response.statusText}`,
+        );
+      }
 
-    this.#accessToken = session.access_token;
-    this.#expiresAt = Date.now() + (session.expires_in ?? 3600) * 1000;
-    return this.#accessToken;
+      const session = await response.json();
+      if (!session.access_token) {
+        throw new Error("Mobile guest auth returned no access token");
+      }
+
+      const expiresIn = session.expires_in;
+      if (
+        typeof expiresIn !== "number" ||
+        !Number.isFinite(expiresIn) ||
+        expiresIn <= 0
+      ) {
+        throw new TypeError(
+          `Invalid expires_in from guest login: expected positive finite number, got ${expiresIn}`,
+        );
+      }
+
+      this.#accessToken = session.access_token;
+      this.#expiresAt = Date.now() + expiresIn * 1000;
+      return this.#accessToken;
+    })();
+
+    try {
+      return await this.#authPromise;
+    } finally {
+      this.#authPromise = null;
+    }
   }
 
   /**
@@ -120,13 +164,18 @@ export class MobileFoodstuffsClient {
 
   /**
    * List all physical stores for this banner.
-   * GET /mobile/store/physical?banner=PNS|MNW
+   * POST /mobile/store/physical?banner=PNS|MNW  body []
    */
   async listStores() {
-    // The research verified POST works; GET is also supported.
-    return this.#request(`/mobile/store/physical?banner=${this.#banner}`, {
-      method: "GET",
-    });
+    const raw = await this.#request(
+      `/mobile/store/physical?banner=${this.#banner}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "[]",
+      },
+    );
+    return normalizeStoreList(raw);
   }
 
   /**

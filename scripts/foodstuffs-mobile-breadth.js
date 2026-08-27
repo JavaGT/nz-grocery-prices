@@ -693,11 +693,18 @@ export async function runCollection(options = {}) {
         `No ${retailer} stores returned by the store list API`,
       );
     }
+    // Pilot default (and any --store fragment) must resolve to a store the
+    // app backend can actually serve: some listed stores are not
+    // online-enabled and their category tree returns 500.
+    const online = all.filter((store) => store.onlineActive !== false);
+    if (online.length === 0) {
+      throw new Error(`No online-active ${retailer} stores returned`);
+    }
     stores =
       storeQueries.length > 0
-        ? resolveStores(storeQueries, all)
+        ? resolveStores(storeQueries, online)
         : [
-            [...all].sort((a, b) =>
+            [...online].sort((a, b) =>
               a.name.localeCompare(b.name, "en-NZ"),
             )[0],
           ];

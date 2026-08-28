@@ -77,5 +77,11 @@ for retailer in paknsave newworld; do
   [ "$retailer" = "paknsave" ] && sleep 120
 done
 
+# Record the running streak of consecutive healthy nights (gate: 3) in the
+# run log — the health log stays strictly machine-parseable.
+"$NODE" "$REPO_ROOT/scripts/breadth-pilot-gate.js" \
+  >> /tmp/nz-grocery-breadth.log 2>/dev/null \
+  || true
+
 echo "=== breadth-pilot done overall=$overall ===" >> /tmp/nz-grocery-breadth.log
 exit "$overall"

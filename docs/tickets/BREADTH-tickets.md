@@ -42,6 +42,14 @@ Blocked by BREADTH-0. Pilot-gated before estate rollout.
 > model ±30%) via `scripts/breadth-passes.sh` pattern; then BREADTH-5
 > projection scale pass and BREADTH-6 orchestration before the 208-store
 > estate rollout.
+>
+> **Gate revised by owner 2026-08-28: 3 consecutive healthy nights** (not
+> 7) — old app/archive daemon parked; breadth pilot is the sole collection
+> path. Gate tracker: `scripts/breadth-pilot-gate.js` (reads
+> `/tmp/nz-grocery-breadth.health.jsonl`, streaks consecutive healthy NZ
+> nights; `npm test` → `test/breadth-pilot-gate.test.js`). Streak as of
+> 2026-08-28: **1/3** (scheduled 3:30am NZ run healthy; earlier manual
+> runs don't count). Nightly runner appends the streak to the run log.
 
 ## Iteration history on the web/edge API (superseded by mobile pivot)
 

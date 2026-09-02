@@ -270,6 +270,25 @@ five commands complete. A lock prevents overlapping runs. Optional collector
 settings can be stored in a mode-600 environment file and passed via
 `COLLECTOR_ENV_FILE`; do not place `WOOLWORTHS_COOKIE` in a plist or logs.
 
+### Nightly breadth pilot
+
+The breadth pilot runs the full-catalogue pilot contexts separately from the
+app's live archive:
+
+```sh
+npm run breadth:nightly
+```
+
+It runs PAK'nSAVE, New World, FreshChoice, Warehouse, and Woolworths in
+sequence, writing to `data/breadth-pilot-*.jsonl`. FreshChoice and Warehouse
+resume from manifests; Woolworths walks all departments for its single
+anonymous fulfilment store each night. This is live network collection and
+does not update `data/prices.jsonl`.
+
+To schedule it at 3:30am on a headless macOS collector, use the
+`ops/nz.grocery-prices.breadth.daemon.plist.template` LaunchDaemon template.
+The run may take over an hour because each retailer is deliberately paced.
+
 To schedule it at 4:00am on a headless macOS collector (including one reached
 over SSH), use a system `LaunchDaemon`, not a GUI `LaunchAgent`:
 

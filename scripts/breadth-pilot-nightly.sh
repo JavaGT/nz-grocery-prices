@@ -1,21 +1,25 @@
 #!/bin/sh
 #
-# Nightly breadth-pilot run: one full-catalogue crawl per pilot store into
-# the pilot archives, then an append-only health line summarizing the night.
+# Nightly breadth-pilot run: one full-catalogue crawl per pilot context for
+# each retailer into separate pilot archives, then an append-only health line.
 #
 # Designed for launchd (StartCalendarInterval) — all paths absolute, no
-# reliance on shell profiles. Safe to re-run: both collectors resume from
-# their manifests, and unchanged prices dedupe in the archive.
+# reliance on shell profiles. Safe to re-run: collectors resume from
+# manifests where supported, and unchanged prices dedupe in each archive.
 #
 # Logs: /tmp/nz-grocery-breadth.log (stdout), .error.log (stderr)
 
 set -u
 
-REPO_ROOT="/Users/server/Development/nz-grocery-prices"
-NODE="/opt/homebrew/bin/node"
+REPO_ROOT="${BREADTH_REPO_ROOT:-/Users/server/Development/nz-grocery-prices}"
+NODE="${BREADTH_NODE:-/opt/homebrew/bin/node}"
+HEALTH_LOG="${BREADTH_HEALTH_LOG:-/tmp/nz-grocery-breadth.health.jsonl}"
+RUN_LOG="${BREADTH_RUN_LOG:-/tmp/nz-grocery-breadth.log}"
+ERROR_LOG="${BREADTH_ERROR_LOG:-/tmp/nz-grocery-breadth.error.log}"
+COOLDOWN_S="${BREADTH_COOLDOWN_S:-120}"
 LOG_STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-echo "=== breadth-pilot start ${LOG_STAMP} ===" >> /tmp/nz-grocery-breadth.log
+echo "=== breadth-pilot start ${LOG_STAMP} ===" >> "$RUN_LOG"
 
 summary_line() {
   # Extract the fields that matter from a collector's summary JSON.
@@ -30,11 +34,12 @@ summary_line() {
         console.log(
           JSON.stringify({
             healthy: summary.healthy,
-            uniqueProducts: store.uniqueProducts ?? null,
-            pagesFetched: store.pagesFetched ?? null,
+            uniqueProducts: store.uniqueProducts ?? summary.uniqueProducts ?? null,
+            pagesFetched: store.pagesFetched ?? summary.pagesFetched ?? null,
             httpRequestsAdmitted: summary.httpRequestsAdmitted ?? null,
+            requestsMade: summary.requestsMade ?? null,
             observationsRecorded: summary.observationsRecorded ?? null,
-            incompleteCoverage: store.incompleteCoverage ?? false,
+            incompleteCoverage: store.incompleteCoverage ?? summary.incompleteCoverage ?? false,
           })
         );
       } catch {
@@ -53,35 +58,46 @@ summary_line() {
 
 overall=0
 
-for retailer in paknsave newworld; do
-  case "$retailer" in
-    paknsave) file="data/breadth-pilot.jsonl" ;;
-    newworld) file="data/breadth-pilot-nw.jsonl" ;;
-  esac
+run_collector() {
+  label="$1"
+  file="$2"
+  script="$3"
+  shift 3
 
-  echo "--- $retailer $(date -u +%H:%M:%SZ)" >> /tmp/nz-grocery-breadth.log
-
-  output="$("$NODE" "$REPO_ROOT/scripts/foodstuffs-mobile-breadth.js" \
-    --retailer "$retailer" --delay-ms 5000 --file "$file" 2>>/tmp/nz-grocery-breadth.error.log)"
+  echo "--- $label $(date -u +%H:%M:%SZ)" >> "$RUN_LOG"
+  output="$("$NODE" "$REPO_ROOT/scripts/$script" "$@" --file "$file" 2>>"$ERROR_LOG")"
   code=$?
 
   result="$(printf '%s' "$output" | summary_line)"
-  echo "${LOG_STAMP} ${retailer} exit=${code} ${result}" >> /tmp/nz-grocery-breadth.health.jsonl
+  echo "${LOG_STAMP} ${label} exit=${code} ${result}" >> "$HEALTH_LOG"
 
   if [ "$code" -ne 0 ]; then
     overall=1
-    echo "breadth pilot: $retailer exited $code" >&2
+    echo "breadth pilot: $label exited $code" >&2
   fi
+}
 
-  # Cool-down between banners so requests never span hosts back-to-back.
-  [ "$retailer" = "paknsave" ] && sleep 120
-done
+run_collector paknsave "$REPO_ROOT/data/breadth-pilot.jsonl" \
+  foodstuffs-mobile-breadth.js --retailer paknsave --delay-ms 5000
+sleep "$COOLDOWN_S"
+run_collector newworld "$REPO_ROOT/data/breadth-pilot-nw.jsonl" \
+  foodstuffs-mobile-breadth.js --retailer newworld --delay-ms 5000
+sleep "$COOLDOWN_S"
+run_collector freshchoice "$REPO_ROOT/data/breadth-pilot-fc.jsonl" \
+  freshchoice-breadth.js --delay-ms 3000 --budget 800
+sleep "$COOLDOWN_S"
+run_collector warehouse "$REPO_ROOT/data/breadth-pilot-tw.jsonl" \
+  warehouse-breadth.js --delay-ms 3000 --budget 400
+sleep "$COOLDOWN_S"
+run_collector woolworths "$REPO_ROOT/data/breadth-pilot-ww.jsonl" \
+  woolworths-breadth.js --delay-ms 3000 --size 120 --budget 400
 
 # Record the running streak of consecutive healthy nights (gate: 3) in the
 # run log — the health log stays strictly machine-parseable.
 "$NODE" "$REPO_ROOT/scripts/breadth-pilot-gate.js" \
-  >> /tmp/nz-grocery-breadth.log 2>/dev/null \
+  --health-log "$HEALTH_LOG" \
+  >> "$RUN_LOG" 2>/dev/null \
   || true
 
-echo "=== breadth-pilot done overall=$overall ===" >> /tmp/nz-grocery-breadth.log
+echo "=== breadth-pilot done overall=$overall ===" >> "$RUN_LOG"
 exit "$overall"

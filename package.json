@@ -55,6 +55,7 @@
     "freshchoice": "node scripts/freshchoice.js",
     "warehouse": "node scripts/warehouse.js",
     "archive:local": "sh scripts/archive-daily-local.sh",
+    "breadth:nightly": "sh scripts/breadth-pilot-nightly.sh",
     "start": "node src/app/server.js",
     "pack:check": "npm pack --dry-run --cache .cache/npm"
   },

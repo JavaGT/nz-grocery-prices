@@ -152,6 +152,22 @@ export class WoolworthsClient {
     return this.#request(`/api/v1/products?${parameters}`);
   }
 
+  async listProducts(options = {}) {
+    const parameters = new URLSearchParams({
+      target: options.target ?? "browse",
+      page: String(options.page ?? 1),
+      size: String(options.size ?? 100),
+    });
+    for (const name of ["dasFilter", "sort", "search", "useRankedSpecials"]) {
+      if (options[name] !== undefined) parameters.set(name, String(options[name]));
+    }
+    return this.#request(`/api/v1/products?${parameters}`);
+  }
+
+  async listDepartments() {
+    return this.#request("/api/v1/products/departments");
+  }
+
   async getStore() {
     const result = await this.listDeals({ page: 1, size: 1 });
     const fulfilment = result.context?.fulfilment;

@@ -13,10 +13,16 @@ function line(stamp, retailer, exit, healthy) {
   return `${stamp} ${retailer} exit=${exit} ${JSON.stringify({ healthy })}`;
 }
 
-/** Two-retailer run (paknsave + newworld) at a given UTC stamp. */
+/** Full five-retailer run at a given UTC stamp. */
 function run(stamp, healthy) {
   const exit = healthy ? 0 : 1;
-  return [line(stamp, "paknsave", exit, healthy), line(stamp, "newworld", exit, healthy)];
+  return [
+    line(stamp, "paknsave", exit, healthy),
+    line(stamp, "newworld", exit, healthy),
+    line(stamp, "freshchoice", exit, healthy),
+    line(stamp, "warehouse", exit, healthy),
+    line(stamp, "woolworths", exit, healthy),
+  ];
 }
 
 // ---- parseLine -----------------------------------------------------------
@@ -73,7 +79,17 @@ describe("nightHealth + streakFromNights", () => {
     const lines = [
       line("2026-08-28T15:30:04Z", "paknsave", 0, true),
       line("2026-08-28T15:30:04Z", "newworld", 1, false),
+      line("2026-08-28T15:30:04Z", "freshchoice", 0, true),
+      line("2026-08-28T15:30:04Z", "warehouse", 0, true),
+      line("2026-08-28T15:30:04Z", "woolworths", 0, true),
     ];
+    const nights = nightHealth(groupRuns(lines));
+    assert.equal(nights.get("2026-08-29").healthy, false);
+    assert.equal(streakFromNights(nights).streak, 0);
+  });
+
+  it("does not count a run missing one retailer", () => {
+    const lines = run("2026-08-28T15:30:04Z", true).slice(0, 4);
     const nights = nightHealth(groupRuns(lines));
     assert.equal(nights.get("2026-08-29").healthy, false);
     assert.equal(streakFromNights(nights).streak, 0);

@@ -69,39 +69,19 @@ fulfilment store). **Warehouse** prices are national, not per-store.
 Expect the 4am run to take much longer than before (Foodstuffs + FreshChoice
 across ~280 storefronts).
 
-## Archive daemon (installed and running)
+## Collection scheduling
 
-The `nz.grocery-prices.archive` LaunchDaemon is installed and active in the
-system domain:
+The historical `nz.grocery-prices.archive` LaunchDaemon described in earlier
+versions of this handoff is not installed on the current machine, and its old
+`/Users/server/Code/prices` path no longer exists. The current breadth pilot is
+the intended collection path. It runs PAK'nSAVE, New World, FreshChoice,
+Warehouse, and Woolworths into separate `data/breadth-pilot-*.jsonl` archives.
 
-```text
-/Library/LaunchDaemons/nz.grocery-prices.archive.plist
-  scheduled: 4:00am daily (StartCalendarInterval Hour=4 Minute=0)
-  user:      server
-  state:     not running (fires on schedule, not a persistent service)
-```
-
-Verification of the last run (2026-07-17 04:01, `/tmp/nz-grocery-prices-archive.log`):
-
-```text
-{"fetched":2400,"added":133,...}
-{"store":"warehouse:national-online","fetched":116,"added":9,...}
-archive collection completed: /Users/server/Code/prices/data/prices.jsonl
-```
-
-`stderr` log was empty (0 bytes) — clean run. To check future runs:
-
-```sh
-tail -40 /tmp/nz-grocery-prices-archive.log
-tail -40 /tmp/nz-grocery-prices-archive.error.log
-sudo launchctl print system/nz.grocery-prices.archive
-```
-
-To manually trigger a one-off collection (writes live data to the archive):
-
-```sh
-sudo launchctl kickstart -k system/nz.grocery-prices.archive
-```
+The runner is `scripts/breadth-pilot-nightly.sh`, exposed as
+`npm run breadth:nightly`. Install
+`ops/nz.grocery-prices.breadth.daemon.plist.template` as a 3:30am LaunchDaemon
+when scheduling is wanted. It deliberately does not write the app's
+authoritative `data/prices.jsonl` archive.
 
 ## Broader product/app state
 

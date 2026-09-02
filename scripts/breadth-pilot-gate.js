@@ -23,6 +23,13 @@ import { readFileSync, existsSync } from "node:fs";
 const DEFAULT_LOG = "/tmp/nz-grocery-breadth.health.jsonl";
 const DEFAULT_TARGET = 3;
 const TZ_OFFSET_H = Number(process.env.BREADTH_TZ_OFFSET_H ?? 12);
+export const EXPECTED_RETAILERS = [
+  "paknsave",
+  "newworld",
+  "freshchoice",
+  "warehouse",
+  "woolworths",
+];
 
 export function parseArgs(argv) {
   const out = { log: DEFAULT_LOG, target: DEFAULT_TARGET };
@@ -83,7 +90,11 @@ export function nzDate(stamp, offsetHours = TZ_OFFSET_H) {
  * Per-night health: date → { healthy, anyRun }. A night is healthy when at
  * least one fully-healthy run happened on that NZST date.
  */
-export function nightHealth(runs, offsetHours = TZ_OFFSET_H) {
+export function nightHealth(
+  runs,
+  offsetHours = TZ_OFFSET_H,
+  expectedRetailers = EXPECTED_RETAILERS,
+) {
   const nights = new Map();
   for (const entries of runs.values()) {
     const stamp = entries[0].stamp;
@@ -92,7 +103,11 @@ export function nightHealth(runs, offsetHours = TZ_OFFSET_H) {
     if (!nights.has(date)) nights.set(date, { healthy: false, anyRun: false });
     const night = nights.get(date);
     night.anyRun = true;
-    if (entries.length > 0 && entries.every((e) => e.healthy)) night.healthy = true;
+    const retailers = new Set(entries.map((entry) => entry.retailer));
+    const complete =
+      entries.length === expectedRetailers.length &&
+      expectedRetailers.every((retailer) => retailers.has(retailer));
+    if (complete && entries.every((entry) => entry.healthy)) night.healthy = true;
   }
   return nights;
 }

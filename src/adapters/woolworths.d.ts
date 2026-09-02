@@ -23,6 +23,11 @@ export interface WoolworthsCollectOptions {
   size?: number;
   maxPages?: number;
   observedAt?: string;
+  target?: string;
+  dasFilter?: string;
+  sort?: string;
+  search?: string;
+  useRankedSpecials?: boolean;
 }
 
 export class WoolworthsClient {
@@ -30,6 +35,8 @@ export class WoolworthsClient {
   origin: string;
   userAgent: string;
   listDeals(options?: WoolworthsCollectOptions): Promise<Record<string, any>>;
+  listProducts(options?: WoolworthsCollectOptions): Promise<Record<string, any>>;
+  listDepartments(): Promise<Record<string, any> | Record<string, any>[]>;
   getStore(): Promise<Store & { retailer: "woolworths"; context: Record<string, any> }>;
   collectDeals(options?: WoolworthsCollectOptions): Promise<PriceObservation[]>;
 }

@@ -65,6 +65,7 @@ v1 whole-observation records are refused everywhere in the hot path:
 | Every New World store | `npm run newworld -- archive --all-stores` | ~148 stores |
 | Every FreshChoice store | `npm run freshchoice -- archive --all-stores` | ~76 storefronts |
 | All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE / New World / FreshChoice default to all stores. Woolworths + Warehouse stay single-context. Never use as a smoke test. |
+| Nightly breadth pilot | `npm run breadth:nightly` | **live network collection** into separate `data/breadth-pilot-*.jsonl` archives. Runs PAK'nSAVE, New World, FreshChoice, Warehouse, and Woolworths pilot crawls. |
 
 ## Known slow / side-effecting checks
 

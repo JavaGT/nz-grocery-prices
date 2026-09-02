@@ -139,6 +139,12 @@ terminate on 0-tile page.
 
 Blocked by BREADTH-0. ISOLATED SPIKE: undocumented session-rebinding.
 
+> **Status: SINGLE-STORE NIGHTLY PILOT IMPLEMENTED (2026-09-02).** The
+> `woolworths-breadth.js` collector walks all departments through the verified
+> browse API, dedupes cross-listed SKUs, and records one anonymous fulfilment
+> store into `data/breadth-pilot-ww.jsonl`. Multi-store switching remains out of
+> scope until the single-store pilot is healthy.
+
 ## Goal
 ~18–22k SKUs per Woolworths store; multi-store via anonymous rebind.
 

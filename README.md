@@ -287,7 +287,13 @@ does not update `data/prices.jsonl`.
 
 To schedule it at 3:30am on a headless macOS collector, use the
 `ops/nz.grocery-prices.breadth.daemon.plist.template` LaunchDaemon template.
-The run may take over an hour because each retailer is deliberately paced.
+The run may take over an hour because each retailer is deliberately paced. The
+one-time installer fills in the current repository path and account, then
+registers the daemon:
+
+```sh
+sudo sh ops/install-breadth-daemon.sh
+```
 
 To schedule it at 4:00am on a headless macOS collector (including one reached
 over SSH), use a system `LaunchDaemon`, not a GUI `LaunchAgent`:

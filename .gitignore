@@ -9,3 +9,4 @@ data/*.sqlite
 research/*.har
 .worktrees/
 collector.env
+reports/

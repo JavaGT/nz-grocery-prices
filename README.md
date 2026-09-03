@@ -295,6 +295,17 @@ registers the daemon:
 sudo sh ops/install-breadth-daemon.sh
 ```
 
+The latest run and accumulated pilot corpus can be summarized without making
+network requests:
+
+```sh
+npm run breadth:report
+```
+
+This writes a dated Markdown report under `reports/`. It reports actual store
+contexts and keeps pilot coverage separate from the claim of collecting every
+store.
+
 To schedule it at 4:00am on a headless macOS collector (including one reached
 over SSH), use a system `LaunchDaemon`, not a GUI `LaunchAgent`:
 

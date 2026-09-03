@@ -27,6 +27,7 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 | `scripts/archive-daily-local.sh` | `sh -n scripts/archive-daily-local.sh && node --test test/local-archive-runner.test.js` |
 | `scripts/woolworths-breadth.js`, breadth gate | `node --test test/woolworths-breadth.test.js test/breadth-pilot-gate.test.js` |
 | `scripts/breadth-pilot-nightly.sh` | `sh -n scripts/breadth-pilot-nightly.sh` |
+| `scripts/breadth-report.js` | `node --test test/breadth-report.test.js` |
 | `src/archive.js`, `src/analytics.js` | `node --test test/archive.test.js test/analytics.test.js` |
 | `src/index.js` + `.d.ts` public surface | `node --test test/types-surface.test.js`; `npm run pack:check` after any package.json change |
 | `src/repository.js` writer/load/repair | `node --test test/repository-writer.test.js test/repository-load.test.js test/repository-repair.test.js` |

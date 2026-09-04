@@ -11,7 +11,16 @@
 # its health line when a store collects fewer than its minimum expected
 # products.
 #
-# Logs: /tmp/nz-grocery-breadth.log (stdout), .error.log (stderr)
+# Lanes run in PARALLEL across distinct retailer hosts (BREADTH-9): each
+# lane writes its own archive under its own lock and paces its own host,
+# so overlap adds no per-host load and the night ends at the slowest lane
+# instead of the sum of all lanes. Exception: paknsave + newworld share one
+# Foodstuffs mobile API host with tarpit history, so that pair stays serial
+# inside its lane with the inter-banner cooldown.
+#
+# Logs: /tmp/nz-grocery-breadth.log (stdout), .error.log (stderr). Lanes
+# interleave in the human-readable run log; the machine-parsed health log
+# stays one JSON object per line (small single appends).
 
 set -u
 
@@ -21,6 +30,10 @@ HEALTH_LOG="${BREADTH_HEALTH_LOG:-/tmp/nz-grocery-breadth.health.jsonl}"
 RUN_LOG="${BREADTH_RUN_LOG:-/tmp/nz-grocery-breadth.log}"
 ERROR_LOG="${BREADTH_ERROR_LOG:-/tmp/nz-grocery-breadth.error.log}"
 COOLDOWN_S="${BREADTH_COOLDOWN_S:-120}"
+# BREADTH-14 trial (7 nights from 2026-09-05): 3000ms vs the script's 5000ms
+# default. Watch circuit-breaker/incompleteCoverage health lines; revert by
+# setting BREADTH_FS_DELAY_MS=5000 if the shared host tarpits.
+FS_DELAY_MS="${BREADTH_FS_DELAY_MS:-3000}"
 LOG_STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo "=== breadth-pilot start ${LOG_STAMP} ===" >> "$RUN_LOG"
@@ -76,25 +89,40 @@ run_collector() {
   echo "${LOG_STAMP} ${label} exit=${code} ${result}" >> "$HEALTH_LOG"
 
   if [ "$code" -ne 0 ]; then
-    overall=1
     echo "breadth pilot: $label exited $code" >&2
   fi
+  return "$code"
 }
 
-run_collector paknsave "$REPO_ROOT/data/breadth-pilot.jsonl" \
-  foodstuffs-mobile-breadth.js --retailer paknsave --delay-ms 5000
-sleep "$COOLDOWN_S"
-run_collector newworld "$REPO_ROOT/data/breadth-pilot-nw.jsonl" \
-  foodstuffs-mobile-breadth.js --retailer newworld --delay-ms 5000
-sleep "$COOLDOWN_S"
+# One background lane per distinct retailer host. Each collector paces its
+# own host, so overlapping lanes never raises any host's request rate, and
+# the night ends at the slowest lane instead of the sum of all lanes.
+# Exception: paknsave + newworld share one Foodstuffs mobile API host with
+# tarpit history, so that pair stays serial inside one lane with the
+# inter-banner cooldown between them.
+
+run_foodstuffs_lane() {
+  lane=0
+  run_collector paknsave "$REPO_ROOT/data/breadth-pilot.jsonl" \
+    foodstuffs-mobile-breadth.js --retailer paknsave --delay-ms "$FS_DELAY_MS" || lane=1
+  sleep "$COOLDOWN_S"
+  run_collector newworld "$REPO_ROOT/data/breadth-pilot-nw.jsonl" \
+    foodstuffs-mobile-breadth.js --retailer newworld --delay-ms "$FS_DELAY_MS" || lane=1
+  return "$lane"
+}
+
+run_foodstuffs_lane & foodstuffs_lane=$!
 run_collector freshchoice "$REPO_ROOT/data/breadth-pilot-fc.jsonl" \
-  freshchoice-breadth.js --delay-ms 3000 --budget 800
-sleep "$COOLDOWN_S"
+  freshchoice-breadth.js --delay-ms 3000 --budget 800 & freshchoice_lane=$!
 run_collector warehouse "$REPO_ROOT/data/breadth-pilot-tw.jsonl" \
-  warehouse-breadth.js --delay-ms 3000 --budget 400
-sleep "$COOLDOWN_S"
+  warehouse-breadth.js --delay-ms 3000 --budget 400 & warehouse_lane=$!
 run_collector woolworths "$REPO_ROOT/data/breadth-pilot-ww.jsonl" \
-  woolworths-breadth.js --delay-ms 3000 --size 120 --budget 400
+  woolworths-breadth.js --delay-ms 3000 --size 120 --budget 400 & woolworths_lane=$!
+
+wait "$foodstuffs_lane" || overall=1
+wait "$freshchoice_lane" || overall=1
+wait "$warehouse_lane" || overall=1
+wait "$woolworths_lane" || overall=1
 
 # Record the running streak of consecutive healthy nights (gate: 3) in the
 # run log — the health log stays strictly machine-parseable.

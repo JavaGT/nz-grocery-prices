@@ -2,6 +2,89 @@ export class TimeoutError extends Error {
   get name() { return 'TimeoutError' }
 }
 
+/**
+ * Hard cap on buffered response bodies (matches the curl adapters'
+ * maxBuffer). A retailer (or anything in between) serving an unbounded
+ * body must not balloon collector memory.
+ */
+const MAX_BODY_BYTES = 20 * 1024 * 1024;
+
+async function readStreamCapped(body, maxBytes, label) {
+  const reader = body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value?.byteLength ?? value?.length ?? 0;
+      if (total > maxBytes) {
+        throw new Error(`${label}: streamed past the ${maxBytes} byte cap mid-read`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try { await body.cancel(); } catch { /* teardown is best-effort */ }
+    throw error;
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+    .toString('utf8');
+}
+
+/**
+ * Read a response body to a string, refusing to buffer more than maxBytes.
+ * A declared Content-Length over the cap is refused before any read;
+ * streamed bodies are capped chunk-wise; non-stream bodies (test doubles)
+ * fall back to .text().
+ */
+export async function readBodyText(response, { maxBytes = MAX_BODY_BYTES, label = 'response body' } = {}) {
+  const declared = Number.parseInt(response?.headers?.get?.('content-length') ?? '', 10);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
+    throw new Error(`${label}: declared Content-Length ${declared} exceeds the ${maxBytes} byte cap`);
+  }
+  if (response?.body && typeof response.body.getReader === 'function') {
+    return readStreamCapped(response.body, maxBytes, label);
+  }
+  if (typeof response?.text === 'function') return response.text();
+  throw new Error(`${label}: response exposes neither a stream nor text() to read`);
+}
+
+function jsonContextError(response, operation, text, cause) {
+  const prefix = text ? String(text).slice(0, 120).replace(/\s+/g, ' ').trim() : '';
+  const contentType = response?.headers?.get?.('content-type') ?? 'unknown content-type';
+  return new Error(
+    `${operation}: expected JSON but got ${response?.status ?? '?'} ${response?.statusText ?? ''} ` +
+    `(${contentType}) — ${cause.message}` + (prefix ? `; body starts: ${prefix}` : ''),
+  );
+}
+
+/**
+ * Read a JSON response hardened against the failure modes that cost
+ * diagnosis time: a WAF challenge served with status 200 must produce an
+ * error naming the operation, status, content-type, and a body prefix —
+ * not a bare "Unexpected token". Bodies go through readBodyText so they
+ * are size-capped. Response doubles that expose only .json() (no stream,
+ * no text) still work.
+ */
+export async function parseJsonResponse(response, operation, { maxBytes = MAX_BODY_BYTES } = {}) {
+  if (!response?.body && typeof response?.json === 'function') {
+    try {
+      return await response.json();
+    } catch (error) {
+      throw jsonContextError(response, operation, undefined, error);
+    }
+  }
+  const text = await readBodyText(response, { maxBytes, label: `${operation} response` });
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw jsonContextError(response, operation, text, error);
+  }
+}
+
 function isRetryableStatus(status) {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }

@@ -14,6 +14,7 @@
  */
 
 import { toPriceObservation } from "./foodstuffs.js";
+import { parseJsonResponse } from "./fetch-with-retry.js";
 
 const DEFAULT_API_ORIGIN = "https://api-prod.prod.fsniwaikato.kiwi/prod";
 const DEFAULT_USER_AGENT = "PAKnSAVEApp/4.32.0 (App Version)";
@@ -133,7 +134,7 @@ export class MobileFoodstuffsClient {
         );
       }
 
-      const session = await response.json();
+      const session = await parseJsonResponse(response, "Mobile guest auth");
       if (!session.access_token) {
         throw new Error("Mobile guest auth returned no access token");
       }
@@ -203,7 +204,7 @@ export class MobileFoodstuffsClient {
             `Mobile request ${path} failed: ${response.status} ${response.statusText}`,
           );
         }
-        return response.json();
+        return parseJsonResponse(response, `Mobile request ${path}`);
       } catch (error) {
         this.#lastCompletedAt = Date.now();
         lastError = error;

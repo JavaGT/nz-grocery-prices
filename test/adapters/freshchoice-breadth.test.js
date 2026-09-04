@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  assertFreshChoiceOrigin,
   parseSitemapCategoryUrls,
   BREAKER_THRESHOLD,
   FreshChoiceBreadthClient,
@@ -120,7 +121,7 @@ describe("FreshChoiceBreadthClient", () => {
       fetch: transport,
       delayMs: 0,
     });
-    const urls = await client.fetchSitemap("https://testville.store.fc.co.nz");
+    const urls = await client.fetchSitemap("https://testville.store.freshchoice.co.nz");
     assert.equal(urls.length, 2);
     assert.ok(urls[0].includes("/category/bakery"));
     assert.ok(urls[1].includes("/category/dairy"));
@@ -136,7 +137,7 @@ describe("FreshChoiceBreadthClient", () => {
       delayMs: 0,
     });
     await assert.rejects(
-      () => client.fetchSitemap("https://testville.store.fc.co.nz"),
+      () => client.fetchSitemap("https://testville.store.freshchoice.co.nz"),
       /sitemap fetch failed/,
     );
     assert.equal(client.consecutiveFailures, 1);
@@ -154,7 +155,7 @@ describe("FreshChoiceBreadthClient", () => {
       delayMs: 0,
     });
     const html = await client.fetchCategoryPage(
-      "https://testville.store.fc.co.nz",
+      "https://testville.store.freshchoice.co.nz",
       "/category/bakery",
       0,
     );
@@ -173,7 +174,7 @@ describe("FreshChoiceBreadthClient", () => {
       delayMs: 0,
     });
     await client.fetchCategoryPage(
-      "https://testville.store.fc.co.nz",
+      "https://testville.store.freshchoice.co.nz",
       "/category/bakery",
       2,
     );
@@ -193,7 +194,7 @@ describe("FreshChoiceBreadthClient", () => {
     await assert.rejects(
       () =>
         client.fetchCategoryPage(
-          "https://testville.store.fc.co.nz",
+          "https://testville.store.freshchoice.co.nz",
           "/category/bakery",
           0,
         ),
@@ -213,7 +214,7 @@ describe("FreshChoiceBreadthClient", () => {
       await assert.rejects(
         () =>
           client.fetchCategoryPage(
-            "https://store.fc.co.nz",
+            "https://store.freshchoice.co.nz",
             "/category/x",
             0,
           ),
@@ -224,7 +225,7 @@ describe("FreshChoiceBreadthClient", () => {
     // One more pushes it over
     await assert.rejects(
       () =>
-        client.fetchCategoryPage("https://store.fc.co.nz", "/category/x", 0),
+        client.fetchCategoryPage("https://store.freshchoice.co.nz", "/category/x", 0),
       /category page fetch failed/,
     );
     assert.equal(client.circuitOpened, true);
@@ -243,12 +244,12 @@ describe("FreshChoiceBreadthClient", () => {
     });
     // One failure
     await assert.rejects(() =>
-      client.fetchCategoryPage("https://store.fc.co.nz", "/category/x", 0),
+      client.fetchCategoryPage("https://store.freshchoice.co.nz", "/category/x", 0),
     );
     assert.equal(client.consecutiveFailures, 1);
     // Success resets
     fail = false;
-    await client.fetchCategoryPage("https://store.fc.co.nz", "/category/x", 0);
+    await client.fetchCategoryPage("https://store.freshchoice.co.nz", "/category/x", 0);
     assert.equal(client.consecutiveFailures, 0);
   });
 
@@ -262,10 +263,79 @@ describe("FreshChoiceBreadthClient", () => {
       fetch: transport,
       delayMs: 50,
     });
-    await client.fetchCategoryPage("https://s.fc.co.nz", "/category/a", 0);
-    await client.fetchCategoryPage("https://s.fc.co.nz", "/category/b", 0);
+    await client.fetchCategoryPage("https://s.store.freshchoice.co.nz", "/category/a", 0);
+    await client.fetchCategoryPage("https://s.store.freshchoice.co.nz", "/category/b", 0);
     assert.equal(timestamps.length, 2);
     const gap = timestamps[1] - timestamps[0];
     assert.ok(gap >= 40, `expected gap >= 40ms, got ${gap}ms`);
+  });
+});
+// ---- origin pinning --------------------------------------------------------
+
+describe("assertFreshChoiceOrigin", () => {
+  it("accepts real storefront hosts and returns the normalized origin", () => {
+    assert.equal(
+      assertFreshChoiceOrigin("https://avondale.store.freshchoice.co.nz/"),
+      "https://avondale.store.freshchoice.co.nz",
+    );
+    assert.equal(
+      assertFreshChoiceOrigin("https://freshchoice.co.nz"),
+      "https://freshchoice.co.nz",
+    );
+  });
+
+  it("rejects hosts outside *.freshchoice.co.nz", () => {
+    for (const evil of [
+      "https://evil.example.com",
+      "https://freshchoice.co.nz.evil.example.com",
+      "https://notfreshchoice.co.nz",
+    ]) {
+      assert.throws(
+        () => assertFreshChoiceOrigin(evil),
+        /outside \*\.freshchoice\.co\.nz/,
+        `should reject ${evil}`,
+      );
+    }
+  });
+
+  it("rejects non-https and malformed origins", () => {
+    assert.throws(() => assertFreshChoiceOrigin("http://avondale.store.freshchoice.co.nz"), /must be https/);
+    assert.throws(() => assertFreshChoiceOrigin("not a url"), /not a valid URL/);
+  });
+});
+
+describe("FreshChoiceBreadthClient origin pinning", () => {
+  it("refuses to fetch an off-domain origin and never calls the transport", async () => {
+    let called = false;
+    const client = new FreshChoiceBreadthClient({
+      fetch: async () => {
+        called = true;
+        throw new Error("transport must not be reached");
+      },
+      delayMs: 0,
+    });
+    await assert.rejects(
+      () => client.fetchSitemap("https://evil.example.com/sitemap.xml"),
+      /outside \*\.freshchoice\.co\.nz/,
+    );
+    assert.equal(called, false);
+  });
+
+  it("refuses off-domain origins for category pages too", async () => {
+    const client = new FreshChoiceBreadthClient({
+      fetch: async () => {
+        throw new Error("transport must not be reached");
+      },
+      delayMs: 0,
+    });
+    await assert.rejects(
+      () =>
+        client.fetchCategoryPage(
+          "https://freshchoice.co.nz.evil.example.com",
+          "/category/bakery",
+          0,
+        ),
+      /outside \*\.freshchoice\.co\.nz/,
+    );
   });
 });

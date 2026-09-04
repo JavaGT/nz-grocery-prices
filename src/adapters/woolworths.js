@@ -1,4 +1,4 @@
-import { fetchWithRetry } from "./fetch-with-retry.js";
+import { fetchWithRetry, parseJsonResponse } from "./fetch-with-retry.js";
 
 const DEFAULT_ORIGIN = "https://www.woolworths.co.nz";
 const DEFAULT_USER_AGENT = "nz-grocery-prices/0.1";
@@ -135,7 +135,7 @@ export class WoolworthsClient {
       }),
       path,
     );
-    const result = await response.json();
+    const result = await parseJsonResponse(response, `Woolworths ${path}`);
     if (result.isSuccessful === false) {
       throw new Error(`Woolworths ${path} returned an unsuccessful response`);
     }

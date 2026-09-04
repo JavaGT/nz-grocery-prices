@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { fetchWithRetry } from "./fetch-with-retry.js";
+import { fetchWithRetry, parseJsonResponse } from "./fetch-with-retry.js";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; nz-grocery-prices/0.1; +https://github.com/)";
@@ -177,7 +177,7 @@ export class FoodstuffsClient {
       }),
       "anonymous authentication",
     );
-    const session = await response.json();
+    const session = await parseJsonResponse(response, "Foodstuffs anonymous authentication");
     if (!session.access_token) {
       throw new Error("Foodstuffs anonymous authentication returned no access token");
     }
@@ -207,7 +207,7 @@ export class FoodstuffsClient {
       }),
       path,
     );
-    return response.json();
+    return parseJsonResponse(response, `Foodstuffs ${path}`);
   }
 
   async listStores(options = {}) {

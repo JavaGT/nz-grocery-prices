@@ -1,6 +1,11 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { fetchWithRetry, TimeoutError } from "../../src/adapters/fetch-with-retry.js";
+import {
+  fetchWithRetry,
+  parseJsonResponse,
+  readBodyText,
+  TimeoutError,
+} from "../../src/adapters/fetch-with-retry.js";
 
 function fakeResponse({ status = 200, headers = {}, body = "ok" } = {}) {
   const stream = new ReadableStream({
@@ -451,6 +456,122 @@ describe("fetchWithRetry adapter integration", () => {
       retry: { attempts: 1 },
     });
     assert.equal(typeof client.collectDeals, "function");
+  });
+
+});
+
+// ---- parseJsonResponse / readBodyText ---------------------------------------
+
+describe("parseJsonResponse", () => {
+
+  it("parses a streamed JSON body", async () => {
+    const response = fakeResponse({ status: 200, body: '{"ok":true}' });
+    assert.deepEqual(await parseJsonResponse(response, "Test op"), { ok: true });
+  });
+
+  it("names operation, status, content-type, and body prefix on a WAF-style 200", async () => {
+    const response = fakeResponse({
+      status: 200,
+      headers: { "content-type": "text/html" },
+      body: "<html><body>Just a moment</body></html>",
+    });
+    await assert.rejects(
+      () => parseJsonResponse(response, "Woolworths /specials"),
+      (error) => {
+        assert.match(error.message, /Woolworths \/specials/);
+        assert.match(error.message, /expected JSON but got 200/);
+        assert.match(error.message, /text\/html/);
+        assert.match(error.message, /Just a moment/);
+        return true;
+      },
+    );
+  });
+
+  it("refuses a declared Content-Length over the cap without reading", async () => {
+    let read = false;
+    const response = {
+      status: 200,
+      headers: new Map([["content-length", String(100 * 1024 * 1024)]]),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            read = true;
+            return { done: true, value: undefined };
+          },
+        }),
+        cancel: async () => {},
+      },
+      async text() {
+        read = true;
+        return "{}";
+      },
+    };
+    await assert.rejects(
+      () => parseJsonResponse(response, "Test op"),
+      /exceeds the .* byte cap/,
+    );
+    assert.equal(read, false);
+  });
+
+  it("caps a streamed body that grows past maxBytes mid-read", async () => {
+    const chunks = JSON.stringify({ big: "x".repeat(1024) });
+    const stream = new ReadableStream({
+      start(controller) {
+        // Many chunks, far over a small cap.
+        for (let i = 0; i < 50; i += 1) controller.enqueue(new TextEncoder().encode(chunks));
+        controller.close();
+      },
+    });
+    const response = {
+      status: 200,
+      headers: new Map(),
+      body: stream,
+      async text() { return "{}"; },
+    };
+    await assert.rejects(
+      () => parseJsonResponse(response, "Test op", { maxBytes: 1024 }),
+      /byte cap mid-read/,
+    );
+  });
+
+  it("falls back to text() for non-stream bodies", async () => {
+    const response = {
+      status: 200,
+      headers: new Map(),
+      async text() { return '{"via":"text"}'; },
+    };
+    assert.deepEqual(await parseJsonResponse(response, "Test op"), { via: "text" });
+  });
+
+  it("falls back to json()-only doubles and still gives context on failure", async () => {
+    const ok = { status: 200, headers: new Map(), async json() { return { via: "json" }; } };
+    assert.deepEqual(await parseJsonResponse(ok, "Test op"), { via: "json" });
+    const bad = {
+      status: 503,
+      statusText: "Service Unavailable",
+      headers: new Map([["content-type", "text/html"]]),
+      async json() { throw new SyntaxError("Unexpected token"); },
+    };
+    await assert.rejects(
+      () => parseJsonResponse(bad, "Foodstuffs /v1/edge/store"),
+      /Foodstuffs \/v1\/edge\/store.*503.*text\/html/s,
+    );
+  });
+
+});
+
+describe("readBodyText", () => {
+
+  it("reads a streamed body to a string", async () => {
+    const response = fakeResponse({ status: 200, body: "hello chunked world" });
+    assert.equal(await readBodyText(response, { label: "test" }), "hello chunked world");
+  });
+
+  it("throws a clear error when a body has no readable form", async () => {
+    await assert.rejects(
+      () => readBodyText({ headers: new Map() }, { label: "weird" }),
+      /neither a stream nor text\(\)/,
+    );
   });
 
 });

@@ -418,13 +418,11 @@ describe("crawlStore (mobile)", () => {
     assert.ok(fetchedIds.includes("store-1:mcat=cat0=Pantry|cat1=Snacks:page1"));
     assert.ok(fetchedIds.includes("store-1:mcat=cat0=Pantry|cat1=Snacks:page2"));
 
-    // Continuation pages checkpoint; discovery pages (page 0) do not.
+    // Checkpoints include continuation pages AND page-0 discovery (BREADTH-8).
     const allContinuations = waves.flatMap((w) => w.continuationIds);
     assert.ok(allContinuations.includes("store-1:mcat=cat0=Pantry|cat1=Snacks:page1"));
     assert.ok(allContinuations.includes("store-1:mcat=cat0=Pantry|cat1=Snacks:page2"));
-    for (const id of allContinuations) {
-      assert.match(id, /:page[1-9]\d*$/);
-    }
+    assert.ok(allContinuations.includes("store-1:mcat=cat0=Pantry:page0"));
   });
 
   it("warns on clamp saturation", async () => {
@@ -1018,6 +1016,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
         await readFile(`${file}.breadth-manifest.json`, "utf8"),
       );
       assert.deepEqual(Object.keys(manifest.completed).sort(), [
+        "s1:mcat=cat0=Pantry:page0",
         "s1:mcat=cat0=Pantry:page1",
         "s1:mcat=cat0=Pantry:page2",
       ]);
@@ -1029,6 +1028,89 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
       const second = await runCollection({ ...common, transport: transport2, file });
       // No new observations because all pages past page 0 are checkpointed.
       assert.equal(second.observationsRecorded, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips drill page-0 within the TTL and re-discovers after it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mobile-breadth-ttl-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      const scriptPages = {
+        "s1:mcat=cat0=Pantry:page0": catPageEnvelope({
+          hits: [hit("1")],
+          totalHits: 250,
+        }),
+        "s1:mcat=cat0=Pantry:page1": catPageEnvelope({
+          hits: [hit("2")],
+          totalHits: 250,
+        }),
+        "s1:mcat=cat0=Pantry:page2": catPageEnvelope({
+          hits: [hit("3")],
+          totalHits: 250,
+        }),
+      };
+
+      function makeTransport() {
+        const urls = [];
+        const transport = fakeMobileTransport({
+          stores: [{ id: "s1", name: "PAK'nSAVE Testville" }],
+          tree: [treeNode("Pantry")],
+          pageScript: { ...scriptPages },
+        });
+        return {
+          transport: async (url, init) => {
+            urls.push(String(url));
+            return transport(url, init);
+          },
+          urls,
+        };
+      }
+
+      const common = {
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1,
+        log: () => {},
+        collectWarning: () => {},
+      };
+
+      await runCollection({
+        ...common,
+        transport: makeTransport().transport,
+        file,
+        observedAt: "2026-09-01T00:00:00.000Z",
+      });
+
+      // One day later the drill entries are fresh: no product fetches at
+      // all, and the product floor is exempted because discovery skipped.
+      const fresh = makeTransport();
+      const run2 = await runCollection({
+        ...common,
+        transport: fresh.transport,
+        file,
+        observedAt: "2026-09-02T00:00:00.000Z",
+      });
+      assert.equal(run2.healthy, true);
+      assert.deepEqual(
+        fresh.urls.filter((u) => u.includes("ecomm-products")),
+        [],
+      );
+
+      // Past the 3-day TTL the drill re-fetches.
+      const stale = makeTransport();
+      const run3 = await runCollection({
+        ...common,
+        transport: stale.transport,
+        file,
+        observedAt: "2026-09-05T00:00:00.000Z",
+      });
+      assert.equal(run3.healthy, true);
+      assert.ok(
+        stale.urls.some((u) => u.includes("ecomm-products")),
+        "expected a drill refetch past the TTL",
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

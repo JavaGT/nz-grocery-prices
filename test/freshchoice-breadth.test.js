@@ -526,6 +526,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       );
       const continuationIds = Object.keys(manifest.completed).sort();
       assert.deepEqual(continuationIds, [
+        "testville:cat=bakery:page0",
         "testville:cat=bakery:page1",
         "testville:cat=bakery:page2",
       ]);
@@ -552,6 +553,133 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         run2ContinuationUrls,
         [],
         `run 2 refetched recorded pages: ${run2ContinuationUrls.join(", ")}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips page-0 discovery within the TTL and re-discovers after it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-ttl-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      function makeTransport() {
+        const urls = [];
+        const transport = fakeTransport({
+          stores: storeCardHtml([
+            {
+              name: "Testville",
+              origin: "https://testville.store.freshchoice.co.nz",
+            },
+          ]),
+          sitemapCategories: ["bakery"],
+          pageScript: {
+            "bakery:0": catHtmlWithPages([product("1")], 1),
+          },
+        });
+        return {
+          transport: async (url, init) => {
+            urls.push(String(url));
+            return transport(url, init);
+          },
+          urls,
+        };
+      }
+      const common = {
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1,
+        log: () => {},
+        collectWarning: () => {},
+      };
+
+      await runCollection({
+        ...common,
+        transport: makeTransport().transport,
+        file,
+        observedAt: "2026-09-01T00:00:00.000Z",
+      });
+
+      // One day later the page-0 entry is fresh: zero category fetches,
+      // and the product floor is exempted because discovery was skipped.
+      const fresh = makeTransport();
+      const run2 = await runCollection({
+        ...common,
+        transport: fresh.transport,
+        file,
+        observedAt: "2026-09-02T00:00:00.000Z",
+      });
+      assert.equal(run2.healthy, true);
+      assert.deepEqual(
+        fresh.urls.filter((u) => u.includes("/category/")),
+        [],
+      );
+
+      // Past the 3-day TTL the entry is stale: page-0 re-fetches.
+      const stale = makeTransport();
+      const run3 = await runCollection({
+        ...common,
+        transport: stale.transport,
+        file,
+        observedAt: "2026-09-05T00:00:00.000Z",
+      });
+      assert.equal(run3.healthy, true);
+      assert.ok(
+        stale.urls.some((u) => u.endsWith("/category/bakery")),
+        `expected a page-0 refetch, got: ${stale.urls.join(", ")}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("forceDiscovery re-crawls page-0 despite a fresh checkpoint", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-force-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      function makeTransport() {
+        const urls = [];
+        const transport = fakeTransport({
+          stores: storeCardHtml([
+            {
+              name: "Testville",
+              origin: "https://testville.store.freshchoice.co.nz",
+            },
+          ]),
+          sitemapCategories: ["bakery"],
+          pageScript: {
+            "bakery:0": catHtmlWithPages([product("1")], 1),
+          },
+        });
+        return {
+          transport: async (url, init) => {
+            urls.push(String(url));
+            return transport(url, init);
+          },
+          urls,
+        };
+      }
+      const common = {
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1,
+        observedAt: "2026-09-01T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      };
+
+      await runCollection({ ...common, transport: makeTransport().transport, file });
+
+      const forced = makeTransport();
+      await runCollection({
+        ...common,
+        transport: forced.transport,
+        file,
+        forceDiscovery: true,
+      });
+      assert.ok(
+        forced.urls.some((u) => u.endsWith("/category/bakery")),
+        `expected forced page-0 refetch, got: ${forced.urls.join(", ")}`,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });

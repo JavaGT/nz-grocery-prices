@@ -37,7 +37,9 @@ import {
   withRetryRounds,
 } from "./lib/crawler.js";
 import {
+  DEFAULT_DISCOVERY_TTL_MS,
   assertNotLiveArchive,
+  discoveryFresh,
   resolveStores,
 } from "./lib/breadth-helpers.js";
 import { fileURLToPath } from "node:url";
@@ -122,6 +124,8 @@ export async function crawlStore({
   commitWave,
   claimBudget = (want) => want,
   completed = new Map(),
+  forceDiscovery = false,
+  discoveryTtlMs = DEFAULT_DISCOVERY_TTL_MS,
   log = () => {},
   collectWarning = () => {},
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -258,10 +262,13 @@ export async function crawlStore({
           }
         }
 
-        // Only committed continuation pages checkpoint; discovery reruns.
-        if (thunk.kind === "leaf" && thunk.page >= 1) {
-          continuationIds.push(thunk.id);
-        }
+        // Checkpoint everything this wave committed — continuation pages
+        // AND page-0 discovery (BREADTH-7). Discovery entries age out after
+        // the discovery TTL, so every category root is still fully
+        // re-discovered periodically. Crash window: a committed drill whose
+        // spawned leaf page 1 has not committed yet delays that page's
+        // prices until the TTL ages the drill out — bounded, never lost.
+        continuationIds.push(thunk.id);
       } catch (error) {
         if (error?.code === "EBREADTHBUDGET") {
           budgetStop = true;
@@ -317,11 +324,22 @@ export async function crawlStore({
     `${store.name}: sitemap has ${categoryUrls.length} category URLs`,
   );
 
-  // Seed initial wave with each category page 0.
+  // Seed initial wave with each category page 0, skipping categories whose
+  // page-0 was discovered within the TTL (BREADTH-7). The sitemap is still
+  // fetched every run, so new/removed categories always crawl; --force-
+  // discovery re-seeds everything regardless of the manifest.
   const initial = [];
+  let skippedDiscovery = 0;
   for (const url of categoryUrls) {
     const path = new URL(url).pathname;
     const id = taskId(store.slug, path, 0);
+    if (
+      !forceDiscovery &&
+      discoveryFresh(completed, id, observedAt, discoveryTtlMs)
+    ) {
+      skippedDiscovery += 1;
+      continue;
+    }
     planned.add(id);
     initial.push({
       kind: "drill",
@@ -331,7 +349,10 @@ export async function crawlStore({
     });
   }
   log(
-    `${store.name}: seeded ${initial.length} initial category tasks`,
+    `${store.name}: seeded ${initial.length} initial category tasks` +
+      (skippedDiscovery > 0
+        ? ` (${skippedDiscovery} discovered within TTL, skipped)`
+        : ""),
   );
 
   let pending = initial;
@@ -365,6 +386,7 @@ export async function crawlStore({
     uniqueCount: seen.size,
     pagesFetched,
     emptyPages,
+    skippedDiscovery,
     sitemapCategories: categoryUrls.length,
     warnings,
     budgetExhausted,
@@ -420,6 +442,7 @@ export function parseArgs(argv) {
     delayMs: DEFAULT_DELAY_MS,
     budget: DEFAULT_PILOT_BUDGET,
     minExpectedProducts: DEFAULT_MIN_EXPECTED_PRODUCTS,
+    forceDiscovery: false,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -446,6 +469,9 @@ export function parseArgs(argv) {
         break;
       case "--min-expected-products":
         options.minExpectedProducts = Number(value());
+        break;
+      case "--force-discovery":
+        options.forceDiscovery = true;
         break;
       case "--help":
       case "-h":
@@ -482,6 +508,8 @@ export async function runCollection(options = {}) {
     delayMs = DEFAULT_DELAY_MS,
     budget = DEFAULT_PILOT_BUDGET,
     minExpectedProducts = DEFAULT_MIN_EXPECTED_PRODUCTS,
+    forceDiscovery = false,
+    discoveryTtlMs = DEFAULT_DISCOVERY_TTL_MS,
     bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
     bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
     transport = globalThis.fetch,
@@ -552,7 +580,9 @@ export async function runCollection(options = {}) {
     if (observations.length > 0) {
       addedTotal += await archive.record(observations);
     }
-    const now = new Date().toISOString();
+    // Stamp with the run's observedAt so discovery-TTL aging is keyed to
+    // observation time (deterministic under an injected clock).
+    const now = observedAt;
     for (const id of continuationIds) completed.set(id, now);
     if (continuationIds.length > 0) {
       try {
@@ -585,6 +615,8 @@ export async function runCollection(options = {}) {
         commitWave,
         claimBudget,
         completed,
+        forceDiscovery,
+        discoveryTtlMs,
         log,
         collectWarning,
         sleep,
@@ -607,12 +639,17 @@ export async function runCollection(options = {}) {
     }
   }
 
+  // The product floor only binds on nights that ran discovery: a TTL-skip
+  // night fetches little by design, and the discovery TTL guarantees a
+  // full-coverage night at least every DEFAULT_DISCOVERY_TTL_MS, where a
+  // broken catalogue still fails the floor and resets the gate streak.
   const unhealthy =
     storeResults.some(
       (result) =>
         result.budgetExhausted ||
         result.error ||
-        (result.uniqueCount ?? 0) < minExpectedProducts,
+        ((result.uniqueCount ?? 0) < minExpectedProducts &&
+          !result.skippedDiscovery),
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -663,9 +700,16 @@ Options:
   --min-expected-products N
                    fail the run as unhealthy when a store collects fewer
                    unique products (default: ${DEFAULT_MIN_EXPECTED_PRODUCTS})
+  --force-discovery
+                   re-crawl every category page-0 this run, ignoring the
+                   discovery checkpoint (default: page-0 entries fresher
+                   than ${Math.round(DEFAULT_DISCOVERY_TTL_MS / 3600000)}h
+                   are skipped; they age out and re-discover after that)
 
-Resume: continuation pages checkpointed in <file>.breadth-manifest.json;
-re-running skips recorded pages. Discovery requests rerun each run. The
+Resume: continuation pages AND page-0 discovery checkpoint in
+<file>.breadth-manifest.json; re-running skips recorded entries, and
+discovery entries older than ${Math.round(DEFAULT_DISCOVERY_TTL_MS / 3600000)}h
+re-run so new products on existing categories surface within that TTL. The
 sitemap fetch retries across ${DEFAULT_BOOTSTRAP_ROUNDS} rounds
 ${DEFAULT_BOOTSTRAP_GAP_MS / 1000}s apart before a store crawl aborts.`);
 }

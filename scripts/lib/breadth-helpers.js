@@ -50,6 +50,29 @@ export function absorbHits(seen, hits) {
 const RECONCILE_TOLERANCE = 0.005;
 
 /**
+ * How long a checkpointed page-0 discovery entry stays fresh. After this
+ * long every category root is re-discovered, so new products on existing
+ * categories surface no later than the TTL (BREADTH-7/BREADTH-8).
+ */
+export const DEFAULT_DISCOVERY_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * True when `id` is checkpointed in `completed` (id -> ISO timestamp) within
+ * the discovery TTL, so its page-0 fetch can be skipped this run. Unknown or
+ * malformed entries are never fresh.
+ */
+export function discoveryFresh(completed, id, now, ttlMs = DEFAULT_DISCOVERY_TTL_MS) {
+  const stamp = completed.get(id);
+  if (stamp === undefined) return false;
+  const done = Date.parse(stamp);
+  if (Number.isNaN(done)) return false;
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+  if (Number.isNaN(nowMs)) return false;
+  const age = nowMs - done;
+  return age >= 0 && age < ttlMs;
+}
+
+/**
  * Coverage reconciliation against a catalogue target. `withinTolerance` is
  * false only when a target exists and |delta| exceeds 0.5% of it.
  */

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_DISCOVERY_TTL_MS,
   DEFAULT_PILOT_BUDGET,
   absorbHits,
   assertNotLiveArchive,
+  discoveryFresh,
   reconcile,
   resolveStores,
 } from "../scripts/lib/breadth-helpers.js";
@@ -30,6 +32,22 @@ describe("breadth-helpers", () => {
   it("pins the shared pilot budget to a finite cap", () => {
     assert.equal(Number.isInteger(DEFAULT_PILOT_BUDGET), true);
     assert.equal(DEFAULT_PILOT_BUDGET > 0, true);
+  });
+
+  it("discoveryFresh judges checkpoint age against the TTL", () => {
+    const completed = new Map([["s:cat=bakery:page0", "2026-09-01T00:00:00.000Z"]]);
+    const ttl = DEFAULT_DISCOVERY_TTL_MS; // 3 days
+
+    assert.equal(discoveryFresh(completed, "s:cat=bakery:page0", "2026-09-02T00:00:00.000Z", ttl), true);
+    // Exactly TTL old is stale (age < ttlMs required).
+    assert.equal(discoveryFresh(completed, "s:cat=bakery:page0", "2026-09-04T00:00:00.000Z", ttl), false);
+    assert.equal(discoveryFresh(completed, "s:cat=bakery:page0", "2026-09-10T00:00:00.000Z", ttl), false);
+    // Unknown and malformed entries are never fresh.
+    assert.equal(discoveryFresh(completed, "s:cat=missing:page0", "2026-09-02T00:00:00.000Z", ttl), false);
+    const bad = new Map([["s:cat=x:page0", "not-a-date"]]);
+    assert.equal(discoveryFresh(bad, "s:cat=x:page0", "2026-09-02T00:00:00.000Z", ttl), false);
+    // A Date instance works as `now`.
+    assert.equal(discoveryFresh(completed, "s:cat=bakery:page0", new Date("2026-09-02T00:00:00.000Z"), ttl), true);
   });
 
   it("assertNotLiveArchive refuses the live archive unless forced", () => {

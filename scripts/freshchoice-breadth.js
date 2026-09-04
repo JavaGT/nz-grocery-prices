@@ -34,6 +34,7 @@ import { JsonlObservationRepository } from "../src/repository.js";
 import {
   loadManifest,
   saveManifest,
+  withRetryRounds,
 } from "./lib/crawler.js";
 import {
   assertNotLiveArchive,
@@ -45,6 +46,11 @@ import { resolve } from "node:path";
 export const DEFAULT_FILE = "data/breadth-pilot-fc.jsonl";
 export const DEFAULT_DELAY_MS = 3000;
 export const DEFAULT_PILOT_BUDGET = 800;
+// Nightly health floor: pilot nights collect ~2,800 products; anything
+// under this means the crawl is failing to see the catalogue.
+export const DEFAULT_MIN_EXPECTED_PRODUCTS = 1000;
+export const DEFAULT_BOOTSTRAP_ROUNDS = 3;
+export const DEFAULT_BOOTSTRAP_GAP_MS = 10_000;
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 
@@ -105,6 +111,9 @@ export function absorbProducts(seen, products) {
  * @param {Map<string, string>} [options.completed]
  * @param {(msg: string) => void} [options.log]
  * @param {(msg: string) => void} [options.collectWarning]
+ * @param {(ms: number) => Promise<void>} [options.sleep]
+ * @param {number} [options.bootstrapRounds]
+ * @param {number} [options.bootstrapGapMs]
  */
 export async function crawlStore({
   client,
@@ -115,6 +124,9 @@ export async function crawlStore({
   completed = new Map(),
   log = () => {},
   collectWarning = () => {},
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
+  bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
 }) {
   const seen = new Map();
   const planned = new Set();
@@ -288,7 +300,19 @@ export async function crawlStore({
 
   // ---- entry point -------------------------------------------------------
 
-  const categoryUrls = await fetchSitemapCategories();
+  // The sitemap is the store crawl's single point of failure; retry it in
+  // walker-level rounds before aborting the whole store (mirrors the
+  // foodstuffs-mobile tree-fetch guard).
+  const categoryUrls = await withRetryRounds(fetchSitemapCategories, {
+    rounds: bootstrapRounds,
+    gapMs: bootstrapGapMs,
+    sleep,
+    onRetry: (attempt, error) =>
+      warn(
+        `sitemap attempt ${attempt} failed: ${error.message} — ` +
+          `retrying (${bootstrapRounds - attempt} round(s) left)`,
+      ),
+  });
   log(
     `${store.name}: sitemap has ${categoryUrls.length} category URLs`,
   );
@@ -395,6 +419,7 @@ export function parseArgs(argv) {
     file: DEFAULT_FILE,
     delayMs: DEFAULT_DELAY_MS,
     budget: DEFAULT_PILOT_BUDGET,
+    minExpectedProducts: DEFAULT_MIN_EXPECTED_PRODUCTS,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -419,6 +444,9 @@ export function parseArgs(argv) {
       case "--budget":
         options.budget = Number(value());
         break;
+      case "--min-expected-products":
+        options.minExpectedProducts = Number(value());
+        break;
       case "--help":
       case "-h":
         options.help = true;
@@ -433,6 +461,14 @@ export function parseArgs(argv) {
   if (!Number.isInteger(options.budget) || options.budget < 1) {
     throw new TypeError("--budget must be a positive integer");
   }
+  if (
+    !Number.isInteger(options.minExpectedProducts) ||
+    options.minExpectedProducts < 0
+  ) {
+    throw new TypeError(
+      "--min-expected-products must be a non-negative integer",
+    );
+  }
   return options;
 }
 
@@ -445,9 +481,13 @@ export async function runCollection(options = {}) {
     file = DEFAULT_FILE,
     delayMs = DEFAULT_DELAY_MS,
     budget = DEFAULT_PILOT_BUDGET,
+    minExpectedProducts = DEFAULT_MIN_EXPECTED_PRODUCTS,
+    bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
+    bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
     transport = globalThis.fetch,
     observedAt = new Date().toISOString(),
     clock = () => new Date(),
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log = () => {},
     collectWarning = (message) => console.error(`warn: ${message}`),
   } = options;
@@ -470,8 +510,18 @@ export async function runCollection(options = {}) {
   });
 
   // Resolve stores. listStores() goes through countingTransport (finding 4).
+  // Retryable: a transient 5xx here aborts the lane before any crawling.
   const fcClient = new FreshChoiceClient({ fetch: countingTransport });
-  const allStores = await fcClient.listStores();
+  const allStores = await withRetryRounds(() => fcClient.listStores(), {
+    rounds: bootstrapRounds,
+    gapMs: bootstrapGapMs,
+    sleep,
+    onRetry: (attempt, error) =>
+      collectWarning(
+        `store list attempt ${attempt} failed: ${error.message} — ` +
+          `retrying (${bootstrapRounds - attempt} round(s) left)`,
+      ),
+  });
   if (!Array.isArray(allStores) || allStores.length === 0) {
     throw new Error("No FreshChoice stores returned by the store list API");
   }
@@ -537,6 +587,9 @@ export async function runCollection(options = {}) {
         completed,
         log,
         collectWarning,
+        sleep,
+        bootstrapRounds,
+        bootstrapGapMs,
       });
       storeResults.push(result);
     } catch (error) {
@@ -556,7 +609,10 @@ export async function runCollection(options = {}) {
 
   const unhealthy =
     storeResults.some(
-      (result) => result.budgetExhausted || result.error,
+      (result) =>
+        result.budgetExhausted ||
+        result.error ||
+        (result.uniqueCount ?? 0) < minExpectedProducts,
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -565,6 +621,7 @@ export async function runCollection(options = {}) {
     observedAt,
     healthy: !unhealthy,
     manifestPersistFailures,
+    minExpectedProducts,
     stores: storeResults.map((result) => ({
       retailer: result.retailer,
       id: result.store.id,
@@ -603,9 +660,14 @@ Options:
                    (default: ${DEFAULT_FILE})
   --delay-ms N     minimum gap between requests (default: ${DEFAULT_DELAY_MS})
   --budget N       hard cap on HTTP calls this run (default ${DEFAULT_PILOT_BUDGET})
+  --min-expected-products N
+                   fail the run as unhealthy when a store collects fewer
+                   unique products (default: ${DEFAULT_MIN_EXPECTED_PRODUCTS})
 
 Resume: continuation pages checkpointed in <file>.breadth-manifest.json;
-re-running skips recorded pages. Discovery requests rerun each run.`);
+re-running skips recorded pages. Discovery requests rerun each run. The
+sitemap fetch retries across ${DEFAULT_BOOTSTRAP_ROUNDS} rounds
+${DEFAULT_BOOTSTRAP_GAP_MS / 1000}s apart before a store crawl aborts.`);
 }
 
 const isMain =

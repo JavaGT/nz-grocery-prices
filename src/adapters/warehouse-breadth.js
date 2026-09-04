@@ -226,6 +226,7 @@ export async function crawlCgid({
   let pagesWith0Tiles = 0;
   let consecutiveFailures = 0;
   let requestsMade = 0;
+  let skippedCompleted = 0;
   let circuitOpen = false;
   let circuitReason = "";
   let budgetExhausted = false;
@@ -264,6 +265,7 @@ export async function crawlCgid({
 
     // BLOCKER 1 — Skip already-checkpointed offsets (manifest resume).
     if (completed.has(id)) {
+      skippedCompleted += 1;
       start += TILE_STEP;
       continue;
     }
@@ -345,6 +347,36 @@ export async function crawlCgid({
           warn(circuitReason);
         } else {
           log(`${id}: ${consecutiveFailures}/${BREAKER_THRESHOLD} non-grid responses, will retry`);
+          await sleep(delayMs);
+        }
+        if (circuitOpen) break;
+        continue; // re-try same offset
+      }
+
+      // 0-tile page with recognisable grid HTML → catalogue end — but ONLY
+      // once the walk has seen products (or skipped completed windows on
+      // resume). A 0-tile FIRST page also matches block/consent pages that
+      // parse as HTML without product tiles; accepting it as "end of
+      // catalogue" silently records nothing, so retry it like any other
+      // failure instead (a grocery tree is never legitimately empty).
+      if (seen.size === 0 && skippedCompleted === 0) {
+        consecutiveFailures += 1;
+        warn(
+          `${id}: 0 tiles on the first fetched page — not a credible ` +
+            `end of catalogue; suspected block or parse failure`,
+        );
+        if (consecutiveFailures >= BREAKER_THRESHOLD) {
+          circuitOpen = true;
+          circuitReason =
+            `circuit opened after ${BREAKER_THRESHOLD} consecutive 0-tile ` +
+            `pages at the start of the walk (last: ${id}); aborting the ` +
+            `cgid walk without any products`;
+          warn(circuitReason);
+        } else {
+          log(
+            `${id}: ${consecutiveFailures}/${BREAKER_THRESHOLD} empty ` +
+              `first pages, will retry`,
+          );
           await sleep(delayMs);
         }
         if (circuitOpen) break;
@@ -440,6 +472,7 @@ export async function crawlCgid({
     pagesWith0Tiles,
     warnings,
     requestsMade,
+    skippedCompleted,
     budgetExhausted,
     circuitOpen,
     circuitReason,

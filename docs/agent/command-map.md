@@ -65,7 +65,7 @@ v1 whole-observation records are refused everywhere in the hot path:
 | Every New World store | `npm run newworld -- archive --all-stores` | ~148 stores |
 | Every FreshChoice store | `npm run freshchoice -- archive --all-stores` | ~76 storefronts |
 | All retailers, atomic | `npm run archive:local` | **mutates `data/prices.jsonl`**. PAK'nSAVE / New World / FreshChoice default to all stores. Woolworths + Warehouse stay single-context. Never use as a smoke test. |
-| Nightly breadth pilot | `npm run breadth:nightly` | **live network collection** into separate `data/breadth-pilot-*.jsonl` archives. Runs PAK'nSAVE, New World, FreshChoice, Warehouse, and Woolworths pilot crawls. |
+| Nightly breadth pilot | `npm run breadth:nightly` | **live network collection** into separate `data/breadth-pilot-*.jsonl` archives. Runs PAK'nSAVE, New World, FreshChoice, Warehouse, and Woolworths pilot crawls. Each lane is unhealthy unless it collects at least its `--min-expected-products` floor; bootstrap fetches (store list / category tree / sitemap) retry in rounds before a lane aborts. The Warehouse walker re-crawls every run (pass `--resume` to its script to continue a crashed manual crawl). |
 | Breadth report | `npm run breadth:report` | Read-only report from the latest breadth health log and pilot archives; writes `reports/breadth-report-<NZ-date>.md`, never calls retailer APIs. |
 | Install breadth schedule | `sudo sh ops/install-breadth-daemon.sh` | Installs the 3:30am macOS LaunchDaemon; requires an interactive administrator password. |
 

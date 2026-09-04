@@ -32,6 +32,15 @@ Blocked by BREADTH-0. Pilot-gated before estate rollout.
 > per-request 20s timeout `a9a1a80`; client-side pacing, no crawler
 > transport `6ef04d1`; online-active store filter `bd9e074`).
 >
+> **NIGHTLY FIX (2026-09-05):** Sep-5 pilot lost the whole PAK'nSAVE
+> night to one persistent 500 on the category-tree endpoint (the client's
+> 3 attempts spanned only ~6s). The walker now retries bootstrap fetches
+> (tree, store list) in 3 rounds 10s apart (`withRetryRounds` in
+> `scripts/lib/crawler.js`; FreshChoice's sitemap likewise), and every
+> lane fails its health line when a store collects under
+> `--min-expected-products` (default 1000) — same silent-stall guard
+> Woolworths already had.
+>
 > **Live validation (both healthy, zero failures):**
 > - PAK'nSAVE Kilbirnie: **11,061 unique products**, 984 requests,
 >   22,120 records (~14 min at 5s pacing)
@@ -126,6 +135,12 @@ Blocked by BREADTH-0.
 > 37 requests / 0 failures / 2,011 records (~3 min at 3s pacing), clean
 > 0-tile termination, marketplace-only windows skipped. National-flat
 > pricing = one crawl covers the whole estate.
+> **NIGHTLY FIX (2026-09-05):** the persisted offset manifest made every
+> run after the first skip all completed windows and exit healthy with 0
+> products (Sep 3–5 pilot nights recorded nothing). The walker now starts
+> fresh each run (`--resume` opts back in), a 0-tile first page is
+> retried/breaker-tripped instead of read as catalogue end, and a
+> `--min-expected-products` floor (default 500) fails a no-data run.
 
 ## Goal
 Grocery tree (1,123 products) nationally; flat pricing = one crawl.

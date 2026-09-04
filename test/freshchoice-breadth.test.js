@@ -275,6 +275,65 @@ describe("crawlStore (FreshChoice)", () => {
     assert.equal(result.budgetExhausted, true);
     assert.ok(warnings.some((w) => w.includes("budget")));
   });
+
+  it("retries the sitemap when it transiently fails", async () => {
+    // Same guard as the foodstuffs tree fetch: the sitemap is the store
+    // crawl's bootstrap; a failing stretch must not abort the night.
+    let sitemapCalls = 0;
+    const sleeps = [];
+    const warnings = [];
+    const client = {
+      fetchSitemap: async (origin) => {
+        sitemapCalls += 1;
+        if (sitemapCalls <= 2) throw new Error("sitemap 503");
+        return [`${origin}/category/bakery`];
+      },
+      fetchCategoryPage: async (origin, categoryPath, page) => {
+        assert.equal(categoryPath, "/category/bakery");
+        assert.equal(page, 0);
+        return catHtmlWithPages([product("1")], 1);
+      },
+    };
+    const result = await crawlStore({
+      client,
+      store,
+      observedAt: "2026-08-27T00:00:00.000Z",
+      commitWave: async () => {},
+      collectWarning: (msg) => warnings.push(msg),
+      sleep: async (ms) => sleeps.push(ms),
+    });
+
+    assert.equal(sitemapCalls, 3);
+    assert.equal(result.uniqueCount, 1);
+    assert.ok(warnings.some((w) => w.includes("sitemap attempt 1 failed")));
+    assert.ok(sleeps.length >= 2);
+  });
+
+  it("aborts the store crawl only after all sitemap retry rounds fail", async () => {
+    let sitemapCalls = 0;
+    await assert.rejects(
+      crawlStore({
+        client: {
+          fetchSitemap: async () => {
+            sitemapCalls += 1;
+            throw new Error("503");
+          },
+          fetchCategoryPage: async () => {
+            throw new Error("unreachable");
+          },
+        },
+        store,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        commitWave: async () => {},
+        collectWarning: () => {},
+        bootstrapRounds: 2,
+        bootstrapGapMs: 5,
+        sleep: () => Promise.resolve(),
+      }),
+      /503/,
+    );
+    assert.equal(sitemapCalls, 2);
+  });
 });
 
 // ---- CLI parsing ----------------------------------------------------------
@@ -371,6 +430,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -444,6 +504,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       const common = {
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -522,6 +583,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -574,6 +636,7 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -584,6 +647,35 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
       // Verify probe happened for Avondale first
       const probeUrl = observedUrls.find((u) => u.includes("avondale") && u.includes("sitemap.xml"));
       assert.ok(probeUrl, "Avondale sitemap should have been probed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags a run as unhealthy when unique products land below the floor", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-floor-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      const transport = fakeTransport({
+        stores: storeCardHtml([{ name: "Testville", origin: "https://testville.store.freshchoice.co.nz" }]),
+        sitemapCategories: ["bakery"],
+        pageScript: { "bakery:0": catHtmlWithPages([product("1")], 1) },
+      });
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 5,
+        sleep: async () => {},
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+
+      assert.equal(summary.stores[0].uniqueProducts, 1);
+      assert.equal(summary.healthy, false);
+      assert.equal(summary.minExpectedProducts, 5);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

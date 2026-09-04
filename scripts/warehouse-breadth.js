@@ -25,6 +25,10 @@ export const DEFAULT_CGID = "foodhouseholdpets-fooddrink";
 export const DEFAULT_FILE = "data/breadth-pilot-tw.jsonl";
 export const DEFAULT_DELAY_MS = 3000;
 export const DEFAULT_BUDGET = 400;
+// Nightly health floor: the grocery tree held ~1,123 products when
+// validated (BREADTH-3); a run collecting far fewer than half of that
+// means the parser or a block page is eating the catalogue.
+export const DEFAULT_MIN_EXPECTED_PRODUCTS = 500;
 const LIVE_ARCHIVE_FALLBACK = "data/prices.jsonl";
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
@@ -53,6 +57,8 @@ export function parseArgs(argv) {
     file: DEFAULT_FILE,
     delayMs: DEFAULT_DELAY_MS,
     budget: DEFAULT_BUDGET,
+    minExpectedProducts: DEFAULT_MIN_EXPECTED_PRODUCTS,
+    resume: false,
     forceLive: false,
     help: false,
   };
@@ -78,6 +84,12 @@ export function parseArgs(argv) {
       case "--budget":
         options.budget = Number(value());
         break;
+      case "--min-expected-products":
+        options.minExpectedProducts = Number(value());
+        break;
+      case "--resume":
+        options.resume = true;
+        break;
       case "--force-live":
         options.forceLive = true;
         break;
@@ -95,6 +107,12 @@ export function parseArgs(argv) {
   if (!Number.isInteger(options.budget) || options.budget < 1) {
     throw new TypeError("--budget must be a positive integer");
   }
+  if (
+    !Number.isInteger(options.minExpectedProducts) ||
+    options.minExpectedProducts < 0
+  ) {
+    throw new TypeError("--min-expected-products must be a non-negative integer");
+  }
   return options;
 }
 
@@ -107,8 +125,11 @@ export async function runCollection(options = {}) {
     file = DEFAULT_FILE,
     delayMs = DEFAULT_DELAY_MS,
     budget = DEFAULT_BUDGET,
+    minExpectedProducts = DEFAULT_MIN_EXPECTED_PRODUCTS,
+    resume = false,
     forceLive = false,
     observedAt = new Date().toISOString(),
+    transport = createCurlTransport(),
     log = (msg) => console.log(msg),
     collectWarning = (msg) => console.error(`warn: ${msg}`),
     clock = Date.now,
@@ -118,8 +139,13 @@ export async function runCollection(options = {}) {
   assertNotLiveArchive(file, { forceLive });
   const manifestPath = `${resolve(file)}${MANIFEST_SUFFIX}`;
 
-  // Resume state.
-  const stored = await loadManifest(manifestPath);
+  // Resume state. Fresh by default: a manifest left by a previous COMPLETE
+  // run must not skip the next nightly crawl (that recorded nothing and
+  // reported healthy — the silent stall that emptied this lane for the
+  // Sep-2026 pilot nights). The archive dedupes unchanged prices, so
+  // re-walking every night is the intended behaviour. --resume opts into
+  // loading prior checkpoints to recover a crashed manual run.
+  const stored = resume ? await loadManifest(manifestPath) : null;
   const completed = new Map(Object.entries(stored?.completed ?? {}));
   const persistManifest = () =>
     saveManifest(manifestPath, {
@@ -134,9 +160,6 @@ export async function runCollection(options = {}) {
     retailer: "warehouse",
     name: "The Warehouse Online",
   };
-
-  // Build the curl transport (production: real curl via execFile).
-  const transport = createCurlTransport();
 
   // Archive for recording.
   const archive = new PriceArchive(new JsonlObservationRepository(file), {
@@ -164,7 +187,7 @@ export async function runCollection(options = {}) {
 
   log(
     `warehouse-breadth: cgid=${cgid} → ${file} ` +
-      `(delay=${delayMs}ms, budget=${budget})`,
+      `(delay=${delayMs}ms, budget=${budget}, resume=${resume})`,
   );
 
   // Run the cgid walk. Per-window recording + checkpointing happens via
@@ -202,7 +225,8 @@ export async function runCollection(options = {}) {
     result.circuitOpen ||
     result.driftDetected ||
     result.maxWindowsReached ||
-    manifestPersistFailures > 0;
+    manifestPersistFailures > 0 ||
+    result.uniqueCount < minExpectedProducts;
 
   const summary = {
     cgid,
@@ -212,8 +236,10 @@ export async function runCollection(options = {}) {
     healthy: !unhealthy,
     manifestPersistFailures,
     uniqueProducts: result.uniqueCount,
+    minExpectedProducts,
     pagesFetched: result.pagesFetched,
     pagesWith0Tiles: result.pagesWith0Tiles,
+    skippedCompleted: result.skippedCompleted,
     requestsMade: result.requestsMade,
     observationsRecorded: addedTotal,
     ...(result.budgetExhausted ? { budgetExhausted: true } : {}),
@@ -232,7 +258,7 @@ export async function runCollection(options = {}) {
 function printHelp() {
   console.log(`Usage:
   node scripts/warehouse-breadth.js [--cgid <id>] [--file <jsonl>]
-      [--delay-ms N] [--budget N]
+      [--delay-ms N] [--budget N] [--resume]
 
 The Warehouse grocery-catalogue breadth collector (BREADTH-3).
 Walks updategrid?cgid= via curl/execFile. Pacing, budget, and
@@ -246,10 +272,20 @@ Options:
                     (default: ${DEFAULT_DELAY_MS})
   --budget N        hard cap on HTTP calls this run;
                     default ${DEFAULT_BUDGET}
+  --min-expected-products N
+                    fail the run as unhealthy when fewer unique
+                    products are collected (default:
+                    ${DEFAULT_MIN_EXPECTED_PRODUCTS})
+  --resume          load the checkpoint manifest and skip completed
+                    offset windows. Default is a fresh walk each run:
+                    a completed manifest must not silently stall the
+                    nightly lane (unchanged prices dedupe in the
+                    archive anyway).
   --force-live      DANGEROUS: allow --file to point at the live archive
 
-Resume: completed offset windows are checkpointed in
-<file>.breadth-manifest.json; re-running skips recorded offsets.`);
+Resume: with --resume, completed offset windows are read from
+<file>.breadth-manifest.json; every run still SAVES checkpoints there,
+so a crashed default run can be recovered with --resume.`);
 }
 
 const isMain =

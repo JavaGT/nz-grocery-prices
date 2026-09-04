@@ -83,6 +83,14 @@ The runner is `scripts/breadth-pilot-nightly.sh`, exposed as
 when scheduling is wanted. It deliberately does not write the app's
 authoritative `data/prices.jsonl` archive.
 
+Health rules (hardened 2026-09-05 after two silent/lost pilot nights): a
+lane is unhealthy unless it collects at least its `--min-expected-products`
+floor; bootstrap fetches (store list / category tree / sitemap) retry in
+rounds before a lane aborts; the Warehouse walker re-crawls fresh every
+run (its offset manifest stalled the lane at 0 products while reporting
+healthy — `--resume` opts back in for crashed manual crawls). Gate state:
+`node scripts/breadth-pilot-gate.js` (3 consecutive healthy nights).
+
 ## Broader product/app state
 
 - Website first vertical slice: `/Users/server/Code/workbench/projects/grocery-prices` (**price•minder** redesign implemented).

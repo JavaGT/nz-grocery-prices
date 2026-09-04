@@ -37,6 +37,7 @@ import {
   createCrawler,
   loadManifest,
   saveManifest,
+  withRetryRounds,
 } from "./lib/crawler.js";
 import {
   absorbHits,
@@ -53,6 +54,15 @@ const { BUDGET_SKIPPED } = OUTCOME_CATEGORIES;
 export const DEFAULT_DELAY_MS = 5000;
 export const DEFAULT_FILE = "data/breadth-pilot.jsonl";
 export const BREAKER_THRESHOLD = 5;
+// Nightly health floor: pilot nights collect 11k-13k products per banner;
+// anything under this means the crawl is failing to see the catalogue.
+export const DEFAULT_MIN_EXPECTED_PRODUCTS = 1000;
+// Bootstrap fetches (store list, category tree) get walker-level retry
+// rounds ON TOP of the client's per-request retries: a stretch of 5xx
+// from Foodstuffs must not abort the whole nightly lane (the Sep-5 pilot
+// night lost paknsave to one persistent 500 on the tree endpoint).
+export const DEFAULT_BOOTSTRAP_ROUNDS = 3;
+export const DEFAULT_BOOTSTRAP_GAP_MS = 10_000;
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 const HIT_CLAMP = 1000;
@@ -293,6 +303,9 @@ export function createCrawlerBridge({
  * @param {Map<string, string>} [options.completed]
  * @param {(msg: string) => void} [options.log]
  * @param {(msg: string) => void} [options.collectWarning]
+ * @param {(ms: number) => Promise<void>} [options.sleep]
+ * @param {number} [options.bootstrapRounds]
+ * @param {number} [options.bootstrapGapMs]
  */
 export async function crawlStore({
   client,
@@ -303,6 +316,9 @@ export async function crawlStore({
   completed = new Map(),
   log = () => {},
   collectWarning = () => {},
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
+  bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
 }) {
   const seen = new Map();
   const planned = new Set();
@@ -495,7 +511,22 @@ export async function crawlStore({
 
   // ---- entry point -------------------------------------------------------
 
-  const tree = await fetchTree();
+  // The tree fetch is a single point of failure for the whole store crawl;
+  // give it walker-level retry rounds (with a wider gap than the client's
+  // per-request backoff) before giving up and aborting the night.
+  const tree = await withRetryRounds(
+    () => fetchTree(),
+    {
+      rounds: bootstrapRounds,
+      gapMs: bootstrapGapMs,
+      sleep,
+      onRetry: (attempt, error) =>
+        warn(
+          `category tree attempt ${attempt} failed: ${error.message} — ` +
+            `retrying (${bootstrapRounds - attempt} round(s) left)`,
+        ),
+    },
+  );
   const plans = buildTreePlans(tree);
   log(
     `${store.name}: tree has ${tree.length} top-level categories, ${plans.length} total nodes`,
@@ -590,6 +621,7 @@ export function parseArgs(argv) {
     file: DEFAULT_FILE,
     delayMs: DEFAULT_DELAY_MS,
     budget: DEFAULT_PILOT_BUDGET,
+    minExpectedProducts: DEFAULT_MIN_EXPECTED_PRODUCTS,
     forceLive: false,
     help: false,
   };
@@ -618,6 +650,9 @@ export function parseArgs(argv) {
       case "--budget":
         options.budget = Number(value());
         break;
+      case "--min-expected-products":
+        options.minExpectedProducts = Number(value());
+        break;
       case "--force-live":
         options.forceLive = true;
         break;
@@ -638,6 +673,14 @@ export function parseArgs(argv) {
   if (!Number.isInteger(options.budget) || options.budget < 1) {
     throw new TypeError("--budget must be a positive integer");
   }
+  if (
+    !Number.isInteger(options.minExpectedProducts) ||
+    options.minExpectedProducts < 0
+  ) {
+    throw new TypeError(
+      "--min-expected-products must be a non-negative integer",
+    );
+  }
   return options;
 }
 
@@ -651,11 +694,15 @@ export async function runCollection(options = {}) {
     file = DEFAULT_FILE,
     delayMs = DEFAULT_DELAY_MS,
     budget = DEFAULT_PILOT_BUDGET,
+    minExpectedProducts = DEFAULT_MIN_EXPECTED_PRODUCTS,
+    bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
+    bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
     forceLive = false,
     transport = globalThis.fetch,
     storesByRetailer = null,
     observedAt = new Date().toISOString(),
     clock = () => new Date(),
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log = () => {},
     collectWarning = (message) => console.error(`warn: ${message}`),
   } = options;
@@ -682,12 +729,25 @@ export async function runCollection(options = {}) {
     delayMs,
   });
 
-  // Resolve stores.
+  // Resolve stores (retryable: a transient 5xx here aborts the lane
+  // before any crawling starts).
   let stores;
   if (storesByRetailer) {
     stores = storesByRetailer;
   } else {
-    const all = await client.listStores();
+    const all = await withRetryRounds(
+      () => client.listStores(),
+      {
+        rounds: bootstrapRounds,
+        gapMs: bootstrapGapMs,
+        sleep,
+        onRetry: (attempt, error) =>
+          collectWarning(
+            `store list attempt ${attempt} failed: ${error.message} — ` +
+              `retrying (${bootstrapRounds - attempt} round(s) left)`,
+          ),
+      },
+    );
     if (!Array.isArray(all) || all.length === 0) {
       throw new Error(
         `No ${retailer} stores returned by the store list API`,
@@ -766,6 +826,9 @@ export async function runCollection(options = {}) {
         completed,
         log,
         collectWarning,
+        sleep,
+        bootstrapRounds,
+        bootstrapGapMs,
       });
       storeResults.push(result);
     } catch (error) {
@@ -787,7 +850,11 @@ export async function runCollection(options = {}) {
 
   const unhealthy =
     storeResults.some(
-      (result) => result.budgetExhausted || result.error || result.incompleteCoverage,
+      (result) =>
+        result.budgetExhausted ||
+        result.error ||
+        result.incompleteCoverage ||
+        (result.uniqueCount ?? 0) < minExpectedProducts,
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -796,6 +863,7 @@ export async function runCollection(options = {}) {
     observedAt,
     healthy: !unhealthy,
     manifestPersistFailures,
+    minExpectedProducts,
     stores: storeResults.map((result) => ({
       retailer: result.retailer,
       id: result.store.id,
@@ -842,11 +910,17 @@ Options:
                      (default: ${DEFAULT_DELAY_MS})
   --budget N         hard cap on HTTP calls this run (auth included);
                      default ${DEFAULT_PILOT_BUDGET}
+  --min-expected-products N
+                     fail the run as unhealthy when a store collects
+                     fewer unique products (default:
+                     ${DEFAULT_MIN_EXPECTED_PRODUCTS})
   --force-live       DANGEROUS: allow --file to point at the live archive
 
 Resume: continuation pages are checkpointed in <file>.breadth-manifest.json
 after their records are appended; re-running skips recorded pages. Discovery
-requests rerun each time to keep the facet plan fresh.`);
+requests rerun each time to keep the facet plan fresh. Bootstrap fetches
+(store list, category tree) retry across ${DEFAULT_BOOTSTRAP_ROUNDS} rounds
+${DEFAULT_BOOTSTRAP_GAP_MS / 1000}s apart before a store crawl aborts.`);
 }
 
 const isMain =

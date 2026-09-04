@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   crawlCgid,
@@ -8,6 +11,7 @@ import {
 import {
   assertNotLiveArchive,
   parseArgs,
+  runCollection,
 } from "../scripts/warehouse-breadth.js";
 
 // ---- fixture helpers -------------------------------------------------------
@@ -454,8 +458,12 @@ describe("crawlCgid", () => {
 
   it("accepts delayMs < 3000 with unsafeFastPacing", async () => {
     // Just validates it doesn't throw; the actual walk needs a real transport.
-    // We'll pass a transport that immediately returns 0 tiles.
-    const transport = fakeTransport(() => ({ status: 200, body: pageHtml(0) }));
+    // Products on page 0, then a 0-tile page terminates the walk cleanly.
+    const transport = fakeTransport((url) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      if (start === 0) return { status: 200, body: pageHtml(1) };
+      return { status: 200, body: pageHtml(0) };
+    });
     const result = await crawlCgid({
       transport, cgid: "food", origin: ORIGIN,
       store: STORE, observedAt: OBSERVED_AT,
@@ -463,12 +471,17 @@ describe("crawlCgid", () => {
       unsafeFastPacing: true,
     });
     assert.equal(result.pagesWith0Tiles, 1);
+    assert.equal(result.uniqueCount, 1);
   });
 
   // ---- CONCERN 6 — zero-parse legitimacy -----------------------------------
 
-  it("treats empty-grid HTML as clean termination", async () => {
-    // Genuine empty grid page (HTML structure, no product tiles).
+  it("retries an empty-grid FIRST page and opens the breaker, not a clean end", async () => {
+    // A 0-tile page with valid-looking HTML at the START of a fresh walk is
+    // not a credible catalogue end — it is how a block/consent page that
+    // parses as HTML presents (the Sep-2026 pilot stall). It must retry and
+    // eventually trip the breaker instead of reporting a healthy 0-product
+    // crawl.
     const body = '<html><body><div class="product-grid"></div></body></html>';
     const transport = fakeTransport(() => ({ status: 200, body }));
 
@@ -478,10 +491,56 @@ describe("crawlCgid", () => {
       delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
     });
 
-    // Clean termination: no circuit open, no warnings about non-grid.
-    assert.equal(result.pagesWith0Tiles, 1);
+    assert.equal(result.circuitOpen, true);
+    assert.ok(result.circuitReason.includes("0-tile"));
+    assert.equal(result.pagesWith0Tiles, 0);
+    assert.equal(result.uniqueCount, 0);
+    assert.equal(result.requestsMade, 5);
+    assert.equal(result.unhealthyTermination, true);
+  });
+
+  it("recovers when the first page is empty but a retry returns products", async () => {
+    const body = '<html><body><div class="product-grid"></div></body></html>';
+    let call = 0;
+    const transport = fakeTransport((url) => {
+      call += 1;
+      const start = Number(new URL(url).searchParams.get("start"));
+      if (call <= 2) return { status: 200, body }; // two empty first pages
+      if (start === 0) return { status: 200, body: pageHtml(32) };
+      return { status: 200, body: pageHtml(0) };
+    });
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, sleep: () => Promise.resolve(), unsafeFastPacing: true,
+    });
+
     assert.equal(result.circuitOpen, false);
-    assert.equal(result.consecutiveFailures, 0);
+    assert.equal(result.uniqueCount, 32);
+    assert.equal(result.pagesWith0Tiles, 1);
+    // 2 empty retries + 1 product page + 1 end page.
+    assert.equal(result.requestsMade, 4);
+  });
+
+  it("still terminates cleanly on a 0-tile page after resume skips", async () => {
+    // With completed windows (resume), reaching a 0-tile page with zero
+    // products collected is a credible end — the earlier windows were
+    // checkpointed by a previous run.
+    const completed = new Map([["food:off0", "2026-08-27T12:00:00.000Z"]]);
+    const transport = fakeTransport(() => ({ status: 200, body: pageHtml(0) }));
+
+    const result = await crawlCgid({
+      transport, cgid: "food", origin: ORIGIN,
+      store: STORE, observedAt: OBSERVED_AT,
+      delayMs: 0, completed, sleep: () => Promise.resolve(),
+      unsafeFastPacing: true,
+    });
+
+    assert.equal(result.circuitOpen, false);
+    assert.equal(result.skippedCompleted, 1);
+    assert.equal(result.pagesWith0Tiles, 1);
+    assert.equal(result.uniqueCount, 0);
   });
 
   it("treats Cloudflare challenge body as failure (counts toward breaker)", async () => {
@@ -622,8 +681,20 @@ describe("parseArgs (warehouse-breadth)", () => {
     assert.equal(opts.file, "data/breadth-pilot-tw.jsonl");
     assert.equal(opts.delayMs, 3000);
     assert.equal(opts.budget, 400);
+    assert.equal(opts.minExpectedProducts, 500);
+    assert.equal(opts.resume, false);
     assert.equal(opts.forceLive, false);
     assert.equal(opts.help, false);
+  });
+
+  it("sets --resume and --min-expected-products", () => {
+    const opts = parseArgs(["--resume", "--min-expected-products", "42"]);
+    assert.equal(opts.resume, true);
+    assert.equal(opts.minExpectedProducts, 42);
+  });
+
+  it("throws on negative min-expected-products", () => {
+    assert.throws(() => parseArgs(["--min-expected-products", "-1"]), TypeError);
   });
 
   it("parses explicit --cgid, --file, --delay-ms, --budget", () => {
@@ -652,5 +723,93 @@ describe("assertNotLiveArchive (warehouse-breadth)", () => {
   it("throws for live archive", () => { assert.throws(() => assertNotLiveArchive("data/prices.jsonl"), /Refusing/); });
   it("passes with --force-live", () => { assertNotLiveArchive("data/prices.jsonl", { forceLive: true }); });
   it("passes for custom file", () => { assertNotLiveArchive("data/custom.jsonl"); });
+
+});
+
+// ---- runCollection — nightly fresh-by-default ------------------------------
+
+describe("runCollection (warehouse-breadth)", () => {
+
+  /** Fake {status, body} transport; products on offset 0, end page after. */
+  function fakeBodyTransport() {
+    return async (url) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      if (start === 0) return { status: 200, body: pageHtml(2) };
+      return { status: 200, body: pageHtml(0) };
+    };
+  }
+
+  async function withTmp(fn) {
+    const dir = await mkdtemp(join(tmpdir(), "warehouse-breadth-run-"));
+    try {
+      return await fn(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  async function seedManifest(file, cgid, offsets) {
+    await mkdir(join(file, ".."), { recursive: true });
+    await writeFile(
+      `${file}.breadth-manifest.json`,
+      JSON.stringify({
+        version: 1,
+        updatedAt: "2026-09-01T00:00:00.000Z",
+        completed: Object.fromEntries(
+          offsets.map((off) => [`${cgid}:off${off}`, "2026-09-01T00:00:00.000Z"]),
+        ),
+      }),
+    );
+  }
+
+  it("ignores a stale manifest by default and re-crawls nightly", async () => {
+    await withTmp(async (dir) => {
+      const file = join(dir, "breadth-pilot-tw.jsonl");
+      // A previous complete run left every window checkpointed.
+      await seedManifest(file, "food", [0, 32, 64]);
+
+      const summary = await runCollection({
+        cgid: "food",
+        file,
+        transport: fakeBodyTransport(),
+        minExpectedProducts: 1,
+        observedAt: OBSERVED_AT,
+        clock: () => Date.parse(OBSERVED_AT),
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        collectWarning: () => {},
+      });
+
+      assert.equal(summary.healthy, true);
+      assert.equal(summary.uniqueProducts, 2);
+      assert.equal(summary.skippedCompleted, 0);
+    });
+  });
+
+  it("--resume skips recorded windows; the floor flags a no-data run", async () => {
+    await withTmp(async (dir) => {
+      const file = join(dir, "breadth-pilot-tw.jsonl");
+      await seedManifest(file, "food", [0]);
+
+      const summary = await runCollection({
+        cgid: "food",
+        file,
+        resume: true,
+        transport: fakeBodyTransport(),
+        minExpectedProducts: 1,
+        observedAt: OBSERVED_AT,
+        clock: () => Date.parse(OBSERVED_AT),
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        collectWarning: () => {},
+      });
+
+      // Offset 0 skipped, end page reached with nothing collected — the
+      // nightly floor must call this unhealthy, not the silent stall.
+      assert.equal(summary.skippedCompleted, 1);
+      assert.equal(summary.uniqueProducts, 0);
+      assert.equal(summary.healthy, false);
+    });
+  });
 
 });

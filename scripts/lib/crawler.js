@@ -111,6 +111,40 @@ export async function saveManifest(path, data) {
 }
 
 /**
+ * Retry a bootstrap fetch (category tree, store list, sitemap) across
+ * `rounds` total attempts, waiting `gapMs` between rounds. This is the
+ * layer ABOVE per-request retries: when a retailer's API 500s for a
+ * stretch, one walker-level round trip every gapMs rides it out instead
+ * of aborting the whole nightly lane. Rethrows the last error once all
+ * rounds fail. `onRetry(attempt, error)` reports each spent round.
+ */
+export async function withRetryRounds(fn, {
+  rounds = 3,
+  gapMs = 10_000,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  onRetry = () => {},
+} = {}) {
+  if (!Number.isInteger(rounds) || rounds < 1) {
+    throw new TypeError("rounds must be a positive integer");
+  }
+  if (!Number.isFinite(gapMs) || gapMs < 0) {
+    throw new TypeError("gapMs must be a non-negative number");
+  }
+  let lastError;
+  for (let attempt = 1; attempt <= rounds; attempt += 1) {
+    try {
+      return await fn(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= rounds) break;
+      onRetry(attempt, error);
+      await sleep(gapMs);
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Create a crawler. Options:
  * - fetch (required): `(url, init) => response`. Injected for tests and so
  *   Warehouse can supply its curl-based transport.

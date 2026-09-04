@@ -249,6 +249,64 @@ describe("crawlStore (mobile)", () => {
     return { result, waves, fetchedIds };
   }
 
+  it("retries the category tree when it transiently fails", async () => {
+    // Sep-2026 pilot: one persistent 500 on the tree endpoint aborted the
+    // whole store crawl. The walker must ride out a failing stretch with
+    // retry rounds before giving up.
+    let treeCalls = 0;
+    const tree = [treeNode("Pantry")];
+    const scripted = {
+      "store-1:mcat=cat0=Pantry:page0": catPageEnvelope({
+        hits: [hit("1")],
+        totalHits: 1,
+        numberOfPages: 1,
+      }),
+    };
+    const sleeps = [];
+    const warnings = [];
+    const { result } = await drive(
+      () => {
+        treeCalls += 1;
+        if (treeCalls <= 2) {
+          throw new Error("Mobile request /mobile/v1/products/category failed: 500");
+        }
+        return tree;
+      },
+      scripted,
+      {
+        sleep: async (ms) => sleeps.push(ms),
+        collectWarning: (msg) => warnings.push(msg),
+      },
+    );
+
+    assert.equal(treeCalls, 3);
+    assert.equal(result.uniqueCount, 1);
+    assert.equal(result.error, undefined);
+    assert.ok(warnings.some((w) => w.includes("category tree attempt 1 failed")));
+    assert.ok(sleeps.length >= 2);
+  });
+
+  it("aborts the store crawl only after all tree retry rounds fail", async () => {
+    let treeCalls = 0;
+    await assert.rejects(
+      drive(
+        () => {
+          treeCalls += 1;
+          throw new Error("500");
+        },
+        {},
+        {
+          bootstrapRounds: 2,
+          bootstrapGapMs: 5,
+          sleep: () => Promise.resolve(),
+          collectWarning: () => {},
+        },
+      ),
+      /500/,
+    );
+    assert.equal(treeCalls, 2);
+  });
+
   it("walks a small store with one top-level category", async () => {
     const tree = [treeNode("Pantry")];
     const scripted = {
@@ -810,6 +868,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -841,6 +900,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -884,6 +944,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 1000,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -940,6 +1001,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
       const common = {
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -1004,6 +1066,7 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
         file,
         delayMs: 0,
         budget: 100,
+        minExpectedProducts: 1,
         observedAt: "2026-08-27T00:00:00.000Z",
         log: () => {},
         collectWarning: () => {},
@@ -1013,6 +1076,40 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
       assert.ok(pathSeen.includes("/MNW/"));
       assert.equal(summary.stores[0].retailer, "newworld");
       assert.equal(summary.healthy, true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags a run as unhealthy when unique products land below the floor", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mobile-breadth-floor-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      const transport = fakeMobileTransport({
+        stores: [{ id: "s1", name: "PAK'nSAVE Testville" }],
+        tree: [treeNode("Pantry")],
+        pageScript: {
+          "s1:mcat=cat0=Pantry:page0": catPageEnvelope({
+            hits: [hit("1")],
+            totalHits: 1,
+          }),
+        },
+      });
+
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 5,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+
+      assert.equal(summary.stores[0].uniqueProducts, 1);
+      assert.equal(summary.healthy, false);
+      assert.equal(summary.minExpectedProducts, 5);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

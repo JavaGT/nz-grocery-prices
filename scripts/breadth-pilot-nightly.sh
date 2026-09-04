@@ -4,8 +4,12 @@
 # each retailer into separate pilot archives, then an append-only health line.
 #
 # Designed for launchd (StartCalendarInterval) — all paths absolute, no
-# reliance on shell profiles. Safe to re-run: collectors resume from
-# manifests where supported, and unchanged prices dedupe in each archive.
+# reliance on shell profiles. Safe to re-run: unchanged prices dedupe in
+# each archive. Continuation-page manifests resume across runs where
+# supported; the Warehouse walker starts fresh each run (a completed
+# offset manifest must not silently stall the lane) and every lane fails
+# its health line when a store collects fewer than its minimum expected
+# products.
 #
 # Logs: /tmp/nz-grocery-breadth.log (stdout), .error.log (stderr)
 

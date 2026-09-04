@@ -8,6 +8,7 @@ import {
   createCrawler,
   loadManifest,
   saveManifest,
+  withRetryRounds,
 } from "../scripts/lib/crawler.js";
 
 const {
@@ -353,4 +354,68 @@ test("error taxonomy separates fatal HTTP, retry-exhausted, network-fatal", asyn
   // Non-retryable network error is immediately network-fatal (no retry).
   assert.equal(byId.dns.category, NETWORK_FATAL);
   assert.ok(!("response" in byId.net));
+});
+
+// ---- withRetryRounds --------------------------------------------------------
+
+test("withRetryRounds returns the first success without sleeping", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const value = await withRetryRounds(
+    () => {
+      calls += 1;
+      return Promise.resolve(`ok-${calls}`);
+    },
+    { rounds: 3, gapMs: 1000, sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "ok-1");
+  assert.equal(calls, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+test("withRetryRounds retries failures and reports each spent round", async () => {
+  let calls = 0;
+  const retries = [];
+  const value = await withRetryRounds(
+    () => {
+      calls += 1;
+      if (calls <= 2) return Promise.reject(new Error(`blip ${calls}`));
+      return Promise.resolve("done");
+    },
+    {
+      rounds: 3,
+      gapMs: 500,
+      sleep: async () => {},
+      onRetry: (attempt, error) => retries.push([attempt, error.message]),
+    },
+  );
+  assert.equal(value, "done");
+  assert.equal(calls, 3);
+  assert.deepEqual(retries, [[1, "blip 1"], [2, "blip 2"]]);
+});
+
+test("withRetryRounds rethrows the last error once all rounds fail", async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRetryRounds(
+      () => {
+        calls += 1;
+        return Promise.reject(new Error(`down ${calls}`));
+      },
+      { rounds: 3, gapMs: 0, sleep: async () => {} },
+    ),
+    /down 3/,
+  );
+  assert.equal(calls, 3);
+});
+
+test("withRetryRounds validates its options", async () => {
+  await assert.rejects(
+    withRetryRounds(async () => {}, { rounds: 0 }),
+    TypeError,
+  );
+  await assert.rejects(
+    withRetryRounds(async () => {}, { rounds: 2, gapMs: -1 }),
+    TypeError,
+  );
 });

@@ -7,6 +7,7 @@
  */
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { groupRuns } from "./breadth-pilot-gate.js";
 
@@ -72,11 +73,72 @@ function emptyStats(file) {
     stores: new Set(),
     gtinProducts: new Set(),
     adapters: new Set(),
-    observedAt: [],
+    observedAtMin: null,
+    observedAtMax: null,
   };
 }
 
-/** Read one JSONL pilot archive and return deduplicated corpus statistics. */
+/** Fold one JSONL line into the running stats (BREADTH-12: O(line) memory). */
+function applyLine(stats, line) {
+  if (!line.trim()) return;
+  stats.lines += 1;
+  let record;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    stats.invalidLines += 1;
+    return;
+  }
+  if (record.type in stats.types) stats.types[record.type] += 1;
+  if (record.productId) stats.products.add(record.productId);
+  if (record.offerId) stats.offers.add(record.offerId);
+  if (record.storeId) stats.stores.add(record.storeId);
+  if (record.type === "store" && record.storeId) stats.stores.add(record.storeId);
+  if (record.type === "product" && record.data?.gtin) {
+    stats.gtinProducts.add(record.productId);
+  }
+  if (record.data?.source?.adapter) stats.adapters.add(record.data.source.adapter);
+  // ISO-8601 UTC timestamps order lexicographically, so string min/max
+  // equals the chronological span without keeping every value.
+  if (record.observedAt) {
+    if (stats.observedAtMin === null || record.observedAt < stats.observedAtMin) {
+      stats.observedAtMin = record.observedAt;
+    }
+    if (stats.observedAtMax === null || record.observedAt > stats.observedAtMax) {
+      stats.observedAtMax = record.observedAt;
+    }
+  }
+}
+
+/**
+ * Chunked streaming read of a JSONL archive, yielding one line at a time.
+ * Lines split on "\n" across chunk boundaries manually — same policy as the
+ * repository loader, but without accumulating the whole file.
+ */
+async function* jsonlLines(filePath) {
+  const handle = await open(filePath, "r");
+  try {
+    const stream = handle.createReadStream({ encoding: "utf8" });
+    let pending = "";
+    for await (const chunk of stream) {
+      const pieces = chunk.split("\n");
+      pending += pieces[0];
+      for (let index = 1; index < pieces.length; index += 1) {
+        yield pending;
+        pending = pieces[index];
+      }
+    }
+    if (pending !== "") yield pending;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Read one JSONL pilot archive and return deduplicated corpus statistics.
+ * Accepts pre-loaded `text` (tests, small fixtures); production callers use
+ * {@link summarizeArchiveStream}, which never holds the whole file.
+ */
 export function summarizeArchive(file, text = null) {
   const stats = emptyStats(file);
   if (text === null) {
@@ -85,25 +147,18 @@ export function summarizeArchive(file, text = null) {
   }
   stats.present = true;
   for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    stats.lines += 1;
-    let record;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      stats.invalidLines += 1;
-      continue;
-    }
-    if (record.type in stats.types) stats.types[record.type] += 1;
-    if (record.productId) stats.products.add(record.productId);
-    if (record.offerId) stats.offers.add(record.offerId);
-    if (record.storeId) stats.stores.add(record.storeId);
-    if (record.type === "store" && record.storeId) stats.stores.add(record.storeId);
-    if (record.type === "product" && record.data?.gtin) {
-      stats.gtinProducts.add(record.productId);
-    }
-    if (record.data?.source?.adapter) stats.adapters.add(record.data.source.adapter);
-    if (record.observedAt) stats.observedAt.push(record.observedAt);
+    applyLine(stats, line);
+  }
+  return stats;
+}
+
+/** Streaming variant of {@link summarizeArchive} for large archives. */
+export async function summarizeArchiveStream(file) {
+  const stats = emptyStats(file);
+  if (!existsSync(file)) return stats;
+  stats.present = true;
+  for await (const line of jsonlLines(file)) {
+    applyLine(stats, line);
   }
   return stats;
 }
@@ -120,7 +175,14 @@ function mergeStats(statsList) {
     for (const value of stats.stores) merged.stores.add(value);
     for (const value of stats.gtinProducts) merged.gtinProducts.add(value);
     for (const value of stats.adapters) merged.adapters.add(value);
-    merged.observedAt.push(...stats.observedAt);
+    if (stats.observedAtMin !== null &&
+        (merged.observedAtMin === null || stats.observedAtMin < merged.observedAtMin)) {
+      merged.observedAtMin = stats.observedAtMin;
+    }
+    if (stats.observedAtMax !== null &&
+        (merged.observedAtMax === null || stats.observedAtMax > merged.observedAtMax)) {
+      merged.observedAtMax = stats.observedAtMax;
+    }
   }
   return merged;
 }
@@ -248,7 +310,7 @@ ${archiveTable}
 
 - Record types: ${formatNumber(corpus.types.product)} products, ${formatNumber(corpus.types.offer)} offers, and ${formatNumber(corpus.types.store)} store records.
 - Products with a GTIN in at least one product record: ${formatNumber(corpus.gtinProducts.size)}.
-- Observation span: ${formatDate(corpus.observedAt.sort()[0])} to ${formatDate(corpus.observedAt.at(-1))}.
+- Observation span: ${formatDate(corpus.observedAtMin)} to ${formatDate(corpus.observedAtMax)}.
 - Invalid JSONL lines: ${formatNumber(corpus.invalidLines)}. The report counts them but does not silently treat them as valid data.
 
 ## Store coverage
@@ -292,9 +354,11 @@ export function parseArgs(argv) {
   return options;
 }
 
-export function runReport({ healthLog = DEFAULT_HEALTH_LOG, dataDir = DEFAULT_DATA_DIR, output = null, generatedAt = new Date().toISOString() } = {}) {
+export async function runReport({ healthLog = DEFAULT_HEALTH_LOG, dataDir = DEFAULT_DATA_DIR, output = null, generatedAt = new Date().toISOString() } = {}) {
   const run = existsSync(healthLog) ? latestRun(readFileSync(healthLog, "utf8")) : null;
-  const archiveStats = ARCHIVES.map(({ file }) => summarizeArchive(join(dataDir, file)));
+  const archiveStats = await Promise.all(
+    ARCHIVES.map(({ file }) => summarizeArchiveStream(join(dataDir, file))),
+  );
   const report = buildReport({ generatedAt, run, archiveStats });
   const reportPath = resolve(output ?? join(DEFAULT_REPORT_DIR, `breadth-report-${nzDate(generatedAt)}.md`));
   mkdirSync(resolve(reportPath, ".."), { recursive: true });
@@ -308,7 +372,7 @@ if (process.argv[1]?.endsWith("breadth-report.js")) {
     if (options.help) {
       console.log("Usage: node scripts/breadth-report.js [--health-log path] [--data-dir path] [--output path]");
     } else {
-      const result = runReport(options);
+      const result = await runReport(options);
       console.log(JSON.stringify({ reportPath: result.reportPath, previousRun: result.run?.stamp ?? null }, null, 2));
     }
   } catch (error) {

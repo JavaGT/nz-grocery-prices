@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildReport, summarizeArchive } from "../scripts/breadth-report.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildReport, summarizeArchive, summarizeArchiveStream } from "../scripts/breadth-report.js";
 
 const healthRun = {
   stamp: "2026-09-02T15:30:00Z",
@@ -46,5 +49,34 @@ describe("breadth report", () => {
     assert.match(report, /not an every-store collection/);
     assert.match(report, /three consecutive healthy nights/);
     assert.match(report, /does not call retailer APIs/);
+  });
+
+  it("streams archives with results identical to the in-memory path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "breadth-report-"));
+    try {
+      const file = join(dir, "fixture.jsonl");
+      // Records split across chunk boundaries plus a torn final fragment.
+      const text = [
+        JSON.stringify({ version: 2, type: "product", productId: "fc:p1", observedAt: "2026-09-02T00:00:00Z", data: { gtin: "9400" } }),
+        JSON.stringify({ version: 2, type: "offer", offerId: "fc:o1", productId: "fc:p1", storeId: "fc:s1", observedAt: "2026-09-01T00:00:00Z" }),
+        JSON.stringify({ type: "store", storeId: "fc:s1", observedAt: "2026-09-03T00:00:00Z" }),
+        "not json",
+        "",
+      ].join("\n");
+      await writeFile(file, text);
+
+      const streamed = await summarizeArchiveStream(file);
+      const inMemory = summarizeArchive(file, text);
+
+      assert.deepEqual(
+        { ...streamed, file: streamed.file },
+        { ...inMemory, file: inMemory.file },
+      );
+      assert.equal(streamed.observedAtMin, "2026-09-01T00:00:00Z");
+      assert.equal(streamed.observedAtMax, "2026-09-03T00:00:00Z");
+      assert.equal(streamed.invalidLines, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

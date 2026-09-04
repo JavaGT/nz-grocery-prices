@@ -21,7 +21,7 @@ import {
   DEFAULT_FILE,
 } from "../scripts/foodstuffs-mobile-breadth.js";
 import { createCrawler } from "../scripts/lib/crawler.js";
-import { absorbHits, assertNotLiveArchive, reconcile } from "../scripts/foodstuffs-breadth.js";
+import { absorbHits, assertNotLiveArchive, reconcile } from "../scripts/lib/breadth-helpers.js";
 
 // ---- fixture helpers -----------------------------------------------------
 

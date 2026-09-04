@@ -45,7 +45,7 @@ import {
   DEFAULT_PILOT_BUDGET,
   reconcile,
   resolveStores,
-} from "./foodstuffs-breadth.js";
+} from "./lib/breadth-helpers.js";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 

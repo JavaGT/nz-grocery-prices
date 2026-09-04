@@ -9,8 +9,11 @@
 # monotonic progress whenever the window lifts — even if a pass aborts.
 #
 # Usage:
-#   scripts/breadth-passes.sh [--retailer paknsave|newworld|both] \
+#   scripts/breadth-passes.sh [--retailer paknsave|newworld] \
 #     [--delay-ms N] [--max-passes N] [--cooldown-s N] [--file <jsonl>]
+#
+# (One banner per invocation: run it twice for both. The retired facet-driven
+# web collector supported "both"; the mobile backend has no such scope.)
 #
 # Stop conditions per pass:
 #   - summary.healthy true          → catalogue complete for the scope: DONE
@@ -62,7 +65,7 @@ while [ "$pass" -lt "$max_passes" ]; do
   set +e
   # ${arr[@]+"${arr[@]}"}: macOS bash 3.2 treats empty-array expansion as
   # unbound under set -u; this idiom expands to nothing when empty.
-  node "$repo_root/scripts/foodstuffs-breadth.js" \
+  node "$repo_root/scripts/foodstuffs-mobile-breadth.js" \
     --retailer "$retailer" --delay-ms "$delay_ms" \
     ${extra_args[@]+"${extra_args[@]}"} > "/tmp/breadth-pass-$stamp.log" 2>&1
   exit_code=$?

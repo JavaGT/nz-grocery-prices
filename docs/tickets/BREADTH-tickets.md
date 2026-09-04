@@ -195,3 +195,20 @@ Replace single-shot daily script with per-retailer crawl plans sharing
 `<archive>.lock`; continuous low-rate scheduling (Woolworths staggered across
 week until measured); launchd registration via updated wizard; alerting from
 collection-health failures; docs/agent updates.
+
+# Perf campaign 2026-09-05 (owner-approved) — tracked on GitHub
+
+Nightly pilot wall clock ~56 min → target ~8-12 min; findings evidence in
+`docs/research/` notes and the 2026-09-05 audit reports (temp dir, see
+HANDOFF). Rulings: 1-7, 9, 10 approved; store-pinning rejected; rotation
+deferred.
+
+- BREADTH-7 freshchoice page-0 checkpointing — [#1](https://github.com/JavaGT/nz-grocery-prices/issues/1)
+- BREADTH-8 foodstuffs-mobile drill checkpointing — [#2](https://github.com/JavaGT/nz-grocery-prices/issues/2)
+- BREADTH-9 parallel nightly lanes (distinct hosts) — [#3](https://github.com/JavaGT/nz-grocery-prices/issues/3)
+- BREADTH-10 warehouse silent no-data gate poison — [#4](https://github.com/JavaGT/nz-grocery-prices/issues/4)
+- BREADTH-11 extract helpers, delete orphan web script — [#5](https://github.com/JavaGT/nz-grocery-prices/issues/5)
+- BREADTH-12 stream breadth-report — [#6](https://github.com/JavaGT/nz-grocery-prices/issues/6)
+- BREADTH-13 sidecar index snapshot — [#7](https://github.com/JavaGT/nz-grocery-prices/issues/7)
+- BREADTH-14 mobile 3s pacing trial — [#8](https://github.com/JavaGT/nz-grocery-prices/issues/8)
+- BREADTH-15 purge stray newworld records — [#9](https://github.com/JavaGT/nz-grocery-prices/issues/9)

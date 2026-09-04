@@ -16,7 +16,7 @@ import {
   DEFAULT_PILOT_BUDGET,
 } from "../scripts/freshchoice-breadth.js";
 import { BREAKER_THRESHOLD } from "../src/adapters/freshchoice-breadth.js";
-import { assertNotLiveArchive } from "../scripts/foodstuffs-breadth.js";
+import { assertNotLiveArchive } from "../scripts/lib/breadth-helpers.js";
 
 // ---- fixture helpers -------------------------------------------------------
 

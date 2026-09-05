@@ -10,3 +10,4 @@ research/*.har
 .worktrees/
 collector.env
 reports/
+data/*.jsonl.*

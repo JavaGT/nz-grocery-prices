@@ -255,7 +255,9 @@ describe("MobileFoodstuffsClient", () => {
       }
       return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
     };
-    const client = new MobileFoodstuffsClient({ fetch });
+    // retryBackoffMs keeps the real retry semantics (2 retryable attempts,
+    // linear backoff) without 3-6s of real sleeps per failing test.
+    const client = new MobileFoodstuffsClient({ fetch, retryBackoffMs: 1 });
     const result = await client.listStores();
     assert.equal(attempts, 2, "transient network failure retried once");
     assert.deepEqual(result.map((s) => s.id), ["s1"]);
@@ -456,7 +458,9 @@ describe("MobileFoodstuffsClient", () => {
       }
       return { ok: false, status: 500, statusText: "Server Error" };
     };
-    const client = new MobileFoodstuffsClient({ fetch });
+    // Exhausts the 2 retryable attempts (linear backoff) before rejecting;
+    // retryBackoffMs: 1 keeps that semantics without 9s of real sleeps.
+    const client = new MobileFoodstuffsClient({ fetch, retryBackoffMs: 1 });
     await assert.rejects(
       () => client.categoryPage({ storeId: "s1", cat0: "Pantry", page: 0 }),
       /Mobile request.*failed: 500 Server Error/,

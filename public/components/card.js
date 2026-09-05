@@ -1,4 +1,4 @@
-import { el, esc } from '../utils/dom.js';
+import { el } from '../utils/dom.js';
 import { formatCents, formatDropPercent, formatRelativeTime, freshnessLevel, retailerColor as rc, retailerLabel } from '../utils/format.js';
 
 export function createProductCard(offer, opts = {}) {
@@ -13,7 +13,7 @@ export function createProductCard(offer, opts = {}) {
 
   const imgWrap = el('div', { className: 'pc-image' });
   const img = el('img', {
-    alt: offer.productName ? esc(offer.productName) : '',
+    alt: offer.productName || '',
     loading: 'lazy',
   });
   img.addEventListener('error', () => { img.style.display = 'none'; });
@@ -30,7 +30,7 @@ export function createProductCard(offer, opts = {}) {
   }
 
   if (offer.signalLabel) {
-    imgWrap.appendChild(el('span', { className: 'pc-signal' }, esc(offer.signalLabel)));
+    imgWrap.appendChild(el('span', { className: 'pc-signal' }, offer.signalLabel));
   }
 
   const brandEl = el('span', { className: 'pc-brandmark' });
@@ -49,10 +49,10 @@ export function createProductCard(offer, opts = {}) {
     title: freshnessLabels[freshness],
   }, '\u00a0');
   storeLine.appendChild(freshnessDot);
-  storeLine.appendChild(document.createTextNode(` ${esc(offer.storeName || '')}`));
+  storeLine.appendChild(document.createTextNode(` ${offer.storeName || ''}`));
   body.appendChild(storeLine);
 
-  const title = el('h3', { className: 'pc-title' }, esc(offer.productName || ''));
+  const title = el('h3', { className: 'pc-title' }, offer.productName || '');
   body.appendChild(title);
 
   const priceBox = el('div', { className: 'pc-pricebox' });
@@ -92,14 +92,14 @@ export function createSkeletonCard() {
 
 export function createEmptyState(message, subMessage) {
   const wrap = el('div', { className: 'empty-state' });
-  wrap.appendChild(el('p', {}, esc(message)));
-  if (subMessage) wrap.appendChild(el('p', { className: 'empty-sub' }, esc(subMessage)));
+  wrap.appendChild(el('p', {}, message));
+  if (subMessage) wrap.appendChild(el('p', { className: 'empty-sub' }, subMessage));
   return wrap;
 }
 
 export function createErrorState(message, onRetry) {
   const wrap = el('div', { className: 'error-state' });
-  wrap.appendChild(el('p', {}, esc(message)));
+  wrap.appendChild(el('p', {}, message));
   if (onRetry) {
     wrap.appendChild(el('button', { className: 'btn btn-outline', onClick: onRetry }, 'Try again'));
   }

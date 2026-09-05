@@ -92,12 +92,13 @@ CREATE TABLE IF NOT EXISTS offer_revisions (
   promotion_data      TEXT,
   source_data         TEXT NOT NULL,
   observed_at         INTEGER NOT NULL,
-  UNIQUE(offer_key, rev_hash, observed_at)
+  -- (offer_key, observed_at) prefix doubles as the offer lookup/order index,
+  -- so no separate idx_or_offer_key is needed.
+  UNIQUE(offer_key, observed_at, rev_hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_or_product ON offer_revisions(product_id, observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_or_context ON offer_revisions(context_id, observed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_or_offer_key ON offer_revisions(offer_key, observed_at DESC);
 
 CREATE TABLE IF NOT EXISTS special_snapshots (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,37 +133,9 @@ LEFT JOIN special_snapshots ss ON ss.context_id = or2.context_id
   AND json_valid(ss.added)
   AND EXISTS (SELECT 1 FROM json_each(ss.added) WHERE value = or2.offer_key);
 
-CREATE TABLE IF NOT EXISTS product_matches (
-  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_a_id       TEXT NOT NULL,
-  product_a_retailer TEXT NOT NULL,
-  product_b_id       TEXT NOT NULL,
-  product_b_retailer TEXT NOT NULL,
-  match_method       TEXT NOT NULL CHECK(match_method IN ('auto_gtin','auto_source_id','human_reviewed','fuzzy_candidate')),
-  confidence         REAL CHECK(confidence >= 0 AND confidence <= 1),
-  review_state       TEXT NOT NULL DEFAULT 'pending' CHECK(review_state IN ('pending','accepted','rejected')),
-  reviewer           TEXT,
-  reviewed_at        TEXT,
-  created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-  UNIQUE(product_a_id, product_b_id)
-);
-
-CREATE TABLE IF NOT EXISTS deal_signals (
-  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id           TEXT NOT NULL,
-  context_id           INTEGER NOT NULL REFERENCES price_contexts(id),
-  signal_kind          TEXT NOT NULL CHECK(signal_kind IN ('history_drop','all_time_low','advertised_only')),
-  calc_version         TEXT NOT NULL,
-  baseline_window_days INTEGER NOT NULL,
-  min_samples          INTEGER NOT NULL,
-  price_policy         TEXT NOT NULL,
-  reference_cents      INTEGER NOT NULL,
-  current_cents        INTEGER NOT NULL,
-  drop_percent         REAL,
-  calculated_at        INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_ds_product ON deal_signals(product_id, context_id);
+-- product_matches and deal_signals tables were removed: documented dead
+-- artifacts (AGENTS.md / DECISIONLOG). Matching truth lives in app.db
+-- product_match_pairs; deals are computed at runtime by src/analytics.js.
 
 CREATE TABLE IF NOT EXISTS _meta (
   key   TEXT PRIMARY KEY,

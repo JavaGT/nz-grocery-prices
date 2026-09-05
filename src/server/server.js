@@ -1,9 +1,36 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 
 const MAX_BODY = 65536;
 const MAX_COOKIE_LENGTH = 4096;
 const MAX_COOKIE_COUNT = 20;
+// JSON responses below this size go out uncompressed: the CPU cost of gzipping
+// outweighs the wire savings once headers are counted.
+const MIN_COMPRESS_BYTES = 1024;
+
+// Parses an Accept-Encoding header into { encoding: q } for the encodings this
+// server can produce (q=0 means "not accepted"). Single source of truth shared
+// with static serving in src/app/server.js.
+export function parseAcceptEncoding(header) {
+  const out = { gzip: 0, br: 0 };
+  if (!header) return out;
+  for (const part of String(header).split(',')) {
+    const pieces = part.trim().split(';');
+    const token = pieces[0].trim().toLowerCase();
+    if (!(token in out)) continue;
+    let q = 1;
+    for (const param of pieces.slice(1)) {
+      const p = param.trim();
+      if (p.startsWith('q=')) {
+        q = Number.parseFloat(p.slice(2));
+        if (!Number.isFinite(q)) q = 0;
+      }
+    }
+    out[token] = q;
+  }
+  return out;
+}
 
 export class StatusError extends Error {
   constructor(status, code, message) {
@@ -157,7 +184,7 @@ export class Server {
       if (allowed.size > 0 && !allowed.has(req.method)) {
         return this.#respond(res, 405, {
           error: { code: 'METHOD_NOT_ALLOWED', message: `${req.method} not allowed for ${pathname}` }
-        }, requestId);
+        }, requestId, null, req.headers['accept-encoding']);
       }
 
       let matched = null;
@@ -178,7 +205,7 @@ export class Server {
         }
         return this.#respond(res, 404, {
           error: { code: 'NOT_FOUND', message: `${pathname} not found` }
-        }, requestId);
+        }, requestId, null, req.headers['accept-encoding']);
       }
 
       let body = null;
@@ -213,7 +240,7 @@ export class Server {
 
       const result = await matched.handler(ctx);
       if (result !== undefined) {
-        this.#respond(res, 200, result, requestId, cookieHeaderSet);
+        this.#respond(res, 200, result, requestId, cookieHeaderSet, req.headers['accept-encoding']);
       } else if (cookieHeaderSet) {
         this.#finalizeResponse(res, 200, requestId, cookieHeaderSet);
       }
@@ -225,12 +252,12 @@ export class Server {
         if (err.retryAfter) {
           errBody.retryAfter = err.retryAfter;
         }
-        this.#respond(res, err.status, errBody, requestId);
+        this.#respond(res, err.status, errBody, requestId, null, req.headers['accept-encoding']);
       } else {
         this.#log.error('Unhandled error:', err);
         this.#respond(res, 500, {
           error: { code: 'INTERNAL_ERROR', message: 'Internal server error' }
-        }, requestId);
+        }, requestId, null, req.headers['accept-encoding']);
       }
     }
 
@@ -238,7 +265,7 @@ export class Server {
     this.#log.info(`${req.method} ${req.url} ${res.statusCode} ${elapsed}ms`);
   }
 
-  #respond(res, status, body, requestId, cookieHeader) {
+  #respond(res, status, body, requestId, cookieHeader, acceptEncoding) {
     const payload = { _requestId: requestId };
     const meta = this.#projMeta();
     payload._freshness = {
@@ -254,6 +281,8 @@ export class Server {
       'x-request-id': requestId,
       'x-frame-options': 'SAMEORIGIN',
       'referrer-policy': 'no-referrer',
+      // Responses are compressible, so caches must key on encoding choice.
+      vary: 'Accept-Encoding',
     };
     if (cookieHeader) headers['set-cookie'] = cookieHeader;
 
@@ -262,18 +291,30 @@ export class Server {
       delete body.retryAfter;
     }
 
+    let json;
     if (Array.isArray(body)) {
-      headers['content-type'] = 'application/json';
-      res.writeHead(status, headers);
-      res.end(JSON.stringify(body));
-      return;
+      json = JSON.stringify(body);
+    } else {
+      if (body && typeof body === 'object') {
+        Object.assign(payload, body);
+      }
+      json = JSON.stringify(payload);
     }
-    if (body && typeof body === 'object') {
-      Object.assign(payload, body);
+
+    let out = Buffer.from(json);
+    const accepted = parseAcceptEncoding(acceptEncoding);
+    if (accepted.gzip > 0 && out.length >= MIN_COMPRESS_BYTES) {
+      try {
+        out = gzipSync(out);
+        headers['content-encoding'] = 'gzip';
+      } catch (err) {
+        this.#log.error('[server] gzip compression failed:', err.message);
+      }
     }
-    const json = JSON.stringify(payload);
+
+    headers['content-length'] = out.length;
     res.writeHead(status, headers);
-    res.end(json);
+    res.end(out);
   }
 
   #finalizeResponse(res, status, requestId, cookieHeader) {

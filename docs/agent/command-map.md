@@ -25,14 +25,14 @@ suffices for collectors.
 
 | Task | Command | Notes |
 |---|---|---|
-| Full test suite | `npm test` | ~600 tests, ~7s. All self-contained (temp dirs, port 0). No child-process dashboard since CORE-6. |
+| Full test suite | `npm test` | ~880 tests, ~2.8s (perf campaign 2026-09-06: retry/scrypt test seams removed real sleeps). All self-contained (temp dirs, port 0). |
 | Lint / typecheck | **none** | no ESLint, no TypeScript compiler. `npm run check` is the syntax gate. |
 
 ## Run / dev
 
 | Task | Command | Port | Env |
 |---|---|---|---|
-| App server (canonical) | `npm start` | 3010 | `PORT`, `HOST`, `JSONL_PATH`, `PRICES_DB`, `APP_DB`, `TRUST_PROXY_HEADERS=1`, `ENABLE_HSTS=1` |
+| App server (canonical) | `npm start` | 3010 | `PORT`, `HOST`, `JSONL_PATH`, `PRICES_DB`, `APP_DB`, `TRUST_PROXY_HEADERS=1`, `ENABLE_HSTS=1`, `DEALS_CACHE_TTL_MS` (per-retailer /api/deals memoization TTL, default 300000, 0 disables) |
 | Rebuild projection DB | `npm run build-db` | — | safe; does not touch `app.db`. Refuses app.db/APP_DB outputs (two-DB rule); refuses v1 archives with the migrator command. Fail-fast `<db>.lock`. |
 | Run matching | `npm run matching -- --fuzzy` | — | writes to `app.db.product_match_pairs` |
 | Repair archive | `npm run archive:repair -- --file <path>` | — | quarantines corrupt/torn lines, atomically rewrites. Takes the `<archive>.lock` while scanning/rewriting (fails fast if a writer holds it; reclaims it if the holder's pid is dead). Rejects `.db` paths (case-insensitive); accepts `--file <path>` or `--file=<path>`; requires `--force` for `data/prices.jsonl`. Keeps legacy v1 lines byte-for-byte (migration is not repair's job). |

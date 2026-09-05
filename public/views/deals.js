@@ -1,4 +1,4 @@
-import { el, esc, clear, delegate, qs } from '../utils/dom.js';
+import { el, clear, qs } from '../utils/dom.js';
 import { formatCents, formatDropPercent, formatRelativeTime, retailerLabel, freshnessLevel, retailerColor } from '../utils/format.js';
 import { createProductCard, createSkeletonCard, createEmptyState, createErrorState, createFreshnessBanner } from '../components/card.js';
 import { openDetailDialog } from '../components/detail-dialog.js';

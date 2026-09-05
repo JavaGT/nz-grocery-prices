@@ -45,7 +45,8 @@ dependencies, `node:test`. **Node 26.3.1+** for the app server / SQLite; Node
 - **No FTS5.** Search uses `LIKE` + `COLLATE NOCASE` on `products.name`. Don't
   assume FTS5 exists.
 - **Dead tables.** Projection DB `deal_signals` and `product_matches` are not
-  populated. Deals = runtime `src/analytics.js`; match truth =
+  populated and no longer exist (dropped from the schema in the 2026-09-06
+  perf campaign). Deals = runtime `src/analytics.js`; match truth =
   `app.db.product_match_pairs`.
 - **Warehouse adapter uses `curl` via `execFile`** (anti-bot TLS fingerprint),
   never shell strings. Don't switch to shell-string execution.

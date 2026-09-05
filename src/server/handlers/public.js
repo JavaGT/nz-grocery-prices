@@ -24,7 +24,14 @@ const TIER_WATCH_PREFERRED = 'watch-preferred';
 const TIER_WATCH_OTHER = 'watch-other';
 const TIER_ALL = 'all';
 
-export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations }) {
+const DEFAULT_DEALS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function defaultDealsCacheTtlMs() {
+  const n = Number(process.env.DEALS_CACHE_TTL_MS);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DEALS_CACHE_TTL_MS;
+}
+
+export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs() }) {
   function db() {
     const d = typeof getDb === 'function' ? getDb() : getDb;
     if (!d) throw new StatusError(503, 'SERVICE_UNAVAILABLE', 'Projection database not available');
@@ -336,17 +343,19 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     return { suggestions: rows.map(r => r.name) };
   }
 
-  async function listDeals(ctx) {
-    db();
-    const filter = ctx.query.filter || 'all';
-    const limit = clamp(ctx.query.limit, 1, 200, 120);
-    const retailer = (ctx.query.retailer || '').trim();
+  // Deal universe cache: /api/deals re-reads ~90 days of offer revisions and
+  // runs two analytics passes per request (~100ms at current archive size).
+  // Offer data only changes when the projection DB is rebuilt (nightly), so
+  // the computation is memoized per retailer for dealsCacheTtlMs (0 disables).
+  // Filter, limit, and tier ordering stay per-request; cached deal objects
+  // are never mutated (the tier path copies before attaching .tier).
+  const dealsCache = new Map();
 
-    if (!['history-backed', 'advertised', 'all'].includes(filter)) {
-      throw new StatusError(400, 'INVALID_FILTER', 'Filter must be history-backed, advertised, or all');
-    }
+  function dealUniverse(retailer, now) {
+    const key = retailer || '*';
+    const hit = dealsCache.get(key);
+    if (hit && now - hit.computedAt < dealsCacheTtlMs) return hit;
 
-    const now = ctx.clock();
     const baselineMs = 90 * 24 * 60 * 60 * 1000;
     const fromMs = now - baselineMs;
 
@@ -361,7 +370,6 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
       observations = observations.filter(o => o.store && o.store.retailer === retailer);
     }
 
-    const fromDate = new Date(fromMs).toISOString();
     const atDate = new Date(now).toISOString();
 
     const salesResult = calculateSales(observations, {
@@ -451,14 +459,6 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
       });
     }
 
-    if (filter === 'history-backed') {
-      advertised.length = 0;
-    } else if (filter === 'advertised') {
-      historyBacked.length = 0;
-    }
-
-    const totalCount = historyBacked.length + advertised.length;
-
     // Deduplicate: if the same product+store offer appears in both, keep
     // history-backed (it has stronger evidence) and remove from advertised.
     if (historyBacked.length > 0 && advertised.length > 0) {
@@ -466,17 +466,52 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
         historyBacked.map(d => `${d.product.id}\x00${d.priceContext.storeId}`)
       );
       for (let i = advertised.length - 1; i >= 0; i--) {
-        const key = `${advertised[i].product.id}\x00${advertised[i].priceContext.storeId}`;
-        if (historyKey.has(key)) {
+        const adKey = `${advertised[i].product.id}\x00${advertised[i].priceContext.storeId}`;
+        if (historyKey.has(adKey)) {
           advertised.splice(i, 1);
         }
       }
     }
 
     // Ordering: history-backed (sorted by drop descending), then advertised.
-    // Cap combined total to limit.
     historyBacked.sort((a, b) => (b.signal.dropPercent || 0) - (a.signal.dropPercent || 0));
     advertised.sort((a, b) => (b.signal.dropPercent || 0) - (a.signal.dropPercent || 0));
+
+    const storeCounts = db().prepare('SELECT COUNT(DISTINCT id) AS total FROM price_contexts').get();
+    const storesWithOffers = db().prepare('SELECT COUNT(DISTINCT context_id) AS c FROM offer_revisions').get();
+
+    const entry = {
+      computedAt: now,
+      historyBacked, advertised,
+      archiveFreshness: { totalStores: storeCounts?.total || 0, storesWithData: storesWithOffers?.c || 0 },
+    };
+    dealsCache.clear();
+    dealsCache.set(key, entry);
+    return entry;
+  }
+
+  async function listDeals(ctx) {
+    db();
+    const filter = ctx.query.filter || 'all';
+    const limit = clamp(ctx.query.limit, 1, 200, 120);
+    const retailer = (ctx.query.retailer || '').trim();
+
+    if (!['history-backed', 'advertised', 'all'].includes(filter)) {
+      throw new StatusError(400, 'INVALID_FILTER', 'Filter must be history-backed, advertised, or all');
+    }
+
+    const now = ctx.clock();
+    const universe = dealUniverse(retailer, now);
+    let historyBacked = universe.historyBacked;
+    let advertised = universe.advertised;
+
+    if (filter === 'history-backed') {
+      advertised = [];
+    } else if (filter === 'advertised') {
+      historyBacked = [];
+    }
+
+    const totalCount = historyBacked.length + advertised.length;
     const combined = [...historyBacked, ...advertised];
 
     // Feed prioritization: partition into tiers for authenticated users.
@@ -495,8 +530,7 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
       };
       for (const deal of combined) {
         const t = dealTier(deal, tiers);
-        deal.tier = t;
-        bucket[t].push(deal);
+        bucket[t].push({ ...deal, tier: t });
       }
       ordered = [...bucket[TIER_WATCH_PREFERRED], ...bucket[TIER_WATCH_OTHER], ...bucket[TIER_ALL]];
       tierSummary = {
@@ -510,12 +544,9 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     const resultHistory = capped.filter(d => d.signal.kind !== 'advertised_only');
     const resultAdvertised = capped.filter(d => d.signal.kind === 'advertised_only');
 
-    const storeCounts = db().prepare('SELECT COUNT(DISTINCT id) AS total FROM price_contexts').get();
-    const storesWithOffers = db().prepare('SELECT COUNT(DISTINCT context_id) AS c FROM offer_revisions').get();
-
     return {
       historyBacked: resultHistory, advertised: resultAdvertised, stale: false,
-      archiveFreshness: { totalStores: storeCounts?.total || 0, storesWithData: storesWithOffers?.c || 0 },
+      archiveFreshness: universe.archiveFreshness,
       total: totalCount, limit,
       ...(tierSummary ? { tiers: tierSummary } : {}),
     };

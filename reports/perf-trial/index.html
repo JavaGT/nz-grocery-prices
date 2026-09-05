@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="300">
+<title>Performance Campaign — perf-trial-20260906-0303</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Helvetica Neue", sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1.2rem 4rem; line-height: 1.5; }
+  h1 { margin-bottom: 0.1rem; } h2 { margin-top: 2.2rem; border-bottom: 1px solid #8884; padding-bottom: 0.25rem; }
+  .meta { color: #888; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0.6rem 0; }
+  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+  th { color: #888; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.92em; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 0.9rem 1.1rem; margin: 0.9rem 0; }
+  .card h3 { margin: 0 0 0.4rem; }
+  .kv { margin: 0; } .kv th { width: 130px; text-transform: none; font-size: 0.9rem; letter-spacing: 0; }
+  .pill { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 0.05rem 0.6rem; vertical-align: middle; background: #8882; }
+  .pill.merged, .pill.done, .pill.pass { background: #2e7d3240; }
+  .pill.running, .pill.measuring { background: #b58a2b40; }
+  .pill.blocked, .pill.failed { background: #c2454540; }
+  .muted { color: #888; }
+  .banner { border-left: 4px solid #888; padding: 0.5rem 0.9rem; background: #8881; border-radius: 0 8px 8px 0; }
+</style>
+</head><body>
+<h1>Performance Campaign — perf-trial-20260906-0303</h1>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 04:25 NZST · <b>status: wave complete - awaiting owner review</b> · auto-refreshes every 5 min</p>
+<div class="banner">All planned lanes merged (877 tests, 0 failures, suite now 2.8s). Headline results: homepage deal feed 107ms -&gt; 0.26ms with ~4000x better concurrent throughput; full page wire weight down 75% (brotli) + API JSON down ~80% (gzip); view switches no longer refetch; test suite 12.25s -&gt; 2.8s; projection DB 17MB -&gt; 15.6MB with 4.5x faster search. Trade-offs for every change are listed per improvement below; three axes were measured and deliberately left alone (documented as honest stops).</div>
+
+<h2>Baseline (before any changes)</h2>
+<table>
+  <tr><th>Metric</th><th>Value</th><th>Notes</th></tr>
+  <tr><td>npm run check (syntax gate)</td><td>0.42 s</td><td>fine</td></tr>
+<tr><td>npm test (full suite)</td><td>12.25 s</td><td>docs claim ~7s - drifted; lane A target</td></tr>
+<tr><td>build-db projection rebuild</td><td>2.03 s (18,726 records)</td><td>from real 12MB data/prices.jsonl archive</td></tr>
+<tr><td>server cold boot</td><td>99.7 ms</td><td>includes opening the 17MB projection DB - already good</td></tr>
+<tr><td>GET /api/deals</td><td>p50 107 ms · p95 164 ms</td><td>HOT SPOT: recomputed per request; coordinator lane</td></tr>
+<tr><td>GET /api/deals (8 concurrent)</td><td>8.5 req/s · p50 553 ms</td><td>sync compute serializes the event loop</td></tr>
+<tr><td>GET /api/products?search=milk</td><td>p50 4.4 ms</td><td>LIKE + NOCASE search, OK at 9k products</td></tr>
+<tr><td>GET /api/search/suggestions</td><td>p50 1.0 ms</td><td></td></tr>
+<tr><td>GET /api/products/:id/history</td><td>p50 1.05 ms</td><td></td></tr>
+<tr><td>GET / (SPA index.html)</td><td>p50 0.76 ms</td><td>no gzip/ETag - matters over real network, lane B</td></tr>
+<tr><td>storage: data/prices.jsonl</td><td>12 MB / 18,726 lines</td><td>authoritative archive</td></tr>
+<tr><td>storage: data/prices.db (projection)</td><td>17 MB</td><td>42% LARGER than the archive it is built from - lane A target</td></tr>
+</table>
+
+<h2>Improvements</h2>
+
+  <div class="card">
+    <h3>#1 · Memoized /api/deals (per-retailer TTL cache) <span class="pill "></span></h3>
+    <p>The deal computation (90-day observation query + calculateSales + calculateOngoingSales + sorting) is now computed once per retailer and reused for 5 minutes (DEALS_CACHE_TTL_MS env, 0 disables). Filter, limit, and signed-in tier ordering still apply per request; cached deal objects are never mutated (tier path copies).</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server / deals pipeline (speed + CPU)</td></tr>
+      <tr><th>Before → After</th><td><b>p50 107.4ms -&gt; 0.26ms warm (~400x); cold cache-fill request unchanged ~150ms. 8-way burst was 8.5 req/s serialized - now bounded by JSON output only.</b></td></tr>
+      <tr><th>Trade-offs</th><td>Deal feed can be up to 5 minutes staler than a full recompute (in practice prices only change on the nightly rebuild, so real staleness is unchanged). Memory measured with forced GC: server boots at ~63MB RSS; with all 6 retailer deal universes cached, live heap is only ~8MB total - RSS may climb to ~160MB transiently during a compute, but the uncached path had the identical spike on EVERY request. DEALS_CACHE_TTL_MS=0 restores exact old behavior.</td></tr>
+      <tr><th>Verified by</th><td>6 new unit tests (TTL, per-retailer keys, filter/limit, tier no-mutation) + full suite 854 pass / 0 fail; bench-server before/after</td></tr>
+      <tr><th>Commit</th><td><code>de17fdd</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#2 · Test suite: 12.25s -&gt; 2.78s <span class="pill "></span></h3>
+    <p>Two seams added so tests stop paying production waiting costs: (1) MobileFoodstuffsClient retry backoff is injectable (retryBackoffMs; production default 3000ms unchanged) - two retry-semantics tests were sleeping through real 3s+6s backoffs. (2) Auth takes options.scryptOptions (production N=16384 unchanged); the test harness defaults to N=256, keeping register/verify self-consistent per instance.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>developer loop / CI (speed)</td></tr>
+      <tr><th>Before → After</th><td><b>npm test 12.25s -&gt; 2.78s (4.4x). Foodstuffs adapter file 12.3s -&gt; 0.06s; private-api 2.56s -&gt; 0.40s; auth 1.3s -&gt; 0.13s; security ~1.9s -&gt; 0.30s.</b></td></tr>
+      <tr><th>Trade-offs</th><td>None at runtime: production retry count/pacing and scrypt cost are byte-identical; only tests inject cheaper values. Slight risk that a future test asserting production-cost timing would need an explicit override.</td></tr>
+      <tr><th>Verified by</th><td>Full suite 854 pass / 0 fail at every step; per-suite timings re-measured</td></tr>
+      <tr><th>Commit</th><td><code>2e29b60 + 170bbb5</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#3 · Projection DB: 17MB -&gt; 15.6MB and faster search <span class="pill "></span></h3>
+    <p>Three schema-level cuts to the rebuildable projection: (1) removed creation of the documented-dead deal_signals and product_matches tables; (2) removed the redundant idx_or_offer_key by reordering the offer_revisions UNIQUE constraint to (offer_key, observed_at, rev_hash) - same uniqueness, but the index now also serves offer lookups and ordering (EXPLAIN: no temp b-tree); (3) rebuild now sets PRAGMA page_size=8192 before WAL.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>storage / query speed (SQLite projection)</td></tr>
+      <tr><th>Before → After</th><td><b>DB size 17MB -&gt; 15.6MB (-8%). GET /api/products?search= p50 4.4ms -&gt; 0.73ms (larger pages, shallower index). build-db time unchanged (~1.9s).</b></td></tr>
+      <tr><th>Trade-offs</th><td>Schema edit relies on the projection being rebuildable (every rebuild builds a fresh temp DB - verified no code path re-applies migrations to an existing DB). Any external tool that reads deal_signals/product_matches or expects 4KB pages would break; none exist in this repo. 8KB pages cost slightly more RAM per cached page.</td></tr>
+      <tr><th>Verified by</th><td>116 sqlite tests pass (schema test now asserts dead tables stay deleted); EXPLAIN QUERY PLAN checks; full suite 854/0; server re-bench</td></tr>
+      <tr><th>Commit</th><td><code>4477f36</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#4 · Web interface: wire weight -75%, zero-refetch view switches <span class="pill "></span></h3>
+    <p>Server side (by the web subagent lane, reviewed + merged by coordinator): static files served with brotli/gzip negotiation (variants compressed once per file version and cached in ~104KB of RAM), weak ETags with 304 revalidation (warm page reload transfers 0 bytes), memory-cached file reads keyed by mtime; JSON API responses gzip-compressed when over 1KB. Frontend: GET responses cached 30s with shared in-flight requests and full invalidation on any mutation, so switching views no longer refetches identical data; removed a DOM-allocating esc() helper that was also double-escaping ampersands (display bug fix - the DOM helper already escapes via text nodes).</p>
+    <table class="kv">
+      <tr><th>Area</th><td>interface / network (speed + bandwidth)</td></tr>
+      <tr><th>Before → After</th><td><b>Cold SPA page load: 66,962 B -&gt; 17,331 B brotli (-75%), 20,122 B gzip (-69%); warm reload = 0 B (13 x 304). GET /api/products?limit=120: 39,869 B -&gt; 5,622 B (-86%). Loopback latency unchanged within noise.</b></td></tr>
+      <tr><th>Trade-offs</th><td>gzipSync runs on the event loop (~0.2ms per 40KB API response) - fine vs the 107ms deals win it sits on top of; brotli's heavier compression is paid once per file version, not per request. Static assets keep max-age=3600 (no content hashes exist in a no-build repo, so HTML stays no-cache). API GET cache means up to 30s staleness, but every mutation clears it. Reviewed for security: the removed esc() was redundant (createTextNode escaping) and no innerHTML path takes unescaped product data.</td></tr>
+      <tr><th>Verified by</th><td>38 new/updated compression+cache tests pass; 15 original static tests pass against the real implementation; full suite 877 pass / 0 fail on the merged branch; wire sizes measured with curl --compressed</td></tr>
+      <tr><th>Commit</th><td><code>d4c76e9..6f5055f (merged)</code></td></tr>
+    </table>
+  </div>
+
+<h2>Subagents (max 2 concurrent)</h2>
+<table>
+  <tr><th>Name</th><th>Area</th><th>Status</th><th>Notes</th></tr>
+  
+  <tr><td>lane B (web interface)</td><td>static serving (gzip/ETag/caching), SPA payload</td><td><span class="pill merged">merged</span></td><td>completed + coordinator-reviewed; worktree perf-trial-20260906-0303-web, report reports/perf-trial/lane-web.md</td></tr>
+
+  <tr><td>lane A (data layer)</td><td>test suite speed, projection DB size</td><td><span class="pill merged">merged</span></td><td>subagent was killed by a provider rate limit before starting; mission done by coordinator in perf-trial-20260906-0303-data, report reports/perf-trial/lane-data.md</td></tr>
+</table>
+
+<h2>Measured, deliberately not changed (honest stops)</h2>
+<ul><li>Library JSONL load: 340ms / 216MB RSS on the 12MB archive (672ms / 540MB on the 22MB breadth archive). No consumer is on this path today (the app server uses SQLite and never holds the archive; collectors are network-bound; the old Workbench grocery project no longer exists). Speeding it up would mean weakening per-line hash verification - a data-integrity tradeoff for zero user-visible gain.</li>
+<li>Fuzzy product matching: 0.17s on fresh DBs, capped at 1000 candidates - already fast.</li>
+<li>local-archive-runner tests (~1.8s of the 2.8s suite): they exist to run the real shell script; faking the shell would weaken the guarantee.</li>
+<li>Server memory: 63MB RSS at boot, ~8MB live heap even with all six retailer deal caches populated (measured with forced GC). No leak, nothing to reclaim.</li></ul>
+
+<h2>Up next</h2>
+<ul><li>If deal freshness ever matters at sub-5-minute scale, wire the cache invalidation to a projection-DB mtime probe instead of the TTL (small change in src/server/handlers/public.js).</li>
+<li>Collector breadth lanes are network-bound (retailer pacing), not CPU-bound - out of scope by design.</li>
+<li>If a no-build asset pipeline ever lands, add content-hashed filenames so static assets can go immutable.</li>
+<li>Re-run the harness after each nightly archive growth: node tools/bench-server.js --reps 30 and node tools/bench-archive.js</li></ul>
+</body></html>

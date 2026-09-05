@@ -13,10 +13,15 @@ function setup() {
   return { dir, db };
 }
 
+// Cheaper scrypt cost for tests: register/verify stay self-consistent per
+// Auth instance, so semantics are unchanged without the production ~100ms cost.
+const TEST_SCRYPT = { N: 256, r: 8, p: 1 };
+
 function makeAuth(db, overrides = {}) {
   return new Auth(db, {
     sessionDurationMs: 24 * 60 * 60 * 1000,
     clock: () => Date.now(),
+    scryptOptions: TEST_SCRYPT,
     ...overrides,
   });
 }
@@ -254,6 +259,7 @@ describe('Auth', () => {
       const auth = new Auth(db, {
         sessionDurationMs: 1000,
         clock: () => fixedTime,
+        scryptOptions: { N: 256, r: 8, p: 1 },
       });
       await auth.register('Grace', 'password123');
       const { token } = await auth.login('Grace', 'password123');

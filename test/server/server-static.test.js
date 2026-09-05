@@ -1,31 +1,14 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync, readFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createPublicHandlers } from '../../src/server/handlers/public.js';
-import { createPrivateHandlers } from '../../src/server/handlers/private.js';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+import { request as httpRequest } from 'node:http';
+import { createStaticFallback } from '../../src/app/server.js';
 import { Server } from '../../src/server/server.js';
 import { AppDatabase } from '../../src/sqlite/app-db.js';
 import { Auth } from '../../src/app/auth.js';
-
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-};
-
-const SPNA_FALLBACK_ROUTES = ['/deals', '/browse', '/watchlist', '/saved', '/settings'];
-
-function isNavigationRoute(pathname) {
-  if (pathname === '/') return true;
-  return SPNA_FALLBACK_ROUTES.some(r => pathname === r || pathname.startsWith(r + '/'));
-}
 
 async function fetchText(url, options = {}) {
   const res = await fetch(url, options);
@@ -33,6 +16,27 @@ async function fetchText(url, options = {}) {
   return { status: res.status, headers: res.headers, body: text };
 }
 
+// Raw HTTP request: undici's fetch auto-decompresses gzip/br responses and
+// rewrites Accept-Encoding, which hides exactly what these tests assert.
+// Returns the untouched wire response.
+function rawRequest(port, path, { method = 'GET', headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, method, headers }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Uses the REAL createStaticFallback from src/app/server.js so tests exercise
+// the same code the production server runs.
 function createTestStaticServer(publicDir) {
   const tmp = mkdtempSync(join(tmpdir(), 'static-test-'));
   const staticDir = publicDir || join(tmp, 'public');
@@ -52,78 +56,7 @@ function createTestStaticServer(publicDir) {
   const auth = new Auth(appDb, { clock: () => Date.now() });
   const server = new Server({ appDb, auth });
 
-  server.setFallback((req, res, pathname, requestId) => {
-    try {
-      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      let filePathname = decodeURIComponent(url.pathname);
-
-      if (filePathname === '/' || filePathname === '') {
-        filePathname = '/index.html';
-      }
-
-      if (filePathname.includes('..') || filePathname.includes('\0')) {
-        res.writeHead(403, { 'content-type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-      }
-
-      const filePath = join(staticDir, filePathname);
-
-      if (!filePath.startsWith(staticDir)) {
-        res.writeHead(403, { 'content-type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-      }
-
-      if (existsSync(filePath) && statSync(filePath).isFile()) {
-        const ext = extname(filePath).toLowerCase();
-        const mime = MIME_TYPES[ext] || 'application/octet-stream';
-        const isCacheable = ext !== '.html';
-        const content = readFileSync(filePath);
-
-        const headers = {
-          'content-type': mime,
-          'x-content-type-options': 'nosniff',
-        };
-
-        if (isCacheable) {
-          headers['cache-control'] = 'public, max-age=3600';
-        } else {
-          headers['cache-control'] = 'no-cache';
-        }
-
-        if (req.method === 'HEAD') {
-          headers['content-length'] = content.length;
-          res.writeHead(200, headers);
-          res.end();
-          return;
-        }
-
-        res.writeHead(200, headers);
-        res.end(content);
-        return;
-      }
-
-      if (isNavigationRoute(filePathname)) {
-        const indexPath = join(staticDir, 'index.html');
-        if (existsSync(indexPath)) {
-          const content = readFileSync(indexPath);
-          res.writeHead(200, {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': 'no-cache',
-          });
-          res.end(content);
-          return;
-        }
-      }
-
-      res.writeHead(404, { 'content-type': 'text/plain' });
-      res.end('Not found');
-    } catch (err) {
-      res.writeHead(500, { 'content-type': 'text/plain' });
-      res.end('Internal error');
-    }
-  });
+  server.setFallback(createStaticFallback(staticDir, console));
 
   return {
     server, tmp, staticDir,
@@ -307,6 +240,163 @@ describe('static serving', () => {
       const port = await srv.server.start(0);
       const res = await fetchText(`http://127.0.0.1:${port}/safe%00`);
       assert.ok(res.status === 403 || res.status === 400, 'null byte should be rejected');
+    } finally {
+      await srv.close();
+    }
+  });
+});
+
+describe('static compression and conditional requests', () => {
+  function writeBigCss(dir) {
+    const css = `body { color: red; }\n${Array.from({ length: 200 }, (_, i) => `.rule-${i} { margin: ${i}px; padding: ${i}px; }`).join('\n')}\n`;
+    writeFileSync(join(dir, 'style.css'), css);
+    return css;
+  }
+
+  it('gzips when Accept-Encoding: gzip, with correct decoded body', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      const css = writeBigCss(srv.staticDir);
+      const res = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(res.headers['content-encoding'], 'gzip');
+      assert.equal(res.headers.vary, 'Accept-Encoding');
+      assert.ok(res.body.length < css.length, `compressed body should be smaller than raw, got ${res.body.length} vs ${css.length}`);
+      assert.equal(gunzipSync(res.body).toString(), css);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('prefers brotli when both brotli and gzip accepted', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      const css = writeBigCss(srv.staticDir);
+      const res = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'br, gzip' } });
+      assert.equal(res.headers['content-encoding'], 'br');
+      assert.ok(brotliDecompressSync(res.body).toString() === css);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('does not set content-encoding when no supported encoding accepted', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      const css = writeBigCss(srv.staticDir);
+      const res = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'deflate' } });
+      assert.equal(res.headers['content-encoding'], undefined);
+      assert.equal(res.body.toString(), css);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('honors q=0 as rejection', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      writeBigCss(srv.staticDir);
+      const res = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'gzip;q=0, br;q=0.5' } });
+      assert.equal(res.headers['content-encoding'], 'br');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('HEAD reports the encoded content-length without a body', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      writeBigCss(srv.staticDir);
+      const res = await rawRequest(port, '/style.css', { method: 'HEAD', headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(res.headers['content-encoding'], 'gzip');
+      assert.ok(Number(res.headers['content-length']) < writeBigCss(srv.staticDir).length);
+      assert.equal(res.body.length, 0);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('returns 304 for If-None-Match with the served etag, and stays 200 after file change', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      writeBigCss(srv.staticDir);
+      const first = await rawRequest(port, '/style.css');
+      const etag = first.headers.etag;
+      assert.match(etag, /^W\//, 'etag should be weak');
+
+      const notMod = await rawRequest(port, '/style.css', { headers: { 'if-none-match': etag } });
+      assert.equal(notMod.status, 304);
+      assert.equal(notMod.body.length, 0);
+
+      writeFileSync(join(srv.staticDir, 'style.css'), 'body { color: blue; }\n');
+      const changed = await rawRequest(port, '/style.css', { headers: { 'if-none-match': etag } });
+      assert.equal(changed.status, 200, 'mtime change must invalidate the etag');
+      assert.equal(changed.body.toString(), 'body { color: blue; }\n');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('matches etag weakly (W/ prefix ignored on comparison)', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      writeBigCss(srv.staticDir);
+      const first = await rawRequest(port, '/style.css');
+      // strip W/ and surrounding quotes -> send back a strong-looking etag
+      const opaque = first.headers.etag.replace(/^W\//, '').replace(/"/g, '');
+      const res = await rawRequest(port, '/style.css', { headers: { 'if-none-match': `"${opaque}"` } });
+      assert.equal(res.status, 304);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('does not compress files below the 256B threshold but still serves them', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      // default style.css is 19 bytes
+      const res = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'gzip, br' } });
+      assert.equal(res.headers['content-encoding'], undefined);
+      assert.equal(res.headers.vary, 'Accept-Encoding');
+      assert.equal(res.body.toString(), 'body { color: red; }');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('serves compressible repeated requests from the memory cache (stable content, no disk churn symptom)', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      writeBigCss(srv.staticDir);
+      const a = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'gzip' } });
+      const b = await rawRequest(port, '/style.css', { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(a.body.length, b.body.length);
+      assert.equal(a.headers.etag, b.headers.etag);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('SPA fallback serves index.html with etag and compression', async () => {
+    const srv = createTestStaticServer();
+    try {
+      const port = await srv.server.start(0);
+      // pad index.html over the compression threshold
+      writeFileSync(join(srv.staticDir, 'index.html'), `<html><body>SPA ${'x'.repeat(400)}</body></html>`);
+      const res = await rawRequest(port, '/deals', { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers['content-encoding'], 'gzip');
+      assert.equal(res.headers['cache-control'], 'no-cache');
+      assert.equal(res.headers['x-content-type-options'], 'nosniff');
+      assert.ok(gunzipSync(res.body).toString().includes('SPA'));
     } finally {
       await srv.close();
     }

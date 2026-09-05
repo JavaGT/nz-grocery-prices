@@ -1,4 +1,4 @@
-import { el, esc, clear } from '../utils/dom.js';
+import { el, clear } from '../utils/dom.js';
 import { formatCents, formatDate, formatShortDate, formatDropPercent, retailerLabel, retailerColor as rc } from '../utils/format.js';
 
 export function openDetailDialog(offer, api) {
@@ -17,12 +17,12 @@ export function openDetailDialog(offer, api) {
   }, '\u2715');
   panel.appendChild(closeBtn);
 
-  panel.appendChild(el('h2', { className: 'dialog-title' }, esc(offer.productName || 'Product')));
+  panel.appendChild(el('h2', { className: 'dialog-title' }, offer.productName || 'Product'));
 
   const meta = el('div', { className: 'dialog-meta' });
   const brandLabel = el('span', { className: 'pc-brandmark', style: `--brand-color:${rc(offer.retailer)}` }, retailerLabel(offer.retailer));
   meta.appendChild(brandLabel);
-  meta.appendChild(el('span', { className: 'dialog-store' }, esc(offer.storeName || '')));
+  meta.appendChild(el('span', { className: 'dialog-store' }, offer.storeName || ''));
   if (offer.priceKind) {
     const kindLabels = { regular: 'Shelf price', promo: 'Special', member: 'Member price' };
     meta.appendChild(el('span', { className: 'pc-kind' }, kindLabels[offer.priceKind] || offer.priceKind));
@@ -39,19 +39,19 @@ export function openDetailDialog(offer, api) {
   panel.appendChild(priceRow);
 
   if (offer.signalLabel) {
-    panel.appendChild(el('div', { className: 'dialog-signal' }, esc(offer.signalLabel)));
+    panel.appendChild(el('div', { className: 'dialog-signal' }, offer.signalLabel));
   }
 
   if (offer.promotionData) {
     const prom = typeof offer.promotionData === 'string' ? JSON.parse(offer.promotionData) : offer.promotionData;
     panel.appendChild(el('div', { className: 'dialog-promo' },
-      esc(prom.type || 'Promotion') + (prom.savePercent ? ` \u2014 save ${prom.savePercent}%` : '')
+      (prom.type || 'Promotion') + (prom.savePercent ? ` \u2014 save ${prom.savePercent}%` : '')
     ));
   }
 
   const source = el('div', { className: 'dialog-source' });
   source.appendChild(el('strong', {}, 'Price source'));
-  source.appendChild(el('span', {}, esc(offer.sourceLabel || 'Live collection')));
+  source.appendChild(el('span', {}, offer.sourceLabel || 'Live collection'));
   if (offer.observedAt) {
     source.appendChild(el('span', {}, `Observed ${formatRelativeTime(offer.observedAt)}`));
   }

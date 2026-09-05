@@ -108,6 +108,9 @@ export async function createTestServer({
   authOptions = {},
   skipProjDb = false,
   clock = Date.now,
+  // Handler tests insert data and immediately query it, so the deal cache is
+  // off unless a test opts in via this pass-through.
+  dealsCacheTtlMs = 0,
 } = {}) {
   const dir = tmpDir();
 
@@ -130,11 +133,17 @@ export async function createTestServer({
     if (typeof appDbInit === 'function') {
       appDbInit(appDb);
     }
-    const auth = new Auth(appDb, { sessionDurationMs: 86400000, ...authOptions });
+    // Cheap scrypt cost by default so register/login tests skip the ~100ms
+    // production KDF; tests can still override via authOptions.scryptOptions.
+    const auth = new Auth(appDb, {
+      sessionDurationMs: 86400000,
+      scryptOptions: { N: 256, r: 8, p: 1 },
+      ...authOptions,
+    });
 
     const server = new Server({ projDb, appDb, auth, clock });
     const now = clock();
-    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations });
+    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations, dealsCacheTtlMs });
     const privateHandlers = createPrivateHandlers({ auth, appDb, clock });
 
     server.get('/api/health', handlers.health);

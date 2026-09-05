@@ -121,17 +121,19 @@ describe('schema migrations', () => {
       applyProjectionMigrations(db);
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r => r.name);
       assert.ok(tables.includes('_meta'));
-      assert.ok(tables.includes('deal_signals'));
       assert.ok(tables.includes('import_runs'));
       assert.ok(tables.includes('offer_revisions'));
       assert.ok(tables.includes('price_contexts'));
-      assert.ok(tables.includes('product_matches'));
       assert.ok(tables.includes('product_revisions'));
       assert.ok(tables.includes('products'));
       assert.ok(tables.includes('retailers'));
       assert.ok(tables.includes('schema_migrations'));
       assert.ok(tables.includes('special_snapshots'));
       assert.ok(tables.includes('store_revisions'));
+      // Dead artifacts must NOT come back (AGENTS.md: deal_signals /
+      // product_matches are dead; matching truth lives in app.db).
+      assert.ok(!tables.includes('deal_signals'), 'deal_signals stays deleted');
+      assert.ok(!tables.includes('product_matches'), 'product_matches stays deleted');
       const views = db.prepare("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name").all().map(r => r.name);
       assert.ok(views.includes('price_observations'));
     } finally { db.close(); rmSync(dir, { recursive: true }); }

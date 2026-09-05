@@ -130,7 +130,13 @@ export async function createTestServer({
     if (typeof appDbInit === 'function') {
       appDbInit(appDb);
     }
-    const auth = new Auth(appDb, { sessionDurationMs: 86400000, ...authOptions });
+    // Cheap scrypt cost by default so register/login tests skip the ~100ms
+    // production KDF; tests can still override via authOptions.scryptOptions.
+    const auth = new Auth(appDb, {
+      sessionDurationMs: 86400000,
+      scryptOptions: { N: 256, r: 8, p: 1 },
+      ...authOptions,
+    });
 
     const server = new Server({ projDb, appDb, auth, clock });
     const now = clock();

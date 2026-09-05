@@ -78,7 +78,20 @@ the intended collection path. It runs PAK'nSAVE, New World, FreshChoice,
 Warehouse, and Woolworths into separate `data/breadth-pilot-*.jsonl` archives.
 
 The runner is `scripts/breadth-pilot-nightly.sh`, exposed as
-`npm run breadth:nightly`. Install
+`npm run breadth:nightly`. Since the 2026-09-05 perf campaign it runs four
+PARALLEL lanes (paknsave→newworld stay serial on the shared Foodstuffs host;
+freshchoice/warehouse/woolworths overlap on their own hosts), and page-0
+discovery checkpoints per archive with a 3-day TTL
+(`--force-discovery` bypasses it), so a steady-state freshchoice night drops
+from ~41 min to minutes. Shared breadth helpers live in
+`scripts/lib/breadth-helpers.js`; the facet-driven `foodstuffs-breadth.js`
+web collector was deleted (the mobile script is canonical; `breadth-passes.sh`
+now drives it, one banner per invocation). `scripts/purge-breadth-archive.js`
+removed 311 stray newworld records from the paknsave archive on 2026-09-05
+(backup: `data/breadth-pilot.jsonl.pre-newworld-purge`). Watch the BREADTH-14
+trial (foodstuffs at 3000 ms pacing) in the health log for a week. Open
+follow-up: BREADTH-13 sidecar index snapshot (issue #7, design notes there).
+Install
 `ops/nz.grocery-prices.breadth.daemon.plist.template` as a 3:30am LaunchDaemon
 when scheduling is wanted. It deliberately does not write the app's
 authoritative `data/prices.jsonl` archive.

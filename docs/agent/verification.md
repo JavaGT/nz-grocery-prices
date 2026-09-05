@@ -28,6 +28,8 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
 | `scripts/woolworths-breadth.js`, breadth gate | `node --test test/woolworths-breadth.test.js test/breadth-pilot-gate.test.js` |
 | `scripts/warehouse-breadth.js` + adapter, `scripts/lib/crawler.js` | `node --test test/warehouse-breadth.test.js test/crawler.test.js` |
 | `scripts/foodstuffs-mobile-breadth.js`, `scripts/freshchoice-breadth.js` | `node --test test/foodstuffs-mobile-breadth.test.js test/freshchoice-breadth.test.js` |
+| `scripts/lib/breadth-helpers.js` (shared breadth helpers, discovery TTL) | `node --test test/breadth-helpers.test.js` |
+| `scripts/purge-breadth-archive.js` (one-shot archive purge) | `node --test test/purge-breadth-archive.test.js` |
 | `scripts/breadth-pilot-nightly.sh` | `sh -n scripts/breadth-pilot-nightly.sh` |
 | `scripts/breadth-report.js` | `node --test test/breadth-report.test.js` |
 | `src/archive.js`, `src/analytics.js` | `node --test test/archive.test.js test/analytics.test.js` |

@@ -40,11 +40,11 @@ into the nightly breadth pipeline).
 | 18 | Computer Lounge | `computer-lounge` | PC hardware | Shopify products.json | implemented 2026-09-06 |
 | 19 | Kathmandu | `kathmandu` | outdoor | Shopify products.json | implemented 2026-09-06 |
 | 20 | Shoe Clinic | `shoe-clinic` | footwear | Shopify products.json | implemented 2026-09-06 |
-| 21 | Babycity | `babycity` | baby | custom | planned |
+| 21 | Babycity | `babycity` | baby | Odoo SSR grids (cookie session) | implemented 2026-09-06 |
 | 22 | Shosha | `shosha` | Asian grocery | Shopify products.json | implemented 2026-09-06 |
 | 23 | Oderings | `oderings` | garden | custom | planned |
 | 24 | Commonsense Organics | `commonsense-organics` | organic grocery | SilverStripe sitemap + JSON-LD PDPs | implemented 2026-09-06 |
-| 25 | Bin Inn | `bin-inn` | bulk foods | probe (custom) | planned |
+| 25 | Hammer Hardware | `hammer-hardware` | hardware | Shopify products.json | implemented 2026-09-06 |
 | 26 | Liquorland | `liquorland` | liquor | window.category JSON (?p=N) | implemented 2026-09-06 |
 | 27 | The Bottle-O | `the-bottle-o` | liquor | Rails SSR talker tiles | implemented 2026-09-06 |
 | 28 | Super Liquor | `super-liquor` | liquor | Algolia index (Id-sliced walk) | implemented 2026-09-06 |
@@ -64,7 +64,7 @@ into the nightly breadth pipeline).
 | 42 | Glassons | `glassons` | apparel | Black Pepper window.category JSON | implemented 2026-09-06 |
 | 43 | Animates | `animates` | pet supplies | Magento HTML grids | implemented 2026-09-06 |
 | 44 | Postie | `postie` | apparel | Black Pepper window.category JSON | implemented 2026-09-06 |
-| 45 | Number One Shoes | `number-one-shoes` | footwear | probe (custom) | planned |
+| 45 | Karen Walker | `karen-walker` | fashion | Shopify products.json | implemented 2026-09-06 |
 | 46 | Paper Plus | `paper-plus` | books/stationery | ASP.NET SSR tiles (tracking attrs) | implemented 2026-09-06 |
 | 47 | Whitcoulls | `whitcoulls` | books/stationery | eStar window.category JSON | implemented 2026-09-06 |
 | 48 | OfficeMax NZ | `officemax` | office supplies | sitemap + JSON-LD PDPs | implemented 2026-09-06 |
@@ -75,6 +75,8 @@ into the nightly breadth pipeline).
 
 | Retailer | Domain | Platform / note |
 |---|---|---|
+| Bin Inn | bininn.co.nz | category pages are marketing-only; no online product prices |
+| Number One Shoes + Hannahs | numberoneshoesandhannahs.co.nz | Vue3 client-rendered listings; PDP JSON-LD unverified |
 | Hallenstein Brothers | hallensteins.co.nz | custom/headless; /graphql 301s to .com 404, deep links redirect — needs browser-level capture |
 | The Sleep Store | thesleepstore.co.nz | Shopify (products.json blocked) |
 | Merchant 1948 | overlandfootwear.co.nz | Shopify (products.json blocked) |
@@ -132,4 +134,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **42 / 50** (5 existing + 37 implemented).
+Progress: **45 / 50** (5 existing + 40 implemented).

@@ -10,7 +10,7 @@ import { ShopifyCatalogClient } from "../_lib/shopify.js";
 export const RETAILER = {
   slug: "fluffy-puppy",
   name: "Fluffy Puppy",
-  origin: "https://fluffypuppypetstore.com/en-nz/",
+  origin: "https://fluffypuppypetstore.com/en-nz",
   platform: "shopify",
 };
 

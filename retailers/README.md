@@ -118,6 +118,86 @@ into the nightly breadth pipeline).
 | 98 | Nature Baby | `naturebaby` | baby clothing | Shopify products.json | implemented 2026-09-06 |
 | 99 | Workshop | `workshop` | denim & menswear | Shopify products.json | implemented 2026-09-06 |
 | 100 | Moochi | `moochi` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 101 | 99 Bikes | `99-bikes` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 102 | Aje NZ | `aje-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 103 | Amazon Surf | `amazon-surf` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 104 | Aurelium Jewellery | `aurelium` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 105 | Ballantynes | `ballantynes` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 106 | Base NZ | `base-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 107 | BePure | `bepure` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 108 | Bicycle Superstore | `bicycle-superstore` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 109 | Bloke & Co | `bloke-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 110 | Boh Runga Jewellery | `boh-runga` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 111 | Burkes Cycles | `burkes-cycles` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 112 | Chapman Store | `chapman-store` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 113 | ComplEat Wellness | `compleat-wellness` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 114 | Cutthroat NZ | `cutthroat` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 115 | Deadly Ponies | `deadly-ponies` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 116 | DK & Co | `dk-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 117 | Drop Out Store | `drop-out` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 118 | Easy Tiger | `easy-tiger` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 119 | Ecostore | `ecostore` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 120 | The Fantail House | `fantail-house` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 121 | Fix & Fogg | `fix-and-fogg` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 122 | Flo & Frankie | `flo-and-frankie` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 123 | Fluffy Puppy | `fluffy-puppy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 124 | Folklore Home | `folklore-home` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 125 | Freeride Surf & Skate | `freeride-surf-skate` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 126 | Furniture Now NZ | `furniture-now` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 127 | Furniture World NZ | `furniture-world` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 128 | Gearshop NZ | `gearshop` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 129 | Gordon Harris | `gordon-harris` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 130 | Hyde Boutique | `hyde-boutique` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 131 | Hyper Ride | `hyper-ride` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 132 | Icon Haircare & Beauty | `icon-haircare-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 133 | IKEA New Zealand | `ikea` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 134 | Juliette Hogan | `juliette-hogan` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 135 | Kiwivelo | `kiwivelo` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 136 | Kmart NZ | `kmart` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 137 | KNOWEAR | `knowear` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 138 | Kookai NZ | `kookai-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 139 | KOOP | `koop` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 140 | Kowtow NZ | `kowtow-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 141 | Lissom Beauty | `lissom-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 142 | LOADED | `loaded` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 143 | Made Good | `made-good` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 144 | ManCave NZ | `man-cave` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 145 | Marle | `marle` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 146 | Meadowlark Jewellery | `meadowlark` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 147 | NOAH Grooming | `noah-grooming` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 148 | Nutrition Warehouse NZ | `nutrition-warehouse` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 149 | NZ Liquor Online | `nz-liquor-online` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 150 | NZ Muscle | `nz-muscle` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 151 | NZ Shred | `nz-shred` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 152 | Outfitters NZ | `outfitters-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 153 | Overland Footwear | `overland-footwear` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 154 | Paper Plane Store | `paper-plane-store` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 155 | Paulas Home & Living | `paulas-home-living` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 156 | Pet Connect NZ | `pet-connect` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 157 | Pet Essentials Warehouse | `pet-essentials-warehouse` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 158 | Pet Factory | `pet-factory` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 159 | Pilgrim Jewellery NZ | `pilgrim-jewellery` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 160 | Playcentre Shop | `playcentre-shop` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 161 | Quest Store NZ | `quest-store` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 162 | Scorpion Supplements | `scorpion-supplements` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 163 | Sealand Gear | `sealand-gear` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 164 | Silk & Steel | `silk-and-steel` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 165 | Six Barrel Soda | `six-barrel-soda` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 166 | Sportsfuel Supplements | `sportsfuel` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 167 | Standard Issue | `standard-issue` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 168 | Superette NZ | `superette-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 169 | Supplements NZ | `supplements-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 170 | Taylorson | `taylorson` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 171 | Te Uru Shop | `te-uru-shop` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 172 | Thirsty Liquor | `thirsty-liquor` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 173 | Triumph & Disaster | `triumph-and-disaster` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 174 | Two Dudes | `two-dudes` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 175 | Ultimate Surf & Skate | `ultimate-surf-skate` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 176 | WhiskeyOnline | `whiskey-online` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 177 | Whisky and More | `whisky-and-more` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 178 | White & Co | `white-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 101 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 102 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
@@ -198,4 +278,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **GOAL MET 2026-09-06 (raised to 100)** — **101 working adapters** (5 existing + 96 campaign) across 102 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence).
+Progress: **GOAL MET 2026-09-06 (raised to 100, then +80)** — **181 working adapters** (5 existing + 176 campaign) across 182 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence). Registry gate: `test/retailers/retailer-registry.test.js` enforces ≥181.

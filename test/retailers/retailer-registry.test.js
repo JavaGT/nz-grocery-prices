@@ -43,15 +43,15 @@ test("every retailer folder exports a coherent RETAILER + createClient", async (
   }
 });
 
-test("the campaign tracks at least 100 retailers overall", async (t) => {
+test("the campaign tracks at least 181 retailers overall (100-goal + 80-more round)", async (t) => {
   // Existing adapters (src/adapters) count toward the 50: woolworths,
   // paknsave, newworld, freshchoice, warehouse.
   const EXISTING = 5;
   const folders = await retailerFolders();
   const total = folders.length + EXISTING;
-  if (total < 100) {
-    t.skip(`campaign in progress: ${total}/100 retailer adapters`);
+  if (total < 181) {
+    t.skip(`campaign in progress: ${total}/181 retailer adapters`);
     return;
   }
-  assert.ok(total >= 100, `campaign reports ${total}; need 100`);
+  assert.ok(total >= 181, `campaign reports ${total}; need 181`);
 });

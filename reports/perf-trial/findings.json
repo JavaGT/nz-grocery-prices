@@ -2,9 +2,9 @@
   "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 09:10 NZST",
-  "status": "running - wave 2",
-  "summary": "Wave 1 (merged to main): deals 107ms -> 0.26ms, page weight -75%, test suite 12.25s -> 2.6s, projection 17MB -> 15.6MB. Wave 2 so far: deals cache now invalidates immediately when the projection DB changes on disk, and the projection rebuild dropped from ~1.9s to 0.24s (8x) via prepared-statement reuse + a single transaction - output verified byte-identical. Scale-resilience lane still running.",
+  "updated": "2026-09-06 09:35 NZST",
+  "status": "wave 2 complete - awaiting owner review",
+  "summary": "Wave 2 complete (910 tests, 0 failures). Merged: (1) deals cache now drops immediately when the projection DB changes on disk; (2) projection rebuild 1.9s -> 0.24s (8x), byte-identical output; (3) cold deals compute ~18% cheaper per call and now O(90-day window) instead of O(total archive) via a new observed_at index - deal latency stays flat as the archive grows past 2x. All query paths verified flat at 2x archive scale (35k records): warm deals 0.33ms, search 1.6ms, boot 74ms.",
   "axes": [
     "speed",
     "CPU",
@@ -127,6 +127,15 @@
       "tradeoffs": "synchronous=OFF means a crash mid-rebuild could corrupt the temp DB - it was always discarded unpublished, so nothing real is exposed. The authoritative JSONL writer fsync semantics are untouched.",
       "verified": "Content-identity tool (rows, integer aggregates, schema, meta) says IDENTICAL vs a pre-change build; 116 sqlite tests + full suite 906 pass / 0 fail; caught in review: the identity tool initially lived in test/ where the runner executes it and fails - moved to tools/.",
       "commit": "47413f9 + review fix 1d759f3 (subagent lane, rate-limit-killed before receipt; coordinator verified and merged)"
+    },
+    {
+      "title": "Wave 2: cold deals compute -18% and made archive-age-independent",
+      "area": "server query path / scale resilience",
+      "what": "Scale-lane fix (subagent, reviewed): the per-request observation mapping no longer rebuilds ISO timestamp strings twice per row (archives have 5-31 distinct timestamps - now memoized) and parses promotion JSON only when attached. Coordinator adopted the lanes measured index: offer_revisions(observed_at) turns the 90-day window scan from a full-table scan + sort into a range seek.",
+      "beforeAfter": "Cold deals compute: 57.4 -> 46.2ms (current archive), 132.2 -> 116.7ms (2x, 35k records) - and the index caps it at O(90-day window): a simulated 4-month archive measured 63.9ms unindexed vs 32.3ms indexed, i.e. no longer grows with archive age. Warm paths flat at 2x scale (deals 0.33ms, search 1.6ms, boot 74ms).",
+      "tradeoffs": "Index costs +152KB on the current projection (296KB per 20k offer rows); rebuild time unchanged (0.28s). Deep pagination OFFSET walks stay linear by design (skipped - API semantics). Small per-call Map for ISO memoization.",
+      "verified": "New mapping output deep-equal to the old (dedicated test); full suite 910 pass / 0 fail on the merged branch; EXPLAIN shows range seek, no temp sort; benches at both scales.",
+      "commit": "c6e2cd5 (lane) + index adoption on wave branch"
     }
   ],
   "agents": [
@@ -141,6 +150,18 @@
       "area": "test suite speed, projection DB size",
       "status": "merged",
       "notes": "subagent was killed by a provider rate limit before starting; mission done by coordinator in perf-trial-20260906-0303-data, report reports/perf-trial/lane-data.md"
+    },
+    {
+      "name": "lane A2 (rebuild/ingest)",
+      "area": "projection rebuild speed",
+      "status": "merged",
+      "notes": "subagent rate-limit-killed before receipt; work verified, one defect fixed in review (tool misplaced under test/), merged"
+    },
+    {
+      "name": "lane B2 (2x-scale)",
+      "area": "query resilience at 2x archive",
+      "status": "merged",
+      "notes": "completed cleanly; found a bench-harness param bug (suggestions ?q= vs ?query= - earlier suggestion baselines were measuring a 400 fast-path, now fixed and re-measured: 0.86ms real)"
     }
   ],
   "stops": [

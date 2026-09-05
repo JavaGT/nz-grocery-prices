@@ -41,7 +41,7 @@ into the nightly breadth pipeline).
 | 19 | Kathmandu | `kathmandu` | outdoor | Shopify products.json | implemented 2026-09-06 |
 | 20 | Shoe Clinic | `shoe-clinic` | footwear | Shopify products.json | implemented 2026-09-06 |
 | 21 | Babycity | `babycity` | baby | custom | planned |
-| 22 | Kings Plant Barn | `kings-plant-barn` | garden | custom | planned |
+| 22 | Shosha | `shosha` | Asian grocery | Shopify products.json | implemented 2026-09-06 |
 | 23 | Oderings | `oderings` | garden | custom | planned |
 | 24 | Commonsense Organics | `commonsense-organics` | organic grocery | probe (custom) | planned |
 | 25 | Bin Inn | `bin-inn` | bulk foods | probe (custom) | planned |

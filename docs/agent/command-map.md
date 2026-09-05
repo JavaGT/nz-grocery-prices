@@ -21,6 +21,16 @@ suffices for collectors.
 | One test directory | `node --test test/sqlite/` |
 | Publishable file set | `npm run pack:check` |
 
+## Retailers campaign (50-retailer roster in `retailers/`)
+
+| Task | Command | Notes |
+|---|---|---|
+| Roster + per-retailer status | `sed -n '1,60p' retailers/README.md` | manifest with platform + verification notes |
+| Collect one retailer (page 1) | `node retailers/<slug>/collect.js --stdout --max-pages 1` | validates each record via `parseObservation` |
+| Collect to JSONL | `node retailers/<slug>/collect.js --out /tmp/<slug>.jsonl` | refuses the live archive (`assertNotLiveArchive`) |
+| Campaign tests | `node --test "test/retailers/*.test.js"` | family transforms + 50-retailer registry gate |
+| Cost-per-request adapters | `--page-size` / `--max-products` flags | pbtech, mitre-10, officemax, moore-wilsons (1 request per product) |
+
 ## Full checks
 
 | Task | Command | Notes |

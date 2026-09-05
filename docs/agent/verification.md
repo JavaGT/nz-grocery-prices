@@ -46,6 +46,11 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
   `storeRec` / `offerRec` to build records.
 - **Adapter logic test** → import the pure `to*Observation` / `parse*Products`
   function and pass hand-crafted fixture objects (see `test/adapters/*.test.js`).
+- **Retailers campaign test** → family tests in `test/retailers/` pass fixture
+  HTML/JSON through the `retailers/_lib/*` families and validate the result
+  with `parseObservation`; `retailer-registry.test.js` imports every
+  `retailers/<slug>/index.js` and asserts the RETAILER/createClient contract
+  (no network).
 - **Adapter network test** → construct the client with `{ fetch: stubFn,
   transport: "fetch" }` and `clock` for retry timing.
 - **SQLite / projection test** → temp dir + `new ProjectionRepository(tmpJsonl,

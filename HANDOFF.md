@@ -109,6 +109,39 @@ run (its offset manifest stalled the lane at 0 products while reporting
 healthy — `--resume` opts back in for crashed manual crawls). Gate state:
 `node scripts/breadth-pilot-gate.js` (3 consecutive healthy nights).
 
+## Retailers campaign — 50 NZ retailer scrapers (2026-09-06)
+
+`retailers/` holds a 50-retailer price·product scraper roster (goal: 50
+major NZ retailers, one subfolder each, all emitting canonical
+PriceObservation records). Status: **50/50 implemented and live-verified**;
+manifest + per-retailer evidence: `retailers/README.md`.
+
+- Pre-existing adapters (woolworths, paknsave, newworld, freshchoice,
+  warehouse) count as 5; 45 campaign adapters live in `retailers/<slug>/`
+  (index.js + collect.js + README.md).
+- Shared families in `retailers/_lib/`: shopify (15 + 3 later Shopify
+  stores), magento-graphql (rebel/briscoes shared backend, `Store` header),
+  html-grid (profile-driven SSR tile parser: hunting-fishing, animates,
+  macpac, supercheap, paper-plus, harvey-norman, the-bottle-o, pet-direct),
+  sfcc-updategrid + curl-transport (noel-leeming; Node fetch 403s — TLS
+  fingerprinting), next-data (bunnings __NEXT_DATA__/Coveo), algolia
+  (super-liquor; paginationLimitedTo workaround = Id-sliced numericFilters
+  walk), jsonld-pdp (officemax, commonsense, moore-wilsons; sitemap +
+  per-PDP), estar-category (liquorland, baby-factory, whitcoulls; spread
+  -payload window.category parser).
+- Runner contract: `collect.js --out F|--stdout [--max-pages] [--page-size]
+  [--max-observations]`; validates every record with `parseObservation`;
+  refuses the live archive. Cost-per-request adapters (mitre-10,
+  moore-wilsons, officemax) map --max-pages×--page-size to a product budget.
+- Blocked (evidence in manifest): Chemist Warehouse (FredHopper 500s to
+  curl; in-browser fetch works), Kmart + Farmers (Akamai), Four Square +
+  Gilmours (Foodstuffs NI mobile API now serves MNW only), Kings/Bin Inn/
+  Oderings (no online pricing discoverable via curl). Roster swaps are
+  recorded in the manifest.
+- Gates: `npm run check` includes `retailers/*`; `test/retailers/`
+  holds family + registry tests (registry asserts every folder's
+  RETAILER/createClient contract and the 50-total gate).
+
 ## Broader product/app state
 
 - Website first vertical slice: `/Users/server/Code/workbench/projects/grocery-prices` (**price•minder** redesign implemented).

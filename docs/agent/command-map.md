@@ -79,6 +79,16 @@ v1 whole-observation records are refused everywhere in the hot path:
 | Breadth report | `npm run breadth:report` | Read-only report from the latest breadth health log and pilot archives; writes `reports/breadth-report-<NZ-date>.md`, never calls retailer APIs. |
 | Install breadth schedule | `sudo sh ops/install-breadth-daemon.sh` | Installs the 3:30am macOS LaunchDaemon; requires an interactive administrator password. |
 
+## Benchmarks (perf campaign 2026-09-06)
+
+| Task | Command | Measures | Needs |
+|---|---|---|---|
+| Server endpoint latency | `npm run bench` | cold boot, per-endpoint p50/p95, deals burst (tools/bench-server.js) | a built projection DB (`data/prices.db` — build with `npm run build-db`; override with `JSONL_PATH`/`PRICES_DB` env) |
+| Archive load / RAM | `npm run bench:archive` | JsonlObservationRepository load time + RSS, full calculateSales pass (tools/bench-archive.js) | `data/prices.jsonl` (override with `--jsonl <path>`) |
+
+Both are read-only against the archive and safe to run anytime; they never
+call retailer APIs. Re-run after each nightly archive growth to watch trends.
+
 ## Known slow / side-effecting checks
 
 - `test/local-archive-runner.test.js` — runs the real shell script with a fake npm (no network, no real archive).

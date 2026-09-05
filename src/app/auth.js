@@ -21,6 +21,10 @@ export class Auth {
     this.db = appDb;
     this.sessionDurationMs = options.sessionDurationMs ?? DAY_MS;
     this._now = options.clock ?? (() => Date.now());
+    // Injectable for tests: register and verify always use the SAME options
+    // on one instance, so a cheaper cost is self-consistent there. Production
+    // keeps the hardened default below.
+    this._scryptOpts = options.scryptOptions ?? SCRYPT_OPTS;
   }
 
   async register(username, password) {
@@ -108,7 +112,7 @@ export class Auth {
 
   _scrypt(password, salt, keylen) {
     return new Promise((resolve, reject) => {
-      scrypt(password, salt, keylen, SCRYPT_OPTS, (err, key) => {
+      scrypt(password, salt, keylen, this._scryptOpts, (err, key) => {
         if (err) reject(err);
         else resolve(key);
       });

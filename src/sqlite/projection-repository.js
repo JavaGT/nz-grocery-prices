@@ -156,6 +156,9 @@ export class ProjectionRepository {
 
     try {
       tmpDb = new DatabaseSync(tmpPath);
+      // page_size must be set before WAL locks it in; 8192 packs the
+      // revision tables' text payloads with less per-page overhead.
+      tmpDb.exec('PRAGMA page_size=8192');
       tmpDb.exec('PRAGMA journal_mode=WAL');
       tmpDb.exec('PRAGMA foreign_keys=ON');
 

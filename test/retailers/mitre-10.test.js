@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mapDetail, parseShardProductUrls } from "../../retailers/mitre-10/index.js";
+import { buildObservation } from "../../retailers/_lib/observation.js";
 import { parseObservation } from "../../src/domain/observation.js";
 
 test("parseShardProductUrls extracts /p/<code> URLs from sitemap XML", () => {
@@ -14,7 +15,7 @@ test("parseShardProductUrls extracts /p/<code> URLs from sitemap XML", () => {
 });
 
 test("mapDetail maps OCC detail with promo and brand", () => {
-  const observation = mapDetail({
+  const spec = mapDetail({
     code: "52375",
     name: "Sinkers",
     brandName: "Kumho",
@@ -23,6 +24,7 @@ test("mapDetail maps OCC detail with promo and brand", () => {
     canonicalUrl: "/shop/kumho-sinkers-6oz/p/52375",
     images: [{ url: "/medias/sys_master/productimages/x/y/img.jpg" }],
   });
+  const observation = buildObservation({ ...spec, observedAt: "2026-09-06T00:00:00.000Z" });
   parseObservation(observation);
   assert.equal(observation.product.id, "mitre-10:52375");
   assert.equal(observation.product.brand, "Kumho");

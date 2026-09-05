@@ -132,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **38 / 50** (5 existing + 33 implemented).
+Progress: **42 / 50** (5 existing + 37 implemented).

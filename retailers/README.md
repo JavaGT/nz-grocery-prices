@@ -199,6 +199,20 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 210 | Clever Poppy | `clever-poppy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 211 | ILoveUgly | `iloveugly` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 212 | Kids Ride Shotgun | `kids-ride-shotgun` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 213 | Little Bird Organics | `little-bird-organics` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 214 | Love That Leaf | `love-that-leaf` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 215 | Moodi Blends | `moodi-blends` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 216 | Nothing Naughty | `nothing-naughty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 217 | The New Zealand Honey Co | `nz-honey-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 218 | Porter James Sports | `porter-james-sports` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 219 | Question Beauty | `question-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 220 | The Sewing Revival | `sewing-revival` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 221 | Swiftpoint | `swiftpoint` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 222 | UP Dairy | `up-dairy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 223 | Wilson & Dorset | `wilson-dorset` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 209 | Book Hound | `book-hound` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 207 | Unity Books | `unity-books` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 208 | Wardini Books | `wardini` | general retail | Shopify products.json | implemented 2026-09-06 |

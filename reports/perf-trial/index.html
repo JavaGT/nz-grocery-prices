@@ -52,7 +52,7 @@
     <table class="kv">
       <tr><th>Area</th><td>server / deals pipeline (speed + CPU)</td></tr>
       <tr><th>Before → After</th><td><b>p50 107.4ms -&gt; 0.26ms warm (~400x); cold cache-fill request unchanged ~150ms. 8-way burst was 8.5 req/s serialized - now bounded by JSON output only.</b></td></tr>
-      <tr><th>Trade-offs</th><td>Deal feed can be up to 5 minutes staler than a full recompute. In practice prices only change when the projection DB is rebuilt nightly, so real staleness is unchanged. RAM cost: one cached deal array per retailer (a few hundred KB worst case).</td></tr>
+      <tr><th>Trade-offs</th><td>Deal feed can be up to 5 minutes staler than a full recompute (in practice prices only change on the nightly rebuild, so real staleness is unchanged). Memory measured with forced GC: server boots at ~63MB RSS; with all 6 retailer deal universes cached, live heap is only ~8MB total - RSS may climb to ~160MB transiently during a compute, but the uncached path had the identical spike on EVERY request. DEALS_CACHE_TTL_MS=0 restores exact old behavior.</td></tr>
       <tr><th>Verified by</th><td>6 new unit tests (TTL, per-retailer keys, filter/limit, tier no-mutation) + full suite 854 pass / 0 fail; bench-server before/after</td></tr>
       <tr><th>Commit</th><td><code>de17fdd</code></td></tr>
     </table>
@@ -91,6 +91,6 @@
 
 <h2>Up next</h2>
 <ul><li>Lane B (web): gzip + ETag + smarter cache headers; SPA network audit - review + merge when the subagent reports</li>
-<li>Coordinator wave 2: library JSONL load time + RAM (PriceArchive / archive-index) - the hosted app reads JSONL directly, so load speed is user-visible there</li>
-<li>Wave 2 candidates: JSONL append/compact path CPU, server RSS measurement, freshchoice/foodstuffs collector pacing unaffected (live network is the bottleneck there, out of scope)</li></ul>
+<li>MEASURED, NO CHANGE (honest stop): library JSONL load via JsonlObservationRepository = 340ms / 216MB RSS for the 12MB archive (672ms / 540MB for the 22MB breadth archive). No app is on this path today: the app server uses the SQLite projection (never holds the archive), collectors run once nightly where network minutes dominate, and the Workbench app has no grocery-prices project anymore (stale HANDOFF note). Cutting load time would mean weakening per-line hash verification - a data-integrity tradeoff for zero user-visible gain.</li>
+<li>Wave 2 candidates: collector-facing archive-index work only if a consumer reappears; server RSS already measured (63MB boot / 8MB live heap with full deals cache)</li></ul>
 </body></html>

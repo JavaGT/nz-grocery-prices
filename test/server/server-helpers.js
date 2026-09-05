@@ -108,6 +108,9 @@ export async function createTestServer({
   authOptions = {},
   skipProjDb = false,
   clock = Date.now,
+  // Handler tests insert data and immediately query it, so the deal cache is
+  // off unless a test opts in via this pass-through.
+  dealsCacheTtlMs = 0,
 } = {}) {
   const dir = tmpDir();
 
@@ -134,7 +137,7 @@ export async function createTestServer({
 
     const server = new Server({ projDb, appDb, auth, clock });
     const now = clock();
-    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations });
+    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations, dealsCacheTtlMs });
     const privateHandlers = createPrivateHandlers({ auth, appDb, clock });
 
     server.get('/api/health', handlers.health);

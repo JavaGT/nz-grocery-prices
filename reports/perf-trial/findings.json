@@ -2,9 +2,9 @@
   "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 09:35 NZST",
-  "status": "wave 2 complete - awaiting owner review",
-  "summary": "Wave 2 complete (910 tests, 0 failures). Merged: (1) deals cache now drops immediately when the projection DB changes on disk; (2) projection rebuild 1.9s -> 0.24s (8x), byte-identical output; (3) cold deals compute ~18% cheaper per call and now O(90-day window) instead of O(total archive) via a new observed_at index - deal latency stays flat as the archive grows past 2x. All query paths verified flat at 2x archive scale (35k records): warm deals 0.33ms, search 1.6ms, boot 74ms.",
+  "updated": "2026-09-06 09:40 NZST",
+  "status": "running - wave 3",
+  "summary": "Waves 1-2 are merged to main (910 tests, 0 failures). Wave 3 targets the remaining headroom: (1) prove/fix latency at 5-10x archive scale - a 150k-record synthetic archive - because 52 new retailer adapters are about to grow the data; (2) cut warm-path CPU: /api/deals currently re-stringifies and re-gzips identical JSON on every request, and brotli was never evaluated for API bodies; (3) frontend first-load waterfall audit. Two subagent lanes running on disjoint files.",
   "axes": [
     "speed",
     "CPU",

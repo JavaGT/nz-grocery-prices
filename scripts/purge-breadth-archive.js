@@ -15,7 +15,7 @@
  *     --retailer newworld
  */
 
-import { copyFile, open, rename, stat } from "node:fs/promises";
+import { copyFile, open, rename, rm, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
@@ -83,6 +83,16 @@ export async function purgeArchive(file, retailer) {
   await stat(target); // throws if missing
 
   const backupPath = `${target}.pre-${retailer}-purge`;
+  try {
+    await stat(backupPath);
+    throw new Error(
+      `Backup already exists at ${backupPath}; move it away before ` +
+        `re-running so a repeated purge cannot overwrite the pre-purge ` +
+        `snapshot with already-purged content.`,
+    );
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   await copyFile(target, backupPath);
 
   const tmpPath = `${target}.purge-tmp`;
@@ -107,13 +117,15 @@ export async function purgeArchive(file, retailer) {
       await handle.write(line + "\n");
       kept += 1;
     }
+    await handle.sync();
   } catch (error) {
-    await handle.close();
-    await rename(backupPath, target).catch(() => {});
+    // The target was never touched (writes go to the tmp file); drop the
+    // partial tmp file and keep both the target and the backup intact.
+    await rm(tmpPath, { force: true }).catch(() => {});
     throw error;
+  } finally {
+    await handle.close();
   }
-  await handle.sync();
-  await handle.close();
   await rename(tmpPath, target);
 
   return { backupPath, kept, purged, invalidLines };

@@ -237,7 +237,14 @@ export async function crawlStore({
         if (thunk.kind === "drill") {
           if (result.maxPage > 1 && products.length > 0) {
             const id = taskId(store.slug, thunk.categoryPath, 1);
-            if (!completed.has(id) && !planned.has(id)) {
+            // TTL-aware spawn guard: a continuation page crawled within the
+            // discovery TTL is skipped; past the TTL the category re-walks
+            // fully, so prices and new products on pages >= 1 surface within
+            // the TTL too (BREADTH-7).
+            if (
+              !discoveryFresh(completed, id, observedAt, discoveryTtlMs) &&
+              !planned.has(id)
+            ) {
               planned.add(id);
               spawned.push({
                 kind: "leaf",
@@ -250,7 +257,10 @@ export async function crawlStore({
           }
         } else if (thunk.kind === "leaf" && hasNext) {
           const id = taskId(store.slug, thunk.categoryPath, nextPage);
-          if (!completed.has(id) && !planned.has(id)) {
+          if (
+            !discoveryFresh(completed, id, observedAt, discoveryTtlMs) &&
+            !planned.has(id)
+          ) {
             planned.add(id);
             spawned.push({
               kind: "leaf",
@@ -386,6 +396,7 @@ export async function crawlStore({
     uniqueCount: seen.size,
     pagesFetched,
     emptyPages,
+    seededDiscovery: initial.length,
     skippedDiscovery,
     sitemapCategories: categoryUrls.length,
     warnings,
@@ -639,17 +650,24 @@ export async function runCollection(options = {}) {
     }
   }
 
-  // The product floor only binds on nights that ran discovery: a TTL-skip
-  // night fetches little by design, and the discovery TTL guarantees a
-  // full-coverage night at least every DEFAULT_DISCOVERY_TTL_MS, where a
-  // broken catalogue still fails the floor and resets the gate streak.
+  // Strict product floor binds whenever this crawl ran ANY discovery
+  // (seededDiscovery > 0): partial-discovery and truncated-sitemap nights
+  // must fail until a complete discovery lands. The exemption is only for
+  // pure skip nights (every category fresh, nothing to see): the discovery
+  // TTL guarantees a full-coverage night at least every
+  // DEFAULT_DISCOVERY_TTL_MS, where a broken catalogue fails the floor and
+  // resets the gate streak. Residual gap: a sitemap truncated to entries
+  // that are all fresh also reads as a pure skip night; TTL re-discovery
+  // catches that within the TTL.
   const unhealthy =
     storeResults.some(
       (result) =>
         result.budgetExhausted ||
         result.error ||
         ((result.uniqueCount ?? 0) < minExpectedProducts &&
-          !result.skippedDiscovery),
+          !(
+            result.skippedDiscovery > 0 && result.seededDiscovery === 0
+          )),
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -666,6 +684,8 @@ export async function runCollection(options = {}) {
       uniqueProducts: result.uniqueCount,
       pagesFetched: result.pagesFetched,
       sitemapCategories: result.sitemapCategories,
+      seededDiscovery: result.seededDiscovery,
+      skippedDiscovery: result.skippedDiscovery,
       emptyPages: result.emptyPages,
       budgetExhausted: result.budgetExhausted,
       ...(result.error ? { error: result.error } : {}),

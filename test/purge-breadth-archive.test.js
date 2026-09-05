@@ -45,14 +45,15 @@ describe("purge-breadth-archive", () => {
       assert.equal(purged.length, 2);
       assert.ok(!purged.join("").includes("newworld"));
 
-      // Backup preserves the pre-purge contents (4 records + 1 invalid line).
+      // A second run refuses: a repeated purge must never overwrite the
+      // pre-purge backup with already-purged content.
+      await assert.rejects(
+        () => purgeArchive(file, "newworld"),
+        /Backup already exists/,
+      );
+      // The refused run left both the target and the original backup intact.
       const backup = (await readFile(first.backupPath, "utf8")).trim().split("\n");
       assert.equal(backup.length, 5);
-
-      // Second run is a no-op but still takes a backup first.
-      const second = await purgeArchive(file, "newworld");
-      assert.equal(second.purged, 0);
-      assert.equal(second.kept, 2);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

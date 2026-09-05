@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -681,6 +681,138 @@ describe("end-to-end runCollection (FreshChoice, fake transport)", () => {
         forced.urls.some((u) => u.endsWith("/category/bakery")),
         `expected forced page-0 refetch, got: ${forced.urls.join(", ")}`,
       );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("re-walks all pages of a multi-page category past the TTL", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-ttl-pages-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      function makeTransport(pageScript) {
+        const urls = [];
+        const transport = fakeTransport({
+          stores: storeCardHtml([
+            {
+              name: "Testville",
+              origin: "https://testville.store.freshchoice.co.nz",
+            },
+          ]),
+          sitemapCategories: ["bakery"],
+          pageScript,
+        });
+        return {
+          transport: async (url, init) => {
+            urls.push(String(url));
+            return transport(url, init);
+          },
+          urls,
+        };
+      }
+      const basePages = {
+        "bakery:0": catHtmlWithPages([product("1")], 3),
+        "bakery:1": catHtmlWithPages([product("2")], 1),
+        "bakery:2": catHtmlWithPages([product("3")], 1),
+      };
+      const common = {
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1,
+        log: () => {},
+        collectWarning: () => {},
+      };
+
+      const run1 = await runCollection({
+        ...common,
+        transport: makeTransport(basePages).transport,
+        file,
+        observedAt: "2026-09-01T00:00:00.000Z",
+      });
+      assert.equal(run1.healthy, true);
+      assert.equal(run1.stores[0].uniqueProducts, 3);
+
+      // Within the TTL: nothing fetches.
+      const fresh = makeTransport(basePages);
+      const run2 = await runCollection({
+        ...common,
+        transport: fresh.transport,
+        file,
+        observedAt: "2026-09-02T00:00:00.000Z",
+      });
+      assert.equal(run2.healthy, true);
+      assert.deepEqual(
+        fresh.urls.filter((u) => u.includes("/category/")),
+        [],
+      );
+
+      // Past the TTL a NEW product sits on page 1: the re-discovery night
+      // must re-walk pages 1..2 as well, or page>=1 prices freeze forever.
+      const stalePages = {
+        ...basePages,
+        "bakery:1": catHtmlWithPages([product("2"), product("9")], 1),
+      };
+      const stale = makeTransport(stalePages);
+      const run3 = await runCollection({
+        ...common,
+        transport: stale.transport,
+        file,
+        observedAt: "2026-09-05T00:00:00.000Z",
+      });
+      assert.equal(run3.healthy, true);
+      assert.ok(
+        stale.urls.some((u) => u.includes("/category/bakery?page=1")),
+        `expected page 1 re-walk, got: ${stale.urls.join(", ")}`,
+      );
+      assert.equal(run3.stores[0].uniqueProducts, 4);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("strict floor binds on a partial-discovery night", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fc-breadth-partial-"));
+    try {
+      const file = join(dir, "breadth-pilot-fc.jsonl");
+      // Bakery is fresh in the manifest; produce is not. The night runs
+      // discovery for produce only (seededDiscovery=1, skippedDiscovery=1),
+      // so the strict product floor must bind despite the skip.
+      await writeFile(
+        `${file}.breadth-manifest.json`,
+        JSON.stringify({
+          version: 1,
+          updatedAt: "2026-09-02T00:00:00.000Z",
+          completed: {
+            "testville:cat=bakery:page0": "2026-09-02T00:00:00.000Z",
+          },
+        }),
+      );
+      const transport = fakeTransport({
+        stores: storeCardHtml([
+          {
+            name: "Testville",
+            origin: "https://testville.store.freshchoice.co.nz",
+          },
+        ]),
+        sitemapCategories: ["bakery", "produce"],
+        pageScript: {
+          "bakery:0": catHtmlWithPages([product("1")], 1),
+          "produce:0": catHtmlWithPages([product("2")], 1),
+        },
+      });
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 99,
+        observedAt: "2026-09-03T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+      assert.equal(summary.stores[0].skippedDiscovery, 1);
+      assert.equal(summary.stores[0].seededDiscovery, 1);
+      assert.equal(summary.healthy, false);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

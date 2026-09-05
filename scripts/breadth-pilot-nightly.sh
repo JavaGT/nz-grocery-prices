@@ -62,7 +62,7 @@ summary_line() {
       } catch {
         // Collectors crash without a summary on transient network failures;
         // surface the TAIL of stdout/stderr context passed before the JSON
-        // attempt instead of an opaque 'unparseable' marker.
+        // attempt instead of an opaque unparseable marker.
         console.log(JSON.stringify({
           healthy: false,
           error: "no summary",

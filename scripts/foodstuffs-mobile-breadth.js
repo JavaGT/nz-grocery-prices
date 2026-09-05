@@ -21,7 +21,7 @@
  *
  * Requests are paced INSIDE MobileFoodstuffsClient (delayMs) and flow
  * over a bare injected transport — see the transport note in runCollection.
- * as foodstuffs-breadth.js — the injected fetch is the crawler bridge, so
+ * as scripts/lib/breadth-helpers.js — the injected fetch is the crawler bridge, so
  * every HTTP call (auth included) becomes a crawler task sharing one
  * per-host pacing slot.
  */
@@ -202,7 +202,7 @@ export function continuationPages(envelope, label = "") {
   return pages;
 }
 
-// ---- crawler bridge (same pattern as foodstuffs-breadth.js) ---------------
+// ---- crawler bridge (same pattern as scripts/lib/crawler.js) --------------
 
 function budgetError(limit) {
   const error = new Error(
@@ -487,7 +487,13 @@ export async function crawlStore({
           const pages = continuationPages(envelope, thunk.id);
           for (const page of pages) {
             const id = taskId(store.id, thunk.categoryPath, page);
-            if (!completed.has(id) && !planned.has(id)) {
+            // TTL-aware spawn guard (BREADTH-8): pages crawled within the
+            // discovery TTL are skipped; past the TTL they re-fetch so
+            // prices and new products on pages >= 1 surface within the TTL.
+            if (
+              !discoveryFresh(completed, id, observedAt, discoveryTtlMs) &&
+              !planned.has(id)
+            ) {
               planned.add(id);
               spawned.push({
                 kind: "leaf",
@@ -629,6 +635,7 @@ export async function crawlStore({
     uniqueCount: seen.size,
     pagesFetched,
     emptyPages,
+    seededDiscovery: initial.length,
     skippedDiscovery,
     treeCategories: tree.length,
     warnings,
@@ -642,7 +649,7 @@ export async function crawlStore({
 // ---- orchestration -------------------------------------------------------
 
 /**
- * Parse CLI argv into options. Same flags as foodstuffs-breadth.js but with
+ * Parse CLI argv into options. Same flags as the freshchoice collector but with
  * delay-ms default 5000.
  */
 export function parseArgs(argv) {
@@ -752,11 +759,6 @@ export async function runCollection(options = {}) {
   // bare sequential fetches flowed fine, so pacing lives in the client
   // (delayMs) and the crawl engine stays untouched.
   let wireRequests = 0;
-  const pacingTransport =
-    delayMs > 0
-      ? undefined // pacing is enforced inside the client via delayMs
-      : transport;
-  void pacingTransport;
   const client = new MobileFoodstuffsClient({
     banner: retailer === "newworld" ? "MNW" : "PNS",
     fetch: (...args) => {
@@ -889,10 +891,13 @@ export async function runCollection(options = {}) {
     }
   }
 
-  // The product floor only binds on nights that ran discovery: a TTL-skip
-  // night fetches little by design, and the discovery TTL guarantees a
-  // full-coverage night at least every DEFAULT_DISCOVERY_TTL_MS, where a
-  // broken catalogue still fails the floor and resets the gate streak.
+  // Strict product floor binds whenever this crawl ran ANY discovery
+  // (seededDiscovery > 0): partial-discovery and truncated-tree nights
+  // must fail until a complete discovery lands. The exemption is only for
+  // pure skip nights (every node fresh, nothing to see): the discovery
+  // TTL guarantees a full-coverage night at least every
+  // DEFAULT_DISCOVERY_TTL_MS, where a broken catalogue fails the floor and
+  // resets the gate streak.
   const unhealthy =
     storeResults.some(
       (result) =>
@@ -900,7 +905,9 @@ export async function runCollection(options = {}) {
         result.error ||
         result.incompleteCoverage ||
         ((result.uniqueCount ?? 0) < minExpectedProducts &&
-          !result.skippedDiscovery),
+          !(
+            result.skippedDiscovery > 0 && result.seededDiscovery === 0
+          )),
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -917,6 +924,8 @@ export async function runCollection(options = {}) {
       uniqueProducts: result.uniqueCount,
       pagesFetched: result.pagesFetched,
       treeCategories: result.treeCategories,
+      seededDiscovery: result.seededDiscovery,
+      skippedDiscovery: result.skippedDiscovery,
       emptyPages: result.emptyPages,
       budgetExhausted: result.budgetExhausted,
       incompleteCoverage: result.incompleteCoverage,

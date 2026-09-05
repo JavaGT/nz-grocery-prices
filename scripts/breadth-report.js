@@ -89,6 +89,11 @@ function applyLine(stats, line) {
     stats.invalidLines += 1;
     return;
   }
+  // Valid JSON that is not an object (null, 42, "str") is a bad line too.
+  if (!record || typeof record !== "object") {
+    stats.invalidLines += 1;
+    return;
+  }
   if (record.type in stats.types) stats.types[record.type] += 1;
   if (record.productId) stats.products.add(record.productId);
   if (record.offerId) stats.offers.add(record.offerId);

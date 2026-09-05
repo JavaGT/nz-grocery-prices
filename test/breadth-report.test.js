@@ -61,6 +61,8 @@ describe("breadth report", () => {
         JSON.stringify({ version: 2, type: "offer", offerId: "fc:o1", productId: "fc:p1", storeId: "fc:s1", observedAt: "2026-09-01T00:00:00Z" }),
         JSON.stringify({ type: "store", storeId: "fc:s1", observedAt: "2026-09-03T00:00:00Z" }),
         "not json",
+        "null",
+        "42",
         "",
       ].join("\n");
       await writeFile(file, text);
@@ -74,7 +76,7 @@ describe("breadth report", () => {
       );
       assert.equal(streamed.observedAtMin, "2026-09-01T00:00:00Z");
       assert.equal(streamed.observedAtMax, "2026-09-03T00:00:00Z");
-      assert.equal(streamed.invalidLines, 1);
+      assert.equal(streamed.invalidLines, 3);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

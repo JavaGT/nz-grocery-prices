@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 09:40 NZST · <b>status: running - wave 3</b> · auto-refreshes every 5 min</p>
-<div class="banner">Waves 1-2 are merged to main (910 tests, 0 failures). Wave 3 targets the remaining headroom: (1) prove/fix latency at 5-10x archive scale - a 150k-record synthetic archive - because 52 new retailer adapters are about to grow the data; (2) cut warm-path CPU: /api/deals currently re-stringifies and re-gzips identical JSON on every request, and brotli was never evaluated for API bodies; (3) frontend first-load waterfall audit. Two subagent lanes running on disjoint files.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 10:15 NZST · <b>status: running - wave 3 (1 of 2 lanes merged)</b> · auto-refreshes every 5 min</p>
+<div class="banner">Wave 3: the 10x-scale lane merged - a synthetic 244k-record archive (14.2x current offers) was bench end to end: every endpoint flat except cold deals (617ms at 14x = linear row work, semantics fixed by design), and the hot SQL dropped ~37% by removing dead column reads. A products(updated_at) index made default listing 65x faster at scale. Wire/warm-path lane still running.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -127,6 +127,18 @@
       <tr><th>Trade-offs</th><td>Index costs +152KB on the current projection (296KB per 20k offer rows); rebuild time unchanged (0.28s). Deep pagination OFFSET walks stay linear by design (skipped - API semantics). Small per-call Map for ISO memoization.</td></tr>
       <tr><th>Verified by</th><td>New mapping output deep-equal to the old (dedicated test); full suite 910 pass / 0 fail on the merged branch; EXPLAIN shows range seek, no temp sort; benches at both scales.</td></tr>
       <tr><th>Commit</th><td><code>c6e2cd5 (lane) + index adoption on wave branch</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#8 · Wave 3: 14x-scale proof + dead-column SQL audit + listing index <span class="pill "></span></h3>
+    <p>Built a 244k-record / 148.7MB synthetic archive (3 shifted copies of the breadth pilots, all inside the 90-day deals window). Benched every endpoint, then removed provably unread columns from the hot SELECTs: rev_hash/offer_key/context_id + the retailers JOIN from the deals window query, promotion_data/source_data from product detail, source_data from history, SELECT * -&gt; explicit columns in listing. Coordinator adopted the lanes measured products(updated_at DESC) index.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server query path at scale (speed)</td></tr>
+      <tr><th>Before → After</th><td><b>Deals window SQL 420ms -&gt; 264ms raw (37%) at 133k offers; cold /api/deals 707 -&gt; 617ms at 14.2x scale (vs 40ms today at 1x - linear, cache-amortized). Product listing ORDER BY updated_at: 1.95ms -&gt; 0.03ms at 37k products. Everything else flat at 14x: search 7.4ms, suggestions 2.7ms, history 0.4ms, boot 72ms.</b></td></tr>
+      <tr><th>Trade-offs</th><td>Dropping the retailers JOIN could only change output if a context existed without a retailer row (rebuild-impossible). Response key sets are now pinned by exact-key contract tests + a SELECT-list audit test so future drift fails loudly. Index costs +180KB; rebuild unchanged (0.25s). At ~500k in-window offers the next lever is pre-materialization, which DECISIONLOG forbids (deals are runtime-computed by rule).</td></tr>
+      <tr><th>Verified by</th><td>917 pass / 0 fail on the merged branch; EXPLAIN-verified index use; new handler-sql-audit + exact-key contract tests; rebuild 0.25s, DB +180KB.</td></tr>
+      <tr><th>Commit</th><td><code>0aee7ab (lane E3) + index adoption on wave branch</code></td></tr>
     </table>
   </div>
 

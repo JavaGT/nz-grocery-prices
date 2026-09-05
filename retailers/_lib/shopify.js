@@ -107,14 +107,14 @@ export class ShopifyCatalogClient {
   }
 
   /** One page of the full published catalog. */
-  async listProducts({ page = 1, limit = DEFAULT_LIMIT } = {}) {
-    return parseShopifyProducts(await this.#productsJson("/products.json", page, limit));
+  async listProducts({ page = 1, pageSize = DEFAULT_LIMIT } = {}) {
+    return parseShopifyProducts(await this.#productsJson("/products.json", page, pageSize));
   }
 
   /** One page of a single collection by handle. */
-  async listCategory(handle, { page = 1, limit = DEFAULT_LIMIT } = {}) {
+  async listCategory(handle, { page = 1, pageSize = DEFAULT_LIMIT } = {}) {
     return parseShopifyProducts(
-      await this.#productsJson(`/collections/${encodeURIComponent(handle)}/products.json`, page, limit),
+      await this.#productsJson(`/collections/${encodeURIComponent(handle)}/products.json`, page, pageSize),
     );
   }
 
@@ -135,15 +135,15 @@ export class ShopifyCatalogClient {
    * Walk the full catalog into validated PriceObservations. Stops at the
    * first short page; dedupes by product id.
    */
-  async collectProducts({ maxPages = Number.POSITIVE_INFINITY, limit = DEFAULT_LIMIT, observedAt } = {}) {
+  async collectProducts({ maxPages = Number.POSITIVE_INFINITY, pageSize = DEFAULT_LIMIT, observedAt } = {}) {
     const store = this.getStore();
     const seen = new Map();
     for (let page = 1; page <= maxPages; page += 1) {
-      const products = await this.listProducts({ page, limit });
+      const products = await this.listProducts({ page, pageSize });
       for (const product of products) {
         if (!seen.has(product.id)) seen.set(product.id, product);
       }
-      if (products.length < limit || page >= maxPages) break;
+      if (products.length < pageSize || page >= maxPages) break;
     }
     return [...seen.values()].flatMap((product) =>
       toShopifyObservations(product, store, { observedAt }),

@@ -39,7 +39,7 @@ function parseArgs(argv) {
 function usage(slug) {
   return (
     `usage: node retailers/${slug}/collect.js (--out FILE | --stdout) ` +
-    `[--max-pages N] [--limit N] [--category HANDLE] [--query TERM] [--page-size N]`
+    `[--max-pages N] [--page-size N] [--max-observations N] [--category HANDLE] [--query TERM] [--origin URL] [--force]`
   );
 }
 
@@ -51,6 +51,10 @@ function usage(slug) {
  * or searchProducts({query, ...}) plus listCategory({handle, ...}) — the
  * runner picks based on flags: --query -> searchProducts, --category ->
  * listCategory, otherwise collectProducts.
+ *
+ * Flags map onto client options: --max-pages bounds pagination, --page-size
+ * bounds each request, --max-observations slices the result (runner-side,
+ * after collection).
  */
 export async function runCollect(ctx, importMeta) {
   const slug = ctx.RETAILER.slug;
@@ -62,16 +66,13 @@ export async function runCollect(ctx, importMeta) {
   }
 
   const maxPages = args["max-pages"] ? Number(args["max-pages"]) : undefined;
-  const limit = args.limit ? Number(args.limit) : undefined;
   const pageSize = args["page-size"] ? Number(args["page-size"]) : undefined;
+  const maxObservations = args["max-observations"] ? Number(args["max-observations"]) : undefined;
   const options = {
     ...(maxPages !== undefined ? { maxPages } : {}),
-    ...(limit !== undefined ? { limit } : {}),
     ...(pageSize !== undefined ? { pageSize } : {}),
   };
 
-  // Only pass defined overrides — an explicit `origin: undefined` would
-  // clobber each retailer's default origin through the options spread.
   const client = ctx.createClient(
     args.origin === undefined ? {} : { origin: args.origin },
   );
@@ -85,6 +86,7 @@ export async function runCollect(ctx, importMeta) {
   } else {
     throw new TypeError(`${slug} client exposes neither collectProducts nor searchProducts`);
   }
+  if (maxObservations !== undefined) observations = observations.slice(0, maxObservations);
 
   const valid = observations.map((observation) => parseObservation(observation));
   if (!args.stdout) {

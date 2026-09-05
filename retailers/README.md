@@ -58,11 +58,11 @@ into the nightly breadth pipeline).
 | 36 | Bunnings NZ | `bunnings` | hardware | Next.js + custom API | planned |
 | 37 | Briscoes | `briscoes` | homeware | probe (custom) | planned |
 | 38 | Rebel Sport | `rebel-sport` | sports | probe (custom) | planned |
-| 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento | planned |
+| 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento HTML grids (GraphQL dead) | implemented 2026-09-06 |
 | 40 | Macpac | `macpac` | outdoor | SFCC | planned |
 | 41 | Supercheap Auto NZ | `supercheap-auto` | auto parts | SFCC | planned |
 | 42 | Glassons | `glassons` | apparel | probe (custom) | planned |
-| 43 | Hallenstein Brothers | `hallensteins` | apparel | Magento | planned |
+| 43 | Animates | `animates` | pet supplies | Magento HTML grids | implemented 2026-09-06 |
 | 44 | Postie | `postie` | apparel | probe (custom) | planned |
 | 45 | Number One Shoes | `number-one-shoes` | footwear | probe (custom) | planned |
 | 46 | Paper Plus | `paper-plus` | books/stationery | probe (custom) | planned |
@@ -75,7 +75,7 @@ into the nightly breadth pipeline).
 
 | Retailer | Domain | Platform / note |
 |---|---|---|
-| Animates | animates.co.nz | Magento |
+| Hallenstein Brothers | hallensteins.co.nz | custom/headless; /graphql 301s to .com 404, deep links redirect — needs browser-level capture |
 | Babycity | babycity.co.nz | custom |
 | Kings Plant Barn | kings.co.nz | custom |
 | Oderings | oderings.co.nz | custom |
@@ -122,4 +122,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **20 / 50** (5 existing + 15 implemented).
+Progress: **22 / 50** (5 existing + 17 implemented).

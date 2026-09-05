@@ -121,7 +121,7 @@ test("collectProducts walks until a short page and dedupes by product id", async
       };
     },
   });
-  const observations = await client.collectProducts({ limit: 2 });
+  const observations = await client.collectProducts({ pageSize: 2 });
   const ids = observations.map((o) => o.product.id).sort();
   assert.deepEqual(ids, ["shopexample:3002", "shopexample:9001"].sort());
 });

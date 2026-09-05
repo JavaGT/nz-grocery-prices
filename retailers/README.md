@@ -198,6 +198,7 @@ into the nightly breadth pipeline).
 | 178 | White & Co | `white-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
 | 101 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 102 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
@@ -241,7 +242,9 @@ into the nightly breadth pipeline).
   HTTP 500 to curl even with exact browser URL/headers; in-browser fetch
   succeeds (session/TLS dependent). Needs browser-graded collection.
 - **Kmart NZ / Farmers** — Akamai bot manager 403/404s all non-browser
-  requests (verified 2026-09-06).
+  requests (verified 2026-09-06). Kmart later cracked via Constructor.io.
+- **HyperDrive** — listing data was client-rendered; cracked 2026-09-06 via
+  the server-rendered category grids (adapter now implemented).
 
 ## Excluded after probing
 

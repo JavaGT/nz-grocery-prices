@@ -9,6 +9,7 @@
  */
 
 import { BROWSER_UA } from "./http.js";
+import { fetchWithRetry } from "../../src/adapters/fetch-with-retry.js";
 import { buildObservation, toCents } from "./observation.js";
 
 const CATEGORY_TREE_QUERY = `{
@@ -103,7 +104,10 @@ export class MagentoGraphqlClient {
   }
 
   async graphql(query, variables = {}) {
-    const response = await this.#fetch(this.origin + "/graphql", {
+    const response = await fetchWithRetry(this.origin + "/graphql", {
+      fetch: this.#fetch,
+      timeout: this.#timeout,
+      retry: this.#retry,
       method: "POST",
       headers: { ...this.headers, "content-type": "application/json" },
       body: JSON.stringify({ query, variables }),

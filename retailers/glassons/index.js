@@ -3,8 +3,8 @@
  *
  * Platform: Black Pepper (same stack as Liquorland/Postie) — category pages
 embed the full payload as `window.category = { ...{...} }`. The `/nz`
-prefix selects the NZ store view (locale "nz", NZD prices). Grid pagination
-is client-side (infinite scroll), so the walk covers page 1 per category.
+prefix selects the NZ store view (locale "nz", NZD prices). Grid pages
+paginate server-side (?p=N), walked via pageParam.
  * Verified live 2026-09-06 (see README.md).
  */
 
@@ -32,6 +32,8 @@ export function createClient(options = {}) {
     origin: RETAILER.origin,
     scopeName: "Glassons NZ Online",
     categories: options.categories ?? CATEGORIES,
+    // Server-side ?p=N paging verified live (p2 mostly disjoint from p1).
+    pageParam: options.pageParam ?? "p",
     ...options,
   });
 }

@@ -20,10 +20,11 @@ export const RETAILER = {
 /** Map a nopCommerce-in-Algolia hit to an observation spec. */
 export function mapHit(hit) {
   const priceValue = Number(hit?.ProductPrice?.PriceValue);
-  const regularCents = Number.isFinite(priceValue) ? toCents(priceValue) : undefined;
-  if (regularCents === undefined || regularCents <= 0) return undefined;
+  const currentCents = Number.isFinite(priceValue) ? toCents(priceValue) : undefined;
+  if (currentCents === undefined || currentCents <= 0) return undefined;
   const oldValue = Number(hit?.ProductPrice?.OldPriceValue);
   const oldCents = Number.isFinite(oldValue) ? toCents(oldValue) : undefined;
+  const onSale = oldCents !== undefined && oldCents > currentCents;
   const skuDigits = String(hit?.Sku ?? "").replace(/\D/g, "");
   return {
     retailerProductId: String(hit?.Id ?? hit?.objectID ?? ""),
@@ -31,8 +32,8 @@ export function mapHit(hit) {
     name: hit?.Name,
     ...(skuDigits.length >= 6 && skuDigits.length <= 14 ? { gtin: skuDigits } : {}),
     image: hit?.PictureModels?.[0]?.ImageUrl ?? hit?.AutoCompleteImageUrl ?? undefined,
-    regularCents,
-    ...(oldCents !== undefined && oldCents > regularCents ? { promoCents: regularCents } : {}),
+    regularCents: onSale ? oldCents : currentCents,
+    ...(onSale ? { promoCents: currentCents } : {}),
   };
 }
 

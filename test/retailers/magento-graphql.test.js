@@ -29,6 +29,19 @@ test("mapMagentoItem maps final/regular price pairs", () => {
   assert.equal(mapMagentoItem({ id: 1, name: "x", price_range: { minimum_price: { final_price: { value: 0 } } } }, store), undefined);
 });
 
+test("graphql() honors the timeout seam (aborts a hanging fetch)", async () => {
+  const client = new MagentoGraphqlClient({
+    slug: "rsexample",
+    origin: "https://rsexample.co.nz",
+    categories: ["clearance"],
+    timeout: 20,
+    fetch: (_url, init) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    }),
+  });
+  await assert.rejects(() => client.listCategoryTree(), /abort/);
+});
+
 function stubClient(responses) {
   return new MagentoGraphqlClient({
     slug: "rsexample",

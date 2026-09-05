@@ -61,6 +61,22 @@ test("mapEstarItem maps variant prices, brand, and skips junk barcodes", () => {
   assert.equal(spec.promoCents, 1299);
 });
 
+test("live-shaped variant: boolean saleprice is not a price; variant hidewasprice suppresses promo", () => {
+  const store = { retailer: "llexample", scopeId: "online", name: "LL", origin: "https://llexample.co.nz" };
+  const item = {
+    ...ITEM,
+    stylecolour: {
+      ...ITEM.stylecolour,
+      variants: [
+        { unitprice: "12.99", saleprice: false, originalunitprice: "14.99", hidewasprice: true },
+      ],
+    },
+  };
+  const spec = mapEstarItem(item, store);
+  assert.equal(spec.regularCents, 1299);
+  assert.equal(spec.promoCents, undefined);
+});
+
 test("EstarCategoryClient walks server-paginated categories and stops on duplicates", async () => {
   const makeItem = (id) => ({
     ...ITEM,

@@ -101,6 +101,54 @@ test("parseHtmlTile drops tiles missing identity, name, or price", () => {
   assert.equal(parseHtmlTile(HF_TILE.replace(/data-price-amount="[\d.]+"/g, 'data-price-amount=""'), HF_PROFILE), undefined);
 });
 
+test("collectProducts keeps absolute tile URLs and labels leading-slash categories", async () => {
+  const tile = `<li class="product-item">
+    <a title="Abs Product" href="https://hf.example/abs-1" class="product-item-link">
+      <img src="https://hf.example/media/abs.jpg" alt="x">
+      <span class="product-item-link__name main">Abs Product</span>
+    </a>
+    <div class="price-box" data-product-id="880001">
+      <span><span data-price-amount="20.00" data-price-type="finalPrice"><span class="price">$20.00</span></span></span>
+    </div>
+  </li>`;
+  const client = new HtmlGridClient({
+    slug: "hfexample",
+    origin: "https://hf.example",
+    categories: ["/shop/art-craft"],
+    profile: HF_PROFILE,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: { get: () => undefined },
+      body: { getReader: undefined },
+      text: async () => tile,
+    }),
+  });
+  const observations = await client.collectProducts({ maxPages: 1, observedAt: "2026-09-06T00:00:00.000Z" });
+  assert.equal(observations.length, 1);
+  for (const observation of observations) parseObservation(observation);
+  assert.equal(observations[0].source.url, "https://hf.example/abs-1");
+  assert.deepEqual(observations[0].product.categories, ["art-craft"]);
+});
+
+test("parseHtmlTile tolerates single-quoted anchors and rejects data: placeholder images", () => {
+  const single = `<li class="product-item">
+    <a title='Single Quote' href='https://hf.example/sq-1' class='product-item-link'>
+      <img data-src='https://hf.example/media/sq.jpg' src='data:image/gif;base64,AAA' alt="x">
+      <span class="product-item-link__name main">Single Quote</span>
+    </a>
+    <div class="price-box" data-product-id="880002">
+      <span><span data-price-amount="9.99" data-price-type="finalPrice"><span class="price">$9.99</span></span></span>
+    </div>
+  </li>`;
+  const tiles = parseHtmlTiles(`<div>${single}</div>`, { ...HF_PROFILE, image: true });
+  assert.equal(tiles.length, 1);
+  assert.equal(tiles[0].url, "https://hf.example/sq-1");
+  assert.equal(tiles[0].name, "Single Quote");
+  assert.equal(tiles[0].image, "https://hf.example/media/sq.jpg");
+});
+
 test("HtmlGridClient walks categories, stops on no-new-tiles, emits valid observations", async () => {
   const pages = {
     "/hunting?p=1": HF_TILE + HF_TILE.replace(/727671/g, "727672"),

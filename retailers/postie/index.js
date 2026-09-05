@@ -33,6 +33,8 @@ export function createClient(options = {}) {
     origin: RETAILER.origin,
     scopeName: "Postie Online",
     categories: options.categories ?? CATEGORIES,
+    // Server-side ?p=N paging verified live (womens ?p=2 disjoint).
+    pageParam: options.pageParam ?? "p",
     ...options,
   });
 }

@@ -1,7 +1,7 @@
 /**
  * Whitcoulls — NZ retailer.
  *
- * Platform: eStar storefront with window.category JSON (page 1 per category).
+ * Platform: eStar storefront with window.category JSON (?p=N paging).
  * Verified live 2026-09-06 (see README.md).
  */
 
@@ -30,6 +30,8 @@ export function createClient(options = {}) {
     origin: RETAILER.origin,
     scopeName: "Whitcoulls Online",
     categories: options.categories ?? CATEGORIES,
+    // Server-side ?p=N paging verified live (art-craft ?p=2 disjoint).
+    pageParam: options.pageParam ?? "p",
     ...options,
   });
 }

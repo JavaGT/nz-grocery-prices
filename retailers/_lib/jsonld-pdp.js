@@ -25,7 +25,9 @@ export function parseJsonLdProducts(html) {
     } catch {
       continue;
     }
-    const nodes = Array.isArray(parsed) ? parsed : [parsed, ...(parsed?.["@graph"] ?? [])];
+    const graph = parsed?.["@graph"];
+    const graphNodes = Array.isArray(graph) ? graph : graph ? [graph] : [];
+    const nodes = Array.isArray(parsed) ? parsed : [parsed, ...graphNodes];
     for (const node of nodes) {
       const type = node?.["@type"];
       const types = Array.isArray(type) ? type : [type];
@@ -37,7 +39,27 @@ export function parseJsonLdProducts(html) {
 
 /** Map one JSON-LD Product node to a buildObservation spec (minus store). */
 export function jsonLdProductSpec(product) {
-  const price = toCents(Number(product?.offers?.price ?? product?.offers?.priceSpecification?.price));
+  // offers can be a single Offer, an array of Offers (take the cheapest
+  // in-stock-ish one), or an AggregateOffer with lowPrice. Each offer may
+  // carry price directly or inside priceSpecification (also possibly an
+  // array). Raw values go straight to toCents so "$5.14" strings parse.
+  const offers = Array.isArray(product?.offers)
+    ? product.offers
+    : product?.offers
+      ? [product.offers]
+      : [];
+  const offerPrices = offers.map((offer) => {
+    if (offer?.["@type"] === "AggregateOffer" && offer?.lowPrice != null) {
+      return toCents(offer.lowPrice);
+    }
+    const spec = Array.isArray(offer?.priceSpecification)
+      ? offer.priceSpecification[0]
+      : offer?.priceSpecification;
+    return toCents(offer?.price ?? spec?.price);
+  }).filter((cents) => cents !== undefined && cents > 0);
+  const highPrices = offers.map((offer) => toCents(offer?.highPrice)).filter((cents) => cents !== undefined && cents > 0);
+  const price = offerPrices.length ? Math.min(...offerPrices) : undefined;
+  const was = highPrices.length ? Math.max(...highPrices) : undefined;
   const name = typeof product?.name === "string" ? product.name.trim() : undefined;
   if (!name || price === undefined || price <= 0) return undefined;
   const brandName =
@@ -51,7 +73,8 @@ export function jsonLdProductSpec(product) {
     brand: typeof brandName === "string" && brandName ? brandName : undefined,
     gtin: gtin.length >= 8 && gtin.length <= 14 ? gtin : undefined,
     image: typeof image === "string" ? image : undefined,
-    regularCents: price,
+    regularCents: was !== undefined && was > price ? was : price,
+    ...(was !== undefined && was > price ? { promoCents: price } : {}),
   };
 }
 

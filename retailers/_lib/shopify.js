@@ -38,11 +38,15 @@ export function toShopifyObservations(product, store, options = {}) {
 
   return variants
     .map((variant) => {
-      const regularCents = toCents(variant.compare_at_price ?? variant.price);
-      const promoCents = variant.compare_at_price != null ? toCents(variant.price) : undefined;
-      // compare_at absent means no discount: regular is the live price.
-      const base = variant.compare_at_price != null ? regularCents : toCents(variant.price);
-      if (base === undefined || base <= 0) return undefined;
+      // The live price is authoritative. compare_at is only a was-price
+      // when it parses AND sits above the live price — inverted or junk
+      // values are ignored instead of mispricing regular or killing the
+      // variant.
+      const priceCents = toCents(variant.price);
+      if (priceCents === undefined || priceCents <= 0) return undefined;
+      const wasCents = variant.compare_at_price != null ? toCents(variant.compare_at_price) : undefined;
+      const onSale = wasCents !== undefined && wasCents > priceCents;
+      const base = onSale ? wasCents : priceCents;
       return buildObservation({
         slug: store.retailer,
         storeId: store.scopeId,
@@ -57,7 +61,7 @@ export function toShopifyObservations(product, store, options = {}) {
         categories,
         image,
         regularCents: base,
-        ...(promoCents !== undefined && promoCents < base ? { promoCents } : {}),
+        ...(onSale ? { promoCents: priceCents } : {}),
         observedAt: options.observedAt,
       });
     })

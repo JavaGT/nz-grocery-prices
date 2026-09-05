@@ -101,6 +101,31 @@ test("multi-variant products emit one observation per variant", () => {
   for (const observation of observations) parseObservation(observation);
 });
 
+test("inverted compare_at is ignored: regular stays at the live price", () => {
+  const [observation] = toShopifyObservations(
+    productFixture({
+      variants: [{ id: 9003, price: "29.90", compare_at_price: "19.90", barcode: null }],
+    }),
+    STORE,
+  );
+  parseObservation(observation);
+  assert.equal(observation.price.regularCents, 2990);
+  assert.equal(observation.price.promoCents, undefined);
+  assert.equal(observation.promotion, undefined);
+});
+
+test("junk compare_at falls back to the live price instead of dropping the variant", () => {
+  const [observation] = toShopifyObservations(
+    productFixture({
+      variants: [{ id: 9004, price: "10.00", compare_at_price: "free", barcode: null }],
+    }),
+    STORE,
+  );
+  parseObservation(observation);
+  assert.equal(observation.price.regularCents, 1000);
+  assert.equal(observation.price.promoCents, undefined);
+});
+
 test("collectProducts walks until a short page and dedupes by product id", async () => {
   const pages = [
     [productFixture(), productFixture({ id: 222, handle: "b", variants: [{ id: 3002, price: "5.00" }] })],

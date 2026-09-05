@@ -18,6 +18,13 @@ export function decodeEntities(value = "") {
     .replaceAll("&quot;", '"')
     .replaceAll("&#39;", "'")
     .replaceAll("&apos;", "'")
+    .replaceAll("&rsquo;", "'")
+    .replaceAll("&lsquo;", "'")
+    .replaceAll("&ldquo;", '"')
+    .replaceAll("&rdquo;", '"')
+    .replaceAll("&hellip;", "…")
+    .replaceAll("&mdash;", "—")
+    .replaceAll("&ndash;", "–")
     .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
@@ -44,11 +51,13 @@ function firstCapture(slice, patterns) {
 }
 
 function anchorTag(slice, className) {
-  return slice.match(new RegExp(`<a\\b[^>]*class="[^"]*${className}[^"]*"[^>]*>`))?.[0];
+  if (!className) return undefined;
+  return slice.match(new RegExp(`<a\\b[^>]*class=(?:"[^"]*${className}[^"]*"|'[^']*${className}[^']*')[^>]*>`))?.[0];
 }
 
 function attribute(tag, name) {
-  return tag?.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+  return tag?.match(new RegExp(`${name}="([^"]*)"`))?.[1]
+    ?? tag?.match(new RegExp(`${name}='([^']*)'`))?.[1];
 }
 
 /**
@@ -99,10 +108,11 @@ export function parseHtmlTile(slice, profile) {
     ...(profile.image
       ? {
           // Lazy-loading themes use data-src for the real image; src is
-          // often a base64 placeholder.
-          image:
-            firstCapture(slice, [/<img[^>]*\bdata-src="([^"]+)"/, /<img[^>]*\bdata-src='([^']+)'/]) ??
-            firstCapture(slice, [/<img[^>]*\ssrc="([^"]+)"/]),
+          // often a base64 placeholder — never emit data: URIs.
+          image: [
+            firstCapture(slice, [/<img[^>]*\bdata-src="([^"]+)"/, /<img[^>]*\bdata-src='([^']+)'/]),
+            firstCapture(slice, [/<img[^>]*\ssrc="([^"]+)"/, /<img[^>]*\ssrc='([^']+)'/]),
+          ].find((src) => src && !src.startsWith("data:")),
         }
       : {}),
   };
@@ -184,7 +194,9 @@ export class HtmlGridClient {
     const store = this.getStore();
     const seen = new Map(); // tile id -> { tile, category label }
     for (const category of this.categories) {
-      const label = decodeEntities(category.split("?")[0].split("/")[0].replace(/^\//, ""));
+      const label = decodeEntities(
+        category.replace(/^\//, "").split("?")[0].split("/").filter(Boolean).pop() ?? "",
+      );
       for (let page = 1; page <= maxPages; page += 1) {
         let tiles;
         try {
@@ -217,8 +229,10 @@ export class HtmlGridClient {
         storeName: store.name,
         origin: store.origin,
         retailerProductId: tile.id,
-        url: tile.url && !/^https?:\/\//.test(tile.url)
-          ? `${store.origin}/${tile.url.replace(/^\//, "")}`
+        url: tile.url
+          ? (/^https?:\/\//.test(tile.url)
+            ? tile.url
+            : `${store.origin}/${tile.url.replace(/^\//, "")}`)
           : this.profile.urlFromId
             ? `${store.origin}${this.profile.urlFromId.replace("{id}", tile.id)}`
             : undefined,

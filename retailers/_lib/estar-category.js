@@ -4,8 +4,9 @@
  * Several NZ storefronts (Liquorland, Baby Factory, Whitcoulls) embed the
  * whole category payload as `window.category = {...}` in a script tag:
  * items[] with productid/description/variants[].unitprice and friends.
- * Liquorland paginates server-side (?p=N); pure eStar sites load deeper
- * pages client-side, so without a pageParam only page 1 is walked.
+ * Category pages paginate server-side (?p=N); pass pageParam: "p" to walk
+ * past page 1 (verified live on liquorland, baby-factory, whitcoulls,
+ * glassons, postie, number-one-shoes).
  */
 
 import { BROWSER_UA, getText } from "./http.js";
@@ -71,6 +72,10 @@ export function parseEstarItems(json) {
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+function isPriced(value) {
+  return typeof value === "number" || (typeof value === "string" && value.trim() !== "");
+}
+
 function firstPricedVariant(item) {
   // Liquorland/eStar nest the variant array under stylecolour.
   const variants = Array.isArray(item?.variants)
@@ -78,7 +83,7 @@ function firstPricedVariant(item) {
     : Array.isArray(item?.stylecolour?.variants)
       ? item.stylecolour.variants
       : [];
-  return variants.find((v) => v?.unitprice != null || v?.saleprice != null) ?? variants[0];
+  return variants.find((v) => isPriced(v?.unitprice) || isPriced(v?.saleprice)) ?? variants[0];
 }
 
 /** Default item → buildObservation spec mapping for the eStar family. */
@@ -89,7 +94,8 @@ export function mapEstarItem(item, store) {
   const name = item?.description ?? item?.name;
   if (id === undefined || !name || current === undefined || current <= 0) return undefined;
   const wasRaw = variant?.originalunitprice ?? variant?.baseunitprice;
-  const was = item?.hidewasprice ? undefined : toCents(wasRaw);
+  const hideWas = variant?.hidewasprice ?? item?.hidewasprice;
+  const was = hideWas ? undefined : toCents(wasRaw);
   const urlPath = item?.url ?? (item?.stylecolour?.urlkey ? `${item.stylecolour.urlkey}` : undefined);
   // Barcode fields are only trusted as GTINs at EAN-8/13 lengths — some
   // retailers (Liquorland) keep 6-digit stock codes in the same field.

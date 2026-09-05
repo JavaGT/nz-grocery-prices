@@ -1,4 +1,4 @@
-import { el, esc, clear } from '../utils/dom.js';
+import { el, clear } from '../utils/dom.js';
 import { formatDate } from '../utils/format.js';
 import { createSkeletonCard, createEmptyState, createErrorState } from '../components/card.js';
 
@@ -64,8 +64,8 @@ export function renderSaved(container, api) {
     for (const s of searches) {
       const item = el('div', { className: 'saved-item' });
       const info = el('div', { className: 'saved-info' });
-      info.appendChild(el('strong', {}, esc(s.name)));
-      info.appendChild(el('span', { className: 'saved-query' }, esc(s.queryText)));
+      info.appendChild(el('strong', {}, s.name));
+      info.appendChild(el('span', { className: 'saved-query' }, s.queryText));
       if (s.createdAt) {
         info.appendChild(el('span', { className: 'saved-date' }, `Saved ${formatDate(s.createdAt)}`));
       }

@@ -1,4 +1,4 @@
-import { el, esc, clear, delegate, qs } from '../utils/dom.js';
+import { el, clear, qs } from '../utils/dom.js';
 import { formatCents, formatShortDate, formatRelativeTime, retailerLabel } from '../utils/format.js';
 import { createProductCard, createSkeletonCard, createEmptyState, createErrorState } from '../components/card.js';
 import { openDetailDialog } from '../components/detail-dialog.js';
@@ -104,9 +104,9 @@ export function renderBrowse(container, api, params) {
       resultsInfo.innerHTML = '';
       if (state.query) {
         if (total === 0) {
-          resultsInfo.appendChild(el('span', { className: 'quiet' }, `No products found for \u201c${esc(state.query)}\u201d`));
+          resultsInfo.appendChild(el('span', { className: 'quiet' }, `No products found for \u201c${state.query}\u201d`));
         } else {
-          resultsInfo.appendChild(el('span', {}, `\u201c${esc(state.query)}\u201d \u2014 ${total} product${total !== 1 ? 's' : ''}`));
+          resultsInfo.appendChild(el('span', {}, `\u201c${state.query}\u201d \u2014 ${total} product${total !== 1 ? 's' : ''}`));
         }
       } else if (total > 0) {
         resultsInfo.appendChild(el('span', { className: 'quiet' }, `${total} products`));
@@ -151,11 +151,7 @@ export function renderBrowse(container, api, params) {
     pushState();
   }
 
-  if (state.query || state.retailer || state.category) {
-    load();
-  } else {
-    load();
-  }
+  load();
 
   const input = qs('.browse-search input', container);
   if (input) {

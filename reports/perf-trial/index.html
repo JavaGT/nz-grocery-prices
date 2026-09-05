@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="300">
+<title>Performance Campaign — perf-trial-20260906-0303</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Helvetica Neue", sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1.2rem 4rem; line-height: 1.5; }
+  h1 { margin-bottom: 0.1rem; } h2 { margin-top: 2.2rem; border-bottom: 1px solid #8884; padding-bottom: 0.25rem; }
+  .meta { color: #888; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0.6rem 0; }
+  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+  th { color: #888; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.92em; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 0.9rem 1.1rem; margin: 0.9rem 0; }
+  .card h3 { margin: 0 0 0.4rem; }
+  .kv { margin: 0; } .kv th { width: 130px; text-transform: none; font-size: 0.9rem; letter-spacing: 0; }
+  .pill { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 0.05rem 0.6rem; vertical-align: middle; background: #8882; }
+  .pill.merged, .pill.done, .pill.pass { background: #2e7d3240; }
+  .pill.running, .pill.measuring { background: #b58a2b40; }
+  .pill.blocked, .pill.failed { background: #c2454540; }
+  .muted { color: #888; }
+  .banner { border-left: 4px solid #888; padding: 0.5rem 0.9rem; background: #8881; border-radius: 0 8px 8px 0; }
+</style>
+</head><body>
+<h1>Performance Campaign — perf-trial-20260906-0303</h1>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 03:08 NZST · <b>status: running</b> · auto-refreshes every 5 min</p>
+<div class="banner">Baseline done. Biggest finding: /api/deals takes ~107ms per request because it re-reads ~90 days of price revisions from SQLite and re-runs two analytics passes on EVERY request (homepage uses it). Everything else responds in 1-5ms. Two subagent lanes dispatched: (A) data layer - test suite speed + projection DB size; (B) web interface - compression, caching, frontend payload. Coordinator is fixing the deals hot path.</div>
+
+<h2>Baseline (before any changes)</h2>
+<table>
+  <tr><th>Metric</th><th>Value</th><th>Notes</th></tr>
+  <tr><td>npm run check (syntax gate)</td><td>0.42 s</td><td>fine</td></tr>
+<tr><td>npm test (full suite)</td><td>12.25 s</td><td>docs claim ~7s - drifted; lane A target</td></tr>
+<tr><td>build-db projection rebuild</td><td>2.03 s (18,726 records)</td><td>from real 12MB data/prices.jsonl archive</td></tr>
+<tr><td>server cold boot</td><td>99.7 ms</td><td>includes opening the 17MB projection DB - already good</td></tr>
+<tr><td>GET /api/deals</td><td>p50 107 ms · p95 164 ms</td><td>HOT SPOT: recomputed per request; coordinator lane</td></tr>
+<tr><td>GET /api/deals (8 concurrent)</td><td>8.5 req/s · p50 553 ms</td><td>sync compute serializes the event loop</td></tr>
+<tr><td>GET /api/products?search=milk</td><td>p50 4.4 ms</td><td>LIKE + NOCASE search, OK at 9k products</td></tr>
+<tr><td>GET /api/search/suggestions</td><td>p50 1.0 ms</td><td></td></tr>
+<tr><td>GET /api/products/:id/history</td><td>p50 1.05 ms</td><td></td></tr>
+<tr><td>GET / (SPA index.html)</td><td>p50 0.76 ms</td><td>no gzip/ETag - matters over real network, lane B</td></tr>
+<tr><td>storage: data/prices.jsonl</td><td>12 MB / 18,726 lines</td><td>authoritative archive</td></tr>
+<tr><td>storage: data/prices.db (projection)</td><td>17 MB</td><td>42% LARGER than the archive it is built from - lane A target</td></tr>
+</table>
+
+<h2>Improvements</h2>
+<p class="muted">No merged improvements yet.</p>
+
+<h2>Subagents (max 2 concurrent)</h2>
+<table>
+  <tr><th>Name</th><th>Area</th><th>Status</th><th>Notes</th></tr>
+  
+  <tr><td>lane A (data layer)</td><td>test suite speed (12.25s), projection DB size (17MB), build-db</td><td><span class="pill running">running</span></td><td>owns src/sqlite/**, scripts/build-db.js, test/sqlite/**</td></tr>
+
+  <tr><td>lane B (web interface)</td><td>static serving (gzip/ETag/caching), SPA payload</td><td><span class="pill running">running</span></td><td>owns public/**, src/app/server.js static fallback, src/server/server.js</td></tr>
+</table>
+
+<h2>Up next</h2>
+<ul><li>Coordinator: memoize /api/deals (TTL + projection DB mtime invalidation) - expected 107ms -&gt; ~1ms warm</li>
+<li>Lane A: profile slowest tests; investigate why suite is 12s vs documented 7s; shrink projection DB (dead empty tables, page size, VACUUM)</li>
+<li>Lane B: gzip + ETag + smarter cache headers for static assets; audit SPA network waterfalls</li>
+<li>Wave 2 candidates: archive-index load time (RAM/speed), JSONL append path, tests for all changes</li></ul>
+</body></html>

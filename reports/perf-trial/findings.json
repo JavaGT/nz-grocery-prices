@@ -1,0 +1,34 @@
+{
+  "title": "Performance Campaign — perf-trial-20260906-0303",
+  "repo": "nz-grocery-prices",
+  "started": "2026-09-06 03:03 NZST",
+  "updated": "2026-09-06 03:08 NZST",
+  "status": "running",
+  "summary": "Baseline done. Biggest finding: /api/deals takes ~107ms per request because it re-reads ~90 days of price revisions from SQLite and re-runs two analytics passes on EVERY request (homepage uses it). Everything else responds in 1-5ms. Two subagent lanes dispatched: (A) data layer - test suite speed + projection DB size; (B) web interface - compression, caching, frontend payload. Coordinator is fixing the deals hot path.",
+  "axes": ["speed", "CPU", "RAM", "storage"],
+  "baselines": [
+    { "metric": "npm run check (syntax gate)", "value": "0.42 s", "notes": "fine" },
+    { "metric": "npm test (full suite)", "value": "12.25 s", "notes": "docs claim ~7s - drifted; lane A target" },
+    { "metric": "build-db projection rebuild", "value": "2.03 s (18,726 records)", "notes": "from real 12MB data/prices.jsonl archive" },
+    { "metric": "server cold boot", "value": "99.7 ms", "notes": "includes opening the 17MB projection DB - already good" },
+    { "metric": "GET /api/deals", "value": "p50 107 ms · p95 164 ms", "notes": "HOT SPOT: recomputed per request; coordinator lane" },
+    { "metric": "GET /api/deals (8 concurrent)", "value": "8.5 req/s · p50 553 ms", "notes": "sync compute serializes the event loop" },
+    { "metric": "GET /api/products?search=milk", "value": "p50 4.4 ms", "notes": "LIKE + NOCASE search, OK at 9k products" },
+    { "metric": "GET /api/search/suggestions", "value": "p50 1.0 ms", "notes": "" },
+    { "metric": "GET /api/products/:id/history", "value": "p50 1.05 ms", "notes": "" },
+    { "metric": "GET / (SPA index.html)", "value": "p50 0.76 ms", "notes": "no gzip/ETag - matters over real network, lane B" },
+    { "metric": "storage: data/prices.jsonl", "value": "12 MB / 18,726 lines", "notes": "authoritative archive" },
+    { "metric": "storage: data/prices.db (projection)", "value": "17 MB", "notes": "42% LARGER than the archive it is built from - lane A target" }
+  ],
+  "improvements": [],
+  "agents": [
+    { "name": "lane A (data layer)", "area": "test suite speed (12.25s), projection DB size (17MB), build-db", "status": "running", "notes": "owns src/sqlite/**, scripts/build-db.js, test/sqlite/**" },
+    { "name": "lane B (web interface)", "area": "static serving (gzip/ETag/caching), SPA payload", "status": "running", "notes": "owns public/**, src/app/server.js static fallback, src/server/server.js" }
+  ],
+  "next": [
+    "Coordinator: memoize /api/deals (TTL + projection DB mtime invalidation) - expected 107ms -> ~1ms warm",
+    "Lane A: profile slowest tests; investigate why suite is 12s vs documented 7s; shrink projection DB (dead empty tables, page size, VACUUM)",
+    "Lane B: gzip + ETag + smarter cache headers for static assets; audit SPA network waterfalls",
+    "Wave 2 candidates: archive-index load time (RAM/speed), JSONL append path, tests for all changes"
+  ]
+}

@@ -10,7 +10,7 @@
  * cover that path. Verdicts per retailer live in retailers/<slug>/README.md.
  */
 
-import { getJson } from "./http.js";
+import { BROWSER_UA, getJson } from "./http.js";
 import { buildObservation, toCents } from "./observation.js";
 
 const DEFAULT_LIMIT = 250;
@@ -73,7 +73,7 @@ export class ShopifyCatalogClient {
     this.scopeId = options.scopeId ?? "online";
     this.scopeName = options.scopeName ?? options.slug;
     this.region = options.region;
-    this.headers = { "user-agent": options.userAgent ?? undefined, ...options.headers };
+    this.headers = { "user-agent": options.userAgent ?? BROWSER_UA, ...options.headers };
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeout = options.timeout ?? 15000;
     this.#retry = options.retry;

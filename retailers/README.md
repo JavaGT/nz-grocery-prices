@@ -45,19 +45,19 @@ into the nightly breadth pipeline).
 | 23 | Oderings | `oderings` | garden | custom | planned |
 | 24 | Commonsense Organics | `commonsense-organics` | organic grocery | probe (custom) | planned |
 | 25 | Bin Inn | `bin-inn` | bulk foods | probe (custom) | planned |
-| 26 | Liquorland | `liquorland` | liquor | probe (custom) | planned |
-| 27 | The Bottle-O | `the-bottle-o` | liquor | probe (custom) | planned |
+| 26 | Liquorland | `liquorland` | liquor | window.category JSON (?p=N) | implemented 2026-09-06 |
+| 27 | The Bottle-O | `the-bottle-o` | liquor | Rails SSR talker tiles | implemented 2026-09-06 |
 | 28 | Super Liquor | `super-liquor` | liquor | Algolia index (Id-sliced walk) | implemented 2026-09-06 |
 | 29 | Chemist Warehouse NZ | `chemist-warehouse` | pharmacy | probe (custom, heavy JS) | planned |
 | 30 | Kmart NZ | `kmart` | dept store | Next.js + custom API | planned |
 | 31 | Farmers | `farmers` | dept store | probe (custom) | planned |
 | 32 | PB Tech | `pbtech` | electronics | probe (custom) | planned |
 | 33 | Noel Leeming | `noel-leeming` | electronics | SFCC updategrid (curl transport) | implemented 2026-09-06 |
-| 34 | Harvey Norman NZ | `harvey-norman` | electronics | probe (custom) | planned |
+| 34 | Harvey Norman NZ | `harvey-norman` | electronics | CS-Cart SSR tiles | implemented 2026-09-06 |
 | 35 | Mitre 10 | `mitre-10` | hardware | SAP Commerce OCC + sitemap shards | implemented 2026-09-06 |
 | 36 | Bunnings NZ | `bunnings` | hardware | Next.js + custom API | planned |
-| 37 | Briscoes | `briscoes` | homeware | probe (custom) | planned |
-| 38 | Rebel Sport | `rebel-sport` | sports | probe (custom) | planned |
+| 37 | Briscoes | `briscoes` | homeware | Magento GraphQL (shared w/ Rebel) | implemented 2026-09-06 |
+| 38 | Rebel Sport | `rebel-sport` | sports | Magento GraphQL (Store: rebelsport) | implemented 2026-09-06 |
 | 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento HTML grids (GraphQL dead) | implemented 2026-09-06 |
 | 40 | Macpac | `macpac` | outdoor | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
 | 41 | Supercheap Auto NZ | `supercheap-auto` | auto parts | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
@@ -65,10 +65,10 @@ into the nightly breadth pipeline).
 | 43 | Animates | `animates` | pet supplies | Magento HTML grids | implemented 2026-09-06 |
 | 44 | Postie | `postie` | apparel | probe (custom) | planned |
 | 45 | Number One Shoes | `number-one-shoes` | footwear | probe (custom) | planned |
-| 46 | Paper Plus | `paper-plus` | books/stationery | probe (custom) | planned |
-| 47 | Whitcoulls | `whitcoulls` | books/stationery | probe (custom) | planned |
+| 46 | Paper Plus | `paper-plus` | books/stationery | ASP.NET SSR tiles (tracking attrs) | implemented 2026-09-06 |
+| 47 | Whitcoulls | `whitcoulls` | books/stationery | eStar window.category JSON | implemented 2026-09-06 |
 | 48 | OfficeMax NZ | `officemax` | office supplies | probe (custom) | planned |
-| 49 | Baby Factory | `baby-factory` | baby | probe (custom) | planned |
+| 49 | Baby Factory | `baby-factory` | baby | eStar window.category JSON | implemented 2026-09-06 |
 | 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce Stencil HTML cards | implemented 2026-09-06 |
 
 ## Backups (swap in if a planned retailer proves inaccessible)
@@ -132,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **28 / 50** (5 existing + 23 implemented).
+Progress: **36 / 50** (5 existing + 31 implemented).

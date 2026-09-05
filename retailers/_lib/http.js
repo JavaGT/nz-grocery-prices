@@ -16,6 +16,11 @@ export function assertOk(response, operation) {
   throw new Error(`${operation} failed: ${response.status} ${response.statusText}`);
 }
 
+/** Drop undefined header values so fetch never sends literal "undefined". */
+function cleanHeaders(headers) {
+  return Object.fromEntries(Object.entries(headers ?? {}).filter(([, v]) => v !== undefined));
+}
+
 /**
  * GET a URL and parse the body as JSON, with retries and hard errors that
  * name the operation. `options`: { fetch, headers, timeout, retry, signal }.
@@ -24,7 +29,7 @@ export async function getJson(url, options = {}) {
   const { fetch, headers, timeout, retry, signal } = options;
   const response = await fetchWithRetry(url, {
     fetch,
-    headers: { accept: "application/json", ...headers },
+    headers: cleanHeaders({ accept: "application/json", ...headers }),
     timeout,
     retry,
     signal,
@@ -38,7 +43,9 @@ export async function getText(url, options = {}) {
   const { fetch, headers, timeout, retry, signal } = options;
   const response = await fetchWithRetry(url, {
     fetch,
-    headers: { accept: "text/html,application/json;q=0.9,*/*;q=0.8", ...headers },
+    // No application/json here: CS-Cart and friends switch to their AJAX
+    // renderer when the request advertises JSON support.
+    headers: cleanHeaders({ accept: "text/html,application/xhtml+xml,*/*;q=0.8", ...headers }),
     timeout,
     retry,
     signal,

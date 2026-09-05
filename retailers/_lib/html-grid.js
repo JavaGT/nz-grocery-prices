@@ -10,7 +10,7 @@
  * not code.
  */
 
-import { getText } from "./http.js";
+import { BROWSER_UA, getText } from "./http.js";
 import { buildObservation, toCents } from "./observation.js";
 
 export function decodeEntities(value = "") {
@@ -86,7 +86,15 @@ export function parseHtmlTile(slice, profile) {
     regularCents: wasCents !== undefined && wasCents > finalCents ? wasCents : finalCents,
     promoCents: wasCents !== undefined && wasCents > finalCents ? finalCents : undefined,
     ...(memberCents !== undefined ? { memberCents } : {}),
-    ...(profile.image ? { image: firstCapture(slice, [/<img[^>]*\ssrc="([^"]+)"/]) } : {}),
+    ...(profile.image
+      ? {
+          // Lazy-loading themes use data-src for the real image; src is
+          // often a base64 placeholder.
+          image:
+            firstCapture(slice, [/<img[^>]*\bdata-src="([^"]+)"/, /<img[^>]*\bdata-src='([^']+)'/]) ??
+            firstCapture(slice, [/<img[^>]*\ssrc="([^"]+)"/]),
+        }
+      : {}),
   };
 }
 
@@ -119,7 +127,7 @@ export class HtmlGridClient {
     // fits SFCC-style grids and requires pageSize.
     this.pagination = options.pagination ?? "page";
     this.pageSize = options.pageSize ?? 24;
-    this.headers = { "user-agent": options.userAgent ?? undefined, ...options.headers };
+    this.headers = { "user-agent": options.userAgent ?? BROWSER_UA, ...options.headers };
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeout = options.timeout ?? 20000;
     this.#retry = options.retry;
@@ -199,7 +207,9 @@ export class HtmlGridClient {
         storeName: store.name,
         origin: store.origin,
         retailerProductId: tile.id,
-        url: tile.url,
+        url: tile.url && !/^https?:\/\//.test(tile.url)
+          ? `${store.origin}/${tile.url.replace(/^\//, "")}`
+          : tile.url,
         name: tile.name,
         brand: tile.brand,
         image: tile.image,

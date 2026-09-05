@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 10:40 NZST · <b>status: wave 3 complete - awaiting owner review</b> · auto-refreshes every 5 min</p>
-<div class="banner">Wave 3 complete (930 tests, 0 failures). Merged: 14x-scale proof (all endpoints flat), 37% less SQL on the hot deals query via dead-column removal, product listing 65x faster at scale via a new index, warm /api/deals CPU down 4.4x by serving cached pre-compressed bytes (brotli q5 for dynamic API JSON: -11% wire vs gzip AND faster to produce), and the SPA first-load waterfall collapsed from 4 serial round trips to 2 via modulepreload hints. One data note: the current live archive yields an empty deals feed (no active sales in data/prices.jsonl right now) - that is data, not a regression; the wire lane measured with a deals-rich payload.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 10:55 NZST · <b>status: complete - stopped per 12:00 NZST condition (finished early)</b> · auto-refreshes every 5 min</p>
+<div class="banner">Campaign complete after 4 waves, all merged to main (942 tests, 0 failures). Final wave: the deals cold compute is now single-flighted - concurrent cold requests share one computation instead of N (and the async path, which previously FAILED all concurrent cold requests, is fixed). Repo gained npm run bench / bench:archive so trends are re-checkable after nightly growth. Cumulative: homepage deals 107ms -&gt; 0.28ms warm and -4.4x CPU further, page weight -75%, search 5x, listing 65x at scale, projection rebuild 8x and 17MB -&gt; 16.7MB, test suite 12.25s -&gt; 2.6s, scale headroom proven at 14x.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -154,6 +154,18 @@
     </table>
   </div>
 
+  <div class="card">
+    <h3>#10 · Wave 4: deals cold compute single-flighted <span class="pill "></span></h3>
+    <p>Concurrent cache misses now share one in-flight computation per retailer key (pending Map with dbSignature guard, settled entries evicted so failures never stick); dealUniverse is async and awaited. All cache semantics (TTL, sig invalidation, per-retailer keys, CachedResponse tokens, non-mutation) preserved.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server / cold-start burst (CPU + robustness)</td></tr>
+      <tr><th>Before → After</th><td><b>8 concurrent cold requests: 8x redundant compute -&gt; 1x. Also a robustness fix: with an async observation source the old code failed ALL concurrent cold requests (never awaited); now 8/8 succeed. Production sync path was incidentally serialized by event-loop blocking - the single-flight makes the guarantee explicit and await-safe.</b></td></tr>
+      <tr><th>Trade-offs</th><td>One microtask hop on cache hits; burst joiners share the first callers computedAt; a mid-flight dbSignature change lets the stale compute finish unused (recomputed next request).</td></tr>
+      <tr><th>Verified by</th><td>3 new single-flight tests (shared compute, non-sticky failure, independent retailer keys); full suite 942 pass / 0 fail on lane and wave branches.</td></tr>
+      <tr><th>Commit</th><td><code>4cf9bac (lane G4, merged)</code></td></tr>
+    </table>
+  </div>
+
 <h2>Subagents (max 2 concurrent)</h2>
 <table>
   <tr><th>Name</th><th>Area</th><th>Status</th><th>Notes</th></tr>
@@ -165,6 +177,8 @@
   <tr><td>lane A2 (rebuild/ingest)</td><td>projection rebuild speed</td><td><span class="pill merged">merged</span></td><td>subagent rate-limit-killed before receipt; work verified, one defect fixed in review (tool misplaced under test/), merged</td></tr>
 
   <tr><td>lane B2 (2x-scale)</td><td>query resilience at 2x archive</td><td><span class="pill merged">merged</span></td><td>completed cleanly; found a bench-harness param bug (suggestions ?q= vs ?query= - earlier suggestion baselines were measuring a 400 fast-path, now fixed and re-measured: 0.86ms real)</td></tr>
+
+  <tr><td>lane G4 (cold single-flight)</td><td>deals cold-path burst</td><td><span class="pill merged">merged</span></td><td>completed cleanly in 13min; report reports/perf-trial/lane-cold.md</td></tr>
 </table>
 
 <h2>Measured, deliberately not changed (honest stops)</h2>

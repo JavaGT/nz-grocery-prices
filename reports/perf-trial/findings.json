@@ -2,9 +2,9 @@
   "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 10:40 NZST",
-  "status": "wave 3 complete - awaiting owner review",
-  "summary": "Wave 3 complete (930 tests, 0 failures). Merged: 14x-scale proof (all endpoints flat), 37% less SQL on the hot deals query via dead-column removal, product listing 65x faster at scale via a new index, warm /api/deals CPU down 4.4x by serving cached pre-compressed bytes (brotli q5 for dynamic API JSON: -11% wire vs gzip AND faster to produce), and the SPA first-load waterfall collapsed from 4 serial round trips to 2 via modulepreload hints. One data note: the current live archive yields an empty deals feed (no active sales in data/prices.jsonl right now) - that is data, not a regression; the wire lane measured with a deals-rich payload.",
+  "updated": "2026-09-06 10:55 NZST",
+  "status": "complete - stopped per 12:00 NZST condition (finished early)",
+  "summary": "Campaign complete after 4 waves, all merged to main (942 tests, 0 failures). Final wave: the deals cold compute is now single-flighted - concurrent cold requests share one computation instead of N (and the async path, which previously FAILED all concurrent cold requests, is fixed). Repo gained npm run bench / bench:archive so trends are re-checkable after nightly growth. Cumulative: homepage deals 107ms -> 0.28ms warm and -4.4x CPU further, page weight -75%, search 5x, listing 65x at scale, projection rebuild 8x and 17MB -> 16.7MB, test suite 12.25s -> 2.6s, scale headroom proven at 14x.",
   "axes": [
     "speed",
     "CPU",
@@ -154,6 +154,15 @@
       "tradeoffs": "Cached gzip is a multi-member stream (+0.8% bytes, decoded identically by curl and node - verified). The response _freshness snapshot is frozen for the TTL window (consistent with dbSignature semantics). Token uniqueness is the handlers contract; the encoded-byte cache is bounded at 32 entries, clear-on-full. Preload hints pin the current import graph - a drift test walks the real graph and fails if hints go stale.",
       "verified": "New server-cached-response (265 lines) + index-preloads tests; full suite 930 pass / 0 fail on the merged branch; real-server curl checks for brotli/gzip bytes and 200s on all hinted modules.",
       "commit": "16d8ade + 9e22649 (lane F3) + hook adoption d144b7f"
+    },
+    {
+      "title": "Wave 4: deals cold compute single-flighted",
+      "area": "server / cold-start burst (CPU + robustness)",
+      "what": "Concurrent cache misses now share one in-flight computation per retailer key (pending Map with dbSignature guard, settled entries evicted so failures never stick); dealUniverse is async and awaited. All cache semantics (TTL, sig invalidation, per-retailer keys, CachedResponse tokens, non-mutation) preserved.",
+      "beforeAfter": "8 concurrent cold requests: 8x redundant compute -> 1x. Also a robustness fix: with an async observation source the old code failed ALL concurrent cold requests (never awaited); now 8/8 succeed. Production sync path was incidentally serialized by event-loop blocking - the single-flight makes the guarantee explicit and await-safe.",
+      "tradeoffs": "One microtask hop on cache hits; burst joiners share the first callers computedAt; a mid-flight dbSignature change lets the stale compute finish unused (recomputed next request).",
+      "verified": "3 new single-flight tests (shared compute, non-sticky failure, independent retailer keys); full suite 942 pass / 0 fail on lane and wave branches.",
+      "commit": "4cf9bac (lane G4, merged)"
     }
   ],
   "agents": [
@@ -180,6 +189,12 @@
       "area": "query resilience at 2x archive",
       "status": "merged",
       "notes": "completed cleanly; found a bench-harness param bug (suggestions ?q= vs ?query= - earlier suggestion baselines were measuring a 400 fast-path, now fixed and re-measured: 0.86ms real)"
+    },
+    {
+      "name": "lane G4 (cold single-flight)",
+      "area": "deals cold-path burst",
+      "status": "merged",
+      "notes": "completed cleanly in 13min; report reports/perf-trial/lane-cold.md"
     }
   ],
   "stops": [

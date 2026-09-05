@@ -202,3 +202,72 @@ test('anonymous responses are CachedResponse; tiered responses stay plain', asyn
   assert.ok(!(tiered instanceof CachedResponse), 'tiered path must stay a plain body');
   assert.ok(tiered.tiers, 'tiered response carries tier summary');
 });
+
+// Single-flight harness: queryDbObservations returns promises the test
+// resolves manually, so concurrent cold requests overlap for real.
+function deferredHandlers() {
+  let startCount = 0;
+  const resolvers = [];
+  const handlers = createPublicHandlers({
+    getDb: fakeDb,
+    clock: () => NOW,
+    queryDbObservations: () => new Promise(resolve => {
+      startCount += 1;
+      resolvers.push(() => resolve(fixtures()));
+    }),
+    dealsCacheTtlMs: 60_000,
+  });
+  return {
+    handlers,
+    starts: () => startCount,
+    resolveAll: () => { while (resolvers.length) resolvers.shift()(); },
+  };
+}
+
+test('concurrent cold requests share one computation', async () => {
+  const h = deferredHandlers();
+  const pending = Array.from({ length: 8 }, () =>
+    h.handlers.listDeals({ query: {}, clock: () => NOW }));
+  assert.equal(h.starts(), 1, 'only the first caller starts a computation');
+  h.resolveAll();
+  const results = await Promise.all(pending);
+  assert.equal(h.starts(), 1, 'still one computation after all resolve');
+  const bodies = results.map(bodyOf);
+  for (const body of bodies) assert.deepEqual(body, bodies[0]);
+  assert.equal(bodies[0].total, 2);
+});
+
+test('a failed computation does not stick; the next request recomputes', async () => {
+  let startCount = 0;
+  let fail = true;
+  const handlers = createPublicHandlers({
+    getDb: fakeDb,
+    clock: () => NOW,
+    queryDbObservations: () => {
+      startCount += 1;
+      return fail
+        ? Promise.reject(new Error('observation query failed'))
+        : Promise.resolve(fixtures());
+    },
+    dealsCacheTtlMs: 60_000,
+  });
+  await assert.rejects(
+    handlers.listDeals({ query: {}, clock: () => NOW }),
+    /observation query failed/,
+  );
+  fail = false;
+  const body = bodyOf(await handlers.listDeals({ query: {}, clock: () => NOW }));
+  assert.equal(startCount, 2, 'rejection must be evicted from the pending slot');
+  assert.equal(body.total, 2, 'the retry succeeds and serves deals');
+});
+
+test('concurrent requests for different retailers compute independently', async () => {
+  const h = deferredHandlers();
+  const pn = h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: () => NOW });
+  const ww = h.handlers.listDeals({ query: { retailer: 'woolworths' }, clock: () => NOW });
+  assert.equal(h.starts(), 2, 'each retailer key runs its own computation');
+  h.resolveAll();
+  const [pnBody, wwBody] = await Promise.all([pn, ww]);
+  assert.equal(bodyOf(pnBody).historyBacked[0].priceContext.retailerId, 'paknsave');
+  assert.equal(bodyOf(wwBody).advertised[0].priceContext.retailerId, 'woolworths');
+});

@@ -80,17 +80,22 @@ Warehouse, and Woolworths into separate `data/breadth-pilot-*.jsonl` archives.
 The runner is `scripts/breadth-pilot-nightly.sh`, exposed as
 `npm run breadth:nightly`. Since the 2026-09-05 perf campaign it runs four
 PARALLEL lanes (paknsave→newworld stay serial on the shared Foodstuffs host;
-freshchoice/warehouse/woolworths overlap on their own hosts), and page-0
-discovery checkpoints per archive with a 3-day TTL
-(`--force-discovery` bypasses it), so a steady-state freshchoice night drops
-from ~41 min to minutes. Shared breadth helpers live in
+freshchoice/warehouse/woolworths overlap on their own hosts), and discovery
+checkpoints per archive with a 3-day TTL (`--force-discovery` bypasses it;
+TTL-expiry nights re-walk whole categories including pages ≥ 1, so prices
+and new products are at most 3 days stale — the approved trade-off).
+Wall clock follows that TTL cycle: roughly every third night freshchoice
+runs a full ~1,050-request re-walk (budget 1200, ~60-70 min) while the
+nights between are near-zero for it (~8-10 min overall, bounded by the
+woolworths full walk). Shared breadth helpers live in
 `scripts/lib/breadth-helpers.js`; the facet-driven `foodstuffs-breadth.js`
 web collector was deleted (the mobile script is canonical; `breadth-passes.sh`
 now drives it, one banner per invocation). `scripts/purge-breadth-archive.js`
 removed 311 stray newworld records from the paknsave archive on 2026-09-05
-(backup: `data/breadth-pilot.jsonl.pre-newworld-purge`). Watch the BREADTH-14
-trial (foodstuffs at 3000 ms pacing) in the health log for a week. Open
-follow-up: BREADTH-13 sidecar index snapshot (issue #7, design notes there).
+(backup: `data/breadth-pilot.jsonl.pre-newworld-purge`; the tool refuses a
+re-run while that backup exists). Watch the BREADTH-14 trial (foodstuffs at
+3000 ms pacing) in the health log for a week. Open follow-up: BREADTH-13
+sidecar index snapshot (issue #7, design notes there).
 Install
 `ops/nz.grocery-prices.breadth.daemon.plist.template` as a 3:30am LaunchDaemon
 when scheduling is wanted. It deliberately does not write the app's

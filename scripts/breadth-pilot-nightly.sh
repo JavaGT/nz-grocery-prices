@@ -113,7 +113,7 @@ run_foodstuffs_lane() {
 
 run_foodstuffs_lane & foodstuffs_lane=$!
 run_collector freshchoice "$REPO_ROOT/data/breadth-pilot-fc.jsonl" \
-  freshchoice-breadth.js --delay-ms 3000 --budget 800 & freshchoice_lane=$!
+  freshchoice-breadth.js --delay-ms 3000 --budget 1200 & freshchoice_lane=$!
 run_collector warehouse "$REPO_ROOT/data/breadth-pilot-tw.jsonl" \
   warehouse-breadth.js --delay-ms 3000 --budget 400 & warehouse_lane=$!
 run_collector woolworths "$REPO_ROOT/data/breadth-pilot-ww.jsonl" \

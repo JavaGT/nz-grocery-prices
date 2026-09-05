@@ -199,8 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
-| 101 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
-| 102 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
+| 182 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
+| 183 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 52 | Number One Shoes + Hannahs | `number-one-shoes` | footwear | Black Pepper window.category JSON (?p=N) | implemented 2026-09-06 (bonus) |
 

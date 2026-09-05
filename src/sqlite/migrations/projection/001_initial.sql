@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS offer_revisions (
 
 CREATE INDEX IF NOT EXISTS idx_or_product ON offer_revisions(product_id, observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_or_context ON offer_revisions(context_id, observed_at DESC);
+-- Serves the deals 90-day window scan (WHERE observed_at BETWEEN ...) as a
+-- range seek instead of a full-table scan + sort: O(window) instead of
+-- O(total archive), so cold /api/deals stays flat as the archive ages.
+CREATE INDEX IF NOT EXISTS idx_or_observed ON offer_revisions(observed_at);
 
 CREATE TABLE IF NOT EXISTS special_snapshots (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,

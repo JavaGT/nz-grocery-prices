@@ -31,7 +31,7 @@ function defaultDealsCacheTtlMs() {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DEALS_CACHE_TTL_MS;
 }
 
-export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs() }) {
+export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs(), dbSignature }) {
   function db() {
     const d = typeof getDb === 'function' ? getDb() : getDb;
     if (!d) throw new StatusError(503, 'SERVICE_UNAVAILABLE', 'Projection database not available');
@@ -346,15 +346,17 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   // Deal universe cache: /api/deals re-reads ~90 days of offer revisions and
   // runs two analytics passes per request (~100ms at current archive size).
   // Offer data only changes when the projection DB is rebuilt (nightly), so
-  // the computation is memoized per retailer for dealsCacheTtlMs (0 disables).
+  // the computation is memoized per retailer for dealsCacheTtlMs (0 disables)
+  // and invalidated early when dbSignature (e.g. the DB file's mtime) changes.
   // Filter, limit, and tier ordering stay per-request; cached deal objects
   // are never mutated (the tier path copies before attaching .tier).
   const dealsCache = new Map();
 
   function dealUniverse(retailer, now) {
     const key = retailer || '*';
+    const sig = typeof dbSignature === 'function' ? dbSignature() : undefined;
     const hit = dealsCache.get(key);
-    if (hit && now - hit.computedAt < dealsCacheTtlMs) return hit;
+    if (hit && sig === hit.sig && now - hit.computedAt < dealsCacheTtlMs) return hit;
 
     const baselineMs = 90 * 24 * 60 * 60 * 1000;
     const fromMs = now - baselineMs;
@@ -482,6 +484,7 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
 
     const entry = {
       computedAt: now,
+      sig,
       historyBacked, advertised,
       archiveFreshness: { totalStores: storeCounts?.total || 0, storesWithData: storesWithOffers?.c || 0 },
     };
@@ -572,12 +575,24 @@ export function defaultQueryDbObservations(db, fromMs, toMs) {
     ORDER BY or2.observed_at
   `).all(fromMs, toMs);
 
+  // Archive collections stamp thousands of revisions with the same run
+  // timestamp (5-31 distinct observed_at values per archive), so the ISO
+  // string is memoized per epoch-ms instead of rebuilt twice per row.
+  const isoCache = new Map();
+
   return rows.map(r => {
     const isAdvertisedDeal = r.price_promo_cents != null && r.price_promo_cents < r.price_regular_cents;
     const isMemberDeal = r.price_member_cents != null && r.price_member_cents < r.price_regular_cents;
     const hasReduction = isAdvertisedDeal || isMemberDeal;
-    const rawPromotion = r.promotion_data ? JSON.parse(r.promotion_data) : undefined;
-    return {
+    const observedAtIso = (() => {
+      let s = isoCache.get(r.observed_at);
+      if (s === undefined) {
+        s = new Date(r.observed_at).toISOString();
+        isoCache.set(r.observed_at, s);
+      }
+      return s;
+    })();
+    const observation = {
       product: {
         id: r.product_id,
         name: r.product_name,
@@ -596,10 +611,11 @@ export function defaultQueryDbObservations(db, fromMs, toMs) {
         memberCents: r.price_member_cents ?? undefined,
         comparative: r.comparative ? JSON.parse(r.comparative) : undefined,
       },
-      observedAt: new Date(r.observed_at).toISOString(),
-      lastSeenAt: new Date(r.observed_at).toISOString(),
+      observedAt: observedAtIso,
+      lastSeenAt: observedAtIso,
       isOnSpecial: hasReduction,
-      ...(hasReduction && rawPromotion ? { promotion: rawPromotion } : {}),
     };
+    if (hasReduction && r.promotion_data) observation.promotion = JSON.parse(r.promotion_data);
+    return observation;
   });
 }

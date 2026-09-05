@@ -100,7 +100,7 @@ try {
       'health': await bench('health', '/api/health'),
       'deals': await bench('deals', '/api/deals'),
       'products search=milk': await bench('products_search', '/api/products?search=milk&limit=20'),
-      'suggestions q=mil': await bench('suggestions', '/api/search/suggestions?q=mil'),
+      'suggestions query=mil': await bench('suggestions', '/api/search/suggestions?query=mil'),
       'stores': await bench('stores', '/api/stores'),
       ...(productId ? { 'product history': await bench('history', `/api/products/${encodeURIComponent(productId)}/history`) } : {}),
       'SPA index.html': await bench('index', '/'),

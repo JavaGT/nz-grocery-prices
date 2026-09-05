@@ -68,6 +68,56 @@ const RETAILER_NAMES = {
   warehouse: 'The Warehouse',
 };
 
+// All statements used by the rebuild insert phase, prepared exactly once per
+// rebuild. Preparing per record dominated the profile (~100k SQL compiles for
+// a 19k-line archive); rows produced are identical either way.
+function prepareRebuildStatements(db) {
+  const findContext = 'SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?';
+  return {
+    ensureRetailer: db.prepare('INSERT OR IGNORE INTO retailers(id, name) VALUES(?, ?)'),
+    productFirstSeen: db.prepare('SELECT first_seen_at FROM products WHERE id = ? AND retailer_id = ?'),
+    productUpsert: db.prepare(`
+      INSERT INTO products(id, retailer_id, name, brand, category, image_url, size, source_id, gtin, latest_hash, first_seen_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id, retailer_id) DO UPDATE SET
+        name = excluded.name,
+        brand = excluded.brand,
+        category = excluded.category,
+        image_url = excluded.image_url,
+        size = excluded.size,
+        source_id = excluded.source_id,
+        gtin = excluded.gtin,
+        latest_hash = excluded.latest_hash,
+        updated_at = excluded.updated_at
+    `),
+    productRevision: db.prepare(`
+      INSERT OR IGNORE INTO product_revisions(hash, product_id, retailer_id, data, observed_at)
+      VALUES(?, ?, ?, ?, ?)
+    `),
+    findContext: db.prepare(findContext),
+    contextUpdate: db.prepare('UPDATE price_contexts SET store_name = ?, address = ?, region = ? WHERE id = ?'),
+    contextInsert: db.prepare(`
+      INSERT INTO price_contexts(retailer_id, store_id, store_name, scope_kind, address, region)
+      VALUES(?, ?, ?, 'physical-store', ?, ?)
+    `),
+    lastRowid: db.prepare('SELECT last_insert_rowid() AS id'),
+    storeRevision: db.prepare('INSERT OR IGNORE INTO store_revisions(hash, context_id, data, observed_at) VALUES(?, ?, ?, ?)'),
+    offerProduct: db.prepare('SELECT id FROM products WHERE id = ?'),
+    offerRevision: db.prepare(`
+      INSERT OR IGNORE INTO offer_revisions(
+        offer_key, product_id, context_id,
+        rev_hash, price_regular_cents, price_promo_cents, price_member_cents,
+        comparative, promotion_data, source_data, observed_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    offerExists: db.prepare('SELECT offer_key FROM offer_revisions WHERE offer_key = ?'),
+    snapshotInsert: db.prepare(`
+      INSERT INTO special_snapshots(context_id, observed_at, offers_hash, offer_count, added, removed)
+      VALUES(?, ?, ?, ?, ?, ?)
+    `),
+  };
+}
+
 export class ProjectionRepository {
   #jsonlPath;
   #dbPath;
@@ -160,6 +210,11 @@ export class ProjectionRepository {
       // revision tables' text payloads with less per-page overhead.
       tmpDb.exec('PRAGMA page_size=8192');
       tmpDb.exec('PRAGMA journal_mode=WAL');
+      // Rebuild-only durability trade: the temp DB is throwaway (the JSONL is
+      // the source of truth and publish is an atomic rename), so skips are
+      // safe and save the per-commit WAL fsyncs. Per-connection setting —
+      // never persisted to the published file.
+      tmpDb.exec('PRAGMA synchronous=OFF');
       tmpDb.exec('PRAGMA foreign_keys=ON');
 
       applyProjectionMigrations(tmpDb);
@@ -213,25 +268,37 @@ export class ProjectionRepository {
       // still an accepted, deduplicated line — not a silent skip).
       let recordsImported = 0;
       const unresolved = [];
-      for (const entry of staged.product) {
-        const result = this.#insertRecord(tmpDb, entry.record);
-        if (result === true) recordsImported++;
-        else unresolved.push({ ...entry, reason: result });
-      }
-      for (const entry of staged.store) {
-        const result = this.#insertRecord(tmpDb, entry.record);
-        if (result === true) recordsImported++;
-        else unresolved.push({ ...entry, reason: result });
-      }
-      for (const entry of staged.offer) {
-        const result = this.#insertRecord(tmpDb, entry.record);
-        if (result === true) recordsImported++;
-        else unresolved.push({ ...entry, reason: result });
-      }
-      for (const entry of staged.snapshot) {
-        const result = this.#insertRecord(tmpDb, entry.record);
-        if (result === true) recordsImported++;
-        else unresolved.push({ ...entry, reason: result });
+      // One transaction for the whole insert phase: the temp DB is throwaway,
+      // so a single commit is safe and removes the per-statement autocommit
+      // journaling that dominated the rebuild profile. Any failure rolls back
+      // and the temp DB is discarded unpublished.
+      const stmts = prepareRebuildStatements(tmpDb);
+      tmpDb.exec('BEGIN IMMEDIATE');
+      try {
+        for (const entry of staged.product) {
+          const result = this.#insertRecord(stmts, entry.record);
+          if (result === true) recordsImported++;
+          else unresolved.push({ ...entry, reason: result });
+        }
+        for (const entry of staged.store) {
+          const result = this.#insertRecord(stmts, entry.record);
+          if (result === true) recordsImported++;
+          else unresolved.push({ ...entry, reason: result });
+        }
+        for (const entry of staged.offer) {
+          const result = this.#insertRecord(stmts, entry.record);
+          if (result === true) recordsImported++;
+          else unresolved.push({ ...entry, reason: result });
+        }
+        for (const entry of staged.snapshot) {
+          const result = this.#insertRecord(stmts, entry.record);
+          if (result === true) recordsImported++;
+          else unresolved.push({ ...entry, reason: result });
+        }
+        tmpDb.exec('COMMIT');
+      } catch (err) {
+        try { tmpDb.exec('ROLLBACK'); } catch { /* temp DB is discarded anyway */ }
+        throw err;
       }
 
       // A record whose references resolve NOWHERE in this archive cannot be
@@ -331,49 +398,38 @@ export class ProjectionRepository {
 
   // Returns true when the record was inserted; otherwise returns a reason
   // for the caller to report instead of silently dropping the record.
-  #insertRecord(db, record) {
+  // `stmts` is the per-rebuild prepared-statement bundle from
+  // prepareRebuildStatements().
+  #insertRecord(stmts, record) {
     switch (record.type) {
-      case 'product':  this.#insertProduct(db, record); return true;
-      case 'store':    this.#insertStore(db, record); return true;
-      case 'offer':    return this.#insertOffer(db, record);
-      case 'snapshot': return this.#insertSnapshot(db, record);
+      case 'product':  this.#insertProduct(stmts, record); return true;
+      case 'store':    this.#insertStore(stmts, record); return true;
+      case 'offer':    return this.#insertOffer(stmts, record);
+      case 'snapshot': return this.#insertSnapshot(stmts, record);
       default:         return 'unknown archive record type';
     }
   }
 
-  #ensureRetailer(db, id) {
+  #ensureRetailer(stmts, id) {
     const name = RETAILER_NAMES[id] || id;
-    db.prepare("INSERT OR IGNORE INTO retailers(id, name) VALUES(?, ?)").run(id, name);
+    stmts.ensureRetailer.run(id, name);
   }
 
-  #insertProduct(db, record) {
+  #insertProduct(stmts, record) {
     const data = record.data || {};
     const productId = record.productId;
     const retailerId = productId.split(':')[0];
     const observedAt = Date.parse(record.observedAt);
     const categories = data.categories || [];
 
-    this.#ensureRetailer(db, retailerId);
+    this.#ensureRetailer(stmts, retailerId);
 
-    const existing = db.prepare("SELECT first_seen_at FROM products WHERE id = ? AND retailer_id = ?").get(productId, retailerId);
+    const existing = stmts.productFirstSeen.get(productId, retailerId);
     const firstSeenAt = existing ? existing.first_seen_at : observedAt;
 
     const imageUrl = data.image_url || bestImage(data.images) || null;
 
-    db.prepare(`
-      INSERT INTO products(id, retailer_id, name, brand, category, image_url, size, source_id, gtin, latest_hash, first_seen_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id, retailer_id) DO UPDATE SET
-        name = excluded.name,
-        brand = excluded.brand,
-        category = excluded.category,
-        image_url = excluded.image_url,
-        size = excluded.size,
-        source_id = excluded.source_id,
-        gtin = excluded.gtin,
-        latest_hash = excluded.latest_hash,
-        updated_at = excluded.updated_at
-    `).run(
+    stmts.productUpsert.run(
       productId, retailerId,
       data.name || null,
       data.brand || null,
@@ -386,13 +442,10 @@ export class ProjectionRepository {
       firstSeenAt, observedAt
     );
 
-    db.prepare(`
-      INSERT OR IGNORE INTO product_revisions(hash, product_id, retailer_id, data, observed_at)
-      VALUES(?, ?, ?, ?, ?)
-    `).run(record.hash, productId, retailerId, JSON.stringify(data), observedAt);
+    stmts.productRevision.run(record.hash, productId, retailerId, JSON.stringify(data), observedAt);
   }
 
-  #insertStore(db, record) {
+  #insertStore(stmts, record) {
     const data = record.data || {};
     const storeId = record.storeId;
     // Store identity is the ENVELOPE storeId everywhere: offers/snapshots
@@ -402,51 +455,40 @@ export class ProjectionRepository {
     const retailerId = storeId.split(':')[0];
     const observedAt = Date.parse(record.observedAt);
 
-    this.#ensureRetailer(db, retailerId);
+    this.#ensureRetailer(stmts, retailerId);
 
     const storeKey = storeId;
-    const existing = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeKey);
+    const existing = stmts.findContext.get(retailerId, storeKey);
     let contextId;
     if (existing) {
       contextId = existing.id;
-      db.prepare("UPDATE price_contexts SET store_name = ?, address = ?, region = ? WHERE id = ?")
-        .run(data.name || null, data.address || null, data.region || null, contextId);
+      stmts.contextUpdate.run(data.name || null, data.address || null, data.region || null, contextId);
     } else {
-      const res = db.prepare(`
-        INSERT INTO price_contexts(retailer_id, store_id, store_name, scope_kind, address, region)
-        VALUES(?, ?, ?, 'physical-store', ?, ?)
-      `).run(retailerId, storeKey, data.name || null, data.address || null, data.region || null);
-      contextId = Number(db.prepare('SELECT last_insert_rowid() AS id').get().id);
+      const res = stmts.contextInsert.run(retailerId, storeKey, data.name || null, data.address || null, data.region || null);
+      contextId = Number(res.lastInsertRowid);
     }
 
-    db.prepare("INSERT OR IGNORE INTO store_revisions(hash, context_id, data, observed_at) VALUES(?, ?, ?, ?)")
-      .run(record.hash, contextId, JSON.stringify(data), observedAt);
+    stmts.storeRevision.run(record.hash, contextId, JSON.stringify(data), observedAt);
   }
 
-  #insertOffer(db, record) {
+  #insertOffer(stmts, record) {
     const data = record.data || {};
     const price = data.price || {};
     const observedAt = Date.parse(record.observedAt);
     const storeId = record.storeId;
     const retailerId = storeId.split(':')[0];
 
-    const product = db.prepare("SELECT id FROM products WHERE id = ?").get(record.productId);
+    const product = stmts.offerProduct.get(record.productId);
     if (!product) {
       return `offer ${record.offerId || record.offerKey} references product ${record.productId}, which has no product revision in this archive`;
     }
-    const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
+    const context = stmts.findContext.get(retailerId, storeId);
     // Unresolved context: return a reason so the caller refuses the build
     // instead of silently dropping this offer (pre-CORE-6-review bug).
     if (!context) {
       return `offer ${record.offerId || record.offerKey} references store context ${storeId}, which has no store revision in this archive`;
     }
-    db.prepare(`
-      INSERT OR IGNORE INTO offer_revisions(
-        offer_key, product_id, context_id,
-        rev_hash, price_regular_cents, price_promo_cents, price_member_cents,
-        comparative, promotion_data, source_data, observed_at
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    stmts.offerRevision.run(
       record.offerKey || record.offerId, record.productId, context.id,
       record.hash,
       price.regularCents != null ? price.regularCents : null,
@@ -460,12 +502,12 @@ export class ProjectionRepository {
     return true;
   }
 
-  #insertSnapshot(db, record) {
+  #insertSnapshot(stmts, record) {
     const observedAt = Date.parse(record.observedAt);
     const storeId = record.storeId;
     const retailerId = storeId.split(':')[0];
 
-    const context = db.prepare("SELECT id FROM price_contexts WHERE retailer_id = ? AND store_id = ?").get(retailerId, storeId);
+    const context = stmts.findContext.get(retailerId, storeId);
     // Unresolved context: return a reason so the caller refuses the build
     // instead of silently dropping this snapshot.
     if (!context) {
@@ -473,17 +515,12 @@ export class ProjectionRepository {
     }
 
     const referencedOffers = [...new Set([...(record.added || []), ...(record.removed || [])])];
-    const missingOffer = referencedOffers.find((offerKey) =>
-      !db.prepare("SELECT offer_key FROM offer_revisions WHERE offer_key = ?").get(offerKey)
-    );
+    const missingOffer = referencedOffers.find((offerKey) => !stmts.offerExists.get(offerKey));
     if (missingOffer) {
       return `snapshot for ${storeId} references offer ${missingOffer}, which has no offer revision in this archive`;
     }
 
-    db.prepare(`
-      INSERT INTO special_snapshots(context_id, observed_at, offers_hash, offer_count, added, removed)
-      VALUES(?, ?, ?, ?, ?, ?)
-    `).run(
+    stmts.snapshotInsert.run(
       context.id, observedAt, record.offersHash,
       record.offerCount || 0,
       JSON.stringify(record.added || []),

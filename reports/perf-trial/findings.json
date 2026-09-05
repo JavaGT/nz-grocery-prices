@@ -2,9 +2,9 @@
   "title": "Performance Campaign — perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 03:08 NZST",
+  "updated": "2026-09-06 03:20 NZST",
   "status": "running",
-  "summary": "Baseline done. Biggest finding: /api/deals takes ~107ms per request because it re-reads ~90 days of price revisions from SQLite and re-runs two analytics passes on EVERY request (homepage uses it). Everything else responds in 1-5ms. Two subagent lanes dispatched: (A) data layer - test suite speed + projection DB size; (B) web interface - compression, caching, frontend payload. Coordinator is fixing the deals hot path.",
+  "summary": "FIRST WIN: /api/deals dropped from 107ms to 0.26ms per request (warm) by memoizing the per-retailer deal computation with a 5-minute TTL - it used to re-read 90 days of prices and re-run two analytics passes on every homepage hit. Subagent cap is now 1 at a time; the web-interface lane is running while the coordinator personally handles the data-layer targets (test suite speed, projection DB size).",
   "axes": ["speed", "CPU", "RAM", "storage"],
   "baselines": [
     { "metric": "npm run check (syntax gate)", "value": "0.42 s", "notes": "fine" },
@@ -20,7 +20,17 @@
     { "metric": "storage: data/prices.jsonl", "value": "12 MB / 18,726 lines", "notes": "authoritative archive" },
     { "metric": "storage: data/prices.db (projection)", "value": "17 MB", "notes": "42% LARGER than the archive it is built from - lane A target" }
   ],
-  "improvements": [],
+  "improvements": [
+    {
+      "title": "Memoized /api/deals (per-retailer TTL cache)",
+      "area": "server / deals pipeline (speed + CPU)",
+      "what": "The deal computation (90-day observation query + calculateSales + calculateOngoingSales + sorting) is now computed once per retailer and reused for 5 minutes (DEALS_CACHE_TTL_MS env, 0 disables). Filter, limit, and signed-in tier ordering still apply per request; cached deal objects are never mutated (tier path copies).",
+      "beforeAfter": "p50 107.4ms -> 0.26ms warm (~400x); cold cache-fill request unchanged ~150ms. 8-way burst was 8.5 req/s serialized - now bounded by JSON output only.",
+      "tradeoffs": "Deal feed can be up to 5 minutes staler than a full recompute. In practice prices only change when the projection DB is rebuilt nightly, so real staleness is unchanged. RAM cost: one cached deal array per retailer (a few hundred KB worst case).",
+      "verified": "6 new unit tests (TTL, per-retailer keys, filter/limit, tier no-mutation) + full suite 854 pass / 0 fail; bench-server before/after",
+      "commit": "de17fdd"
+    }
+  ],
   "agents": [
     { "name": "lane A (data layer)", "area": "test suite speed (12.25s), projection DB size (17MB), build-db", "status": "running", "notes": "owns src/sqlite/**, scripts/build-db.js, test/sqlite/**" },
     { "name": "lane B (web interface)", "area": "static serving (gzip/ETag/caching), SPA payload", "status": "running", "notes": "owns public/**, src/app/server.js static fallback, src/server/server.js" }

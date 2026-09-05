@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 03:08 NZST · <b>status: running</b> · auto-refreshes every 5 min</p>
-<div class="banner">Baseline done. Biggest finding: /api/deals takes ~107ms per request because it re-reads ~90 days of price revisions from SQLite and re-runs two analytics passes on EVERY request (homepage uses it). Everything else responds in 1-5ms. Two subagent lanes dispatched: (A) data layer - test suite speed + projection DB size; (B) web interface - compression, caching, frontend payload. Coordinator is fixing the deals hot path.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 03:20 NZST · <b>status: running</b> · auto-refreshes every 5 min</p>
+<div class="banner">FIRST WIN: /api/deals dropped from 107ms to 0.26ms per request (warm) by memoizing the per-retailer deal computation with a 5-minute TTL - it used to re-read 90 days of prices and re-run two analytics passes on every homepage hit. Subagent cap is now 1 at a time; the web-interface lane is running while the coordinator personally handles the data-layer targets (test suite speed, projection DB size).</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -45,7 +45,18 @@
 </table>
 
 <h2>Improvements</h2>
-<p class="muted">No merged improvements yet.</p>
+
+  <div class="card">
+    <h3>#1 · Memoized /api/deals (per-retailer TTL cache) <span class="pill "></span></h3>
+    <p>The deal computation (90-day observation query + calculateSales + calculateOngoingSales + sorting) is now computed once per retailer and reused for 5 minutes (DEALS_CACHE_TTL_MS env, 0 disables). Filter, limit, and signed-in tier ordering still apply per request; cached deal objects are never mutated (tier path copies).</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server / deals pipeline (speed + CPU)</td></tr>
+      <tr><th>Before → After</th><td><b>p50 107.4ms -&gt; 0.26ms warm (~400x); cold cache-fill request unchanged ~150ms. 8-way burst was 8.5 req/s serialized - now bounded by JSON output only.</b></td></tr>
+      <tr><th>Trade-offs</th><td>Deal feed can be up to 5 minutes staler than a full recompute. In practice prices only change when the projection DB is rebuilt nightly, so real staleness is unchanged. RAM cost: one cached deal array per retailer (a few hundred KB worst case).</td></tr>
+      <tr><th>Verified by</th><td>6 new unit tests (TTL, per-retailer keys, filter/limit, tier no-mutation) + full suite 854 pass / 0 fail; bench-server before/after</td></tr>
+      <tr><th>Commit</th><td><code>de17fdd</code></td></tr>
+    </table>
+  </div>
 
 <h2>Subagents (max 2 concurrent)</h2>
 <table>

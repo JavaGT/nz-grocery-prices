@@ -199,6 +199,12 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 238 | Aka Aka Brewing | `aka-aka-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 239 | Beer Cellar NZ | `beer-cellar` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 240 | Beer Hug | `beer-hug` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 241 | Beer Jerk | `beer-jerk` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 242 | MoreBeer NZ | `morebeer` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 243 | Prestige Botanicals | `prestige-botanicals` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 224 | 86 Parts | `86-parts` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 225 | Baby HQ | `baby-hq` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 226 | Barefoot Kiwi | `barefoot-kiwi` | general retail | Shopify products.json | implemented 2026-09-06 |

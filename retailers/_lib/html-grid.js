@@ -1,12 +1,12 @@
 /**
- * Classic Magento 2 server-rendered listing adapter for the retailers/
+ * Server-rendered HTML listing-grid adapter (Magento 2 and SFCC themes) for the retailers/
  * campaign.
  *
  * Several NZ Magento storefronts expose no usable GraphQL (empty catalog
  * scope or disabled endpoint) but render category pages as plain HTML
  * product tiles with priceBox data attributes. This module slices those
  * tiles and extracts identity/name/price via per-retailer profiles —
- * Magento themes differ enough that the tile selectors are configuration,
+ * Storefront themes differ enough that the tile selectors are configuration,
  * not code.
  */
 
@@ -63,7 +63,7 @@ function attribute(tag, name) {
  *     image?: boolean          — also extract the first <img src>,
  *   }
  */
-export function parseMagentoTile(slice, profile) {
+export function parseHtmlTile(slice, profile) {
   const id = firstCapture(slice, profile.id);
   if (!id) return undefined;
   const link = anchorTag(slice, profile.linkClass);
@@ -73,22 +73,26 @@ export function parseMagentoTile(slice, profile) {
   ).trim();
   const finalRaw = firstCapture(slice, profile.finalPrice);
   const wasRaw = firstCapture(slice, profile.wasPrice ?? []);
+  const memberRaw = firstCapture(slice, profile.memberPrice ?? []);
   const finalCents = toCents(finalRaw);
   const wasCents = toCents(wasRaw);
+  const memberCents = toCents(memberRaw);
   if (!name || finalCents === undefined) return undefined;
   return {
     id,
     name,
     url,
+    ...(profile.brand ? { brand: decodeEntities(firstCapture(slice, profile.brand) ?? "").trim() || undefined } : {}),
     regularCents: wasCents !== undefined && wasCents > finalCents ? wasCents : finalCents,
     promoCents: wasCents !== undefined && wasCents > finalCents ? finalCents : undefined,
+    ...(memberCents !== undefined ? { memberCents } : {}),
     ...(profile.image ? { image: firstCapture(slice, [/<img[^>]*\ssrc="([^"]+)"/]) } : {}),
   };
 }
 
-export function parseMagentoTiles(html, profile) {
+export function parseHtmlTiles(html, profile) {
   return extractTileSlices(html, profile.tileStart)
-    .map((slice) => parseMagentoTile(slice, profile))
+    .map((slice) => parseHtmlTile(slice, profile))
     .filter(Boolean);
 }
 
@@ -97,12 +101,12 @@ export function parseMagentoTiles(html, profile) {
  * no *new* tile ids (repeated products across pages are fine but signal
  * the end when nothing new appears) or maxPages is reached.
  */
-export class MagentoListClient {
+export class HtmlGridClient {
   constructor(options = {}) {
-    if (!options.origin) throw new TypeError("MagentoListClient requires origin");
-    if (!options.slug) throw new TypeError("MagentoListClient requires slug");
+    if (!options.origin) throw new TypeError("HtmlGridClient requires origin");
+    if (!options.slug) throw new TypeError("HtmlGridClient requires slug");
     if (!Array.isArray(options.categories) || options.categories.length === 0) {
-      throw new TypeError("MagentoListClient requires categories: [\"path\", ...]");
+      throw new TypeError("HtmlGridClient requires categories: [\"path\", ...]");
     }
     this.origin = options.origin.replace(/\/$/, "");
     this.slug = options.slug;
@@ -111,6 +115,10 @@ export class MagentoListClient {
     this.categories = options.categories;
     this.profile = options.profile;
     this.pageParam = options.pageParam ?? "p";
+    // pagination: "page" (?p=N) is the default; "offset" (?start=N&sz=N)
+    // fits SFCC-style grids and requires pageSize.
+    this.pagination = options.pagination ?? "page";
+    this.pageSize = options.pageSize ?? 24;
     this.headers = { "user-agent": options.userAgent ?? undefined, ...options.headers };
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeout = options.timeout ?? 20000;
@@ -131,17 +139,27 @@ export class MagentoListClient {
   }
 
   async listCategoryPage(category, page) {
-    const url =
-      `${this.origin}/${category.replace(/^\//, "")}` +
-      `${category.includes("?") ? "&" : "?"}${this.pageParam}=${page}`;
+    // "page" mode (Magento): /category?p=N
+    // "offset" mode (SFCC):    /category?start=N&sz=N
+    let url;
+    if (this.pagination === "offset") {
+      const start = (page - 1) * this.pageSize;
+      url =
+        `${this.origin}/${category.replace(/^\//, "")}` +
+        `${category.includes("?") ? "&" : "?"}start=${start}&sz=${this.pageSize}`;
+    } else {
+      url =
+        `${this.origin}/${category.replace(/^\//, "")}` +
+        `${category.includes("?") ? "&" : "?"}${this.pageParam}=${page}`;
+    }
     const html = await getText(url, {
       fetch: this.#fetch,
       headers: this.headers,
       timeout: this.#timeout,
       retry: this.#retry,
-      operation: `magento ${this.slug} ${category} p${page}`,
+      operation: `grid ${this.slug} ${category} p${page}`,
     });
-    return parseMagentoTiles(html, this.profile);
+    return parseHtmlTiles(html, this.profile);
   }
 
   async collectProducts({ maxPages = 50, observedAt } = {}) {
@@ -157,7 +175,7 @@ export class MagentoListClient {
           // A dead/renamed category must not abort the whole walk; page 1
           // failures skip the category entirely.
           if (page === 1) {
-            console.error(`magento ${this.slug}: skipping category ${category}: ${error.message}`);
+            console.error(`grid ${this.slug}: skipping category ${category}: ${error.message}`);
             break;
           }
           throw error;
@@ -183,10 +201,12 @@ export class MagentoListClient {
         retailerProductId: tile.id,
         url: tile.url,
         name: tile.name,
+        brand: tile.brand,
         image: tile.image,
         ...(label ? { categories: [label] } : {}),
         regularCents: tile.regularCents,
         promoCents: tile.promoCents,
+        memberCents: tile.memberCents,
         observedAt,
       }),
     );

@@ -38,6 +38,11 @@ function totalItems(html) {
   return match ? Number(match[1].replaceAll(",", "")) : undefined;
 }
 
+/** Grid result count from the "1 – N of M products" SFCC grid header. */
+export function totalGridItems(html) {
+  return totalItems(html);
+}
+
 function multibuy(callout) {
   const match = callout?.match(/(\d+)\s+for\s+\$\s*([\d,]+(?:\.\d{1,2})?)/i);
   if (!match) return undefined;
@@ -68,7 +73,13 @@ export function parseWarehouseProducts(html) {
   });
 }
 
-export function toWarehouseObservation(product, store, options = {}) {
+/**
+ * Generalized observation mapping for SFCC `product-tile` grids that carry
+ * the `data-gtm-product` payload (The Warehouse, Noel Leeming, …). `slug`
+ * (usually store.retailer) drives product/store/promotion identity.
+ */
+export function toSfccObservation(product, store, options = {}) {
+  const slug = store.retailer ?? "warehouse";
   const currentCents = cents(product.price);
   const thenCents = cents(product.productThenPrice);
   if (!product.id || !product.name || currentCents === undefined) return undefined;
@@ -84,7 +95,7 @@ export function toWarehouseObservation(product, store, options = {}) {
 
   return {
     product: {
-      id: `warehouse:${product.id}`,
+      id: `${slug}:${product.id}`,
       name: product.name,
       ...(product.brand && product.brand !== "na" ? { brand: product.brand } : {}),
       ...(product.productEAN && product.productEAN !== "na" ? { gtin: product.productEAN } : {}),
@@ -93,7 +104,7 @@ export function toWarehouseObservation(product, store, options = {}) {
     },
     store: {
       id: store.id,
-      retailer: "warehouse",
+      retailer: slug,
       name: store.name,
       ...(store.region ? { region: store.region } : {}),
     },
@@ -105,7 +116,7 @@ export function toWarehouseObservation(product, store, options = {}) {
     ...(isSpecial
       ? {
           promotion: {
-            id: `warehouse:${product.id}:${regularCents}:${promoCents}`,
+            id: `${slug}:${product.id}:${regularCents}:${promoCents}`,
             type: offer ? "MULTIBUY" : "SPECIAL",
             memberOnly: false,
             ...(offer ? { threshold: offer.quantity, totalCents: offer.totalCents } : {}),
@@ -124,10 +135,14 @@ export function toWarehouseObservation(product, store, options = {}) {
     observedAt: options.observedAt ?? new Date().toISOString(),
     source: {
       retailerProductId: product.id,
-      adapter: "warehouse",
+      adapter: slug,
       url: new URL(product.path || `/p/${product.id}.html`, options.origin ?? DEFAULT_ORIGIN).toString(),
     },
   };
+}
+
+export function toWarehouseObservation(product, store, options = {}) {
+  return toSfccObservation(product, { ...store, retailer: "warehouse" }, options);
 }
 
 export class WarehouseClient {

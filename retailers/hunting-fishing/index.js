@@ -8,7 +8,7 @@
  * Verified live 2026-09-06 (see README.md).
  */
 
-import { MagentoListClient } from "../_lib/magento-html.js";
+import { HtmlGridClient } from "../_lib/html-grid.js";
 
 export const RETAILER = {
   slug: "hunting-fishing",
@@ -37,7 +37,7 @@ const PROFILE = {
 };
 
 export function createClient(options = {}) {
-  return new MagentoListClient({
+  return new HtmlGridClient({
     slug: RETAILER.slug,
     origin: RETAILER.origin,
     scopeName: "Hunting & Fishing Online",

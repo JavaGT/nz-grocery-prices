@@ -52,15 +52,15 @@ into the nightly breadth pipeline).
 | 30 | Kmart NZ | `kmart` | dept store | Next.js + custom API | planned |
 | 31 | Farmers | `farmers` | dept store | probe (custom) | planned |
 | 32 | PB Tech | `pbtech` | electronics | probe (custom) | planned |
-| 33 | Noel Leeming | `noel-leeming` | electronics | SFCC | planned |
+| 33 | Noel Leeming | `noel-leeming` | electronics | SFCC updategrid (curl transport) | implemented 2026-09-06 |
 | 34 | Harvey Norman NZ | `harvey-norman` | electronics | probe (custom) | planned |
 | 35 | Mitre 10 | `mitre-10` | hardware | Algolia search index | planned |
 | 36 | Bunnings NZ | `bunnings` | hardware | Next.js + custom API | planned |
 | 37 | Briscoes | `briscoes` | homeware | probe (custom) | planned |
 | 38 | Rebel Sport | `rebel-sport` | sports | probe (custom) | planned |
 | 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento HTML grids (GraphQL dead) | implemented 2026-09-06 |
-| 40 | Macpac | `macpac` | outdoor | SFCC | planned |
-| 41 | Supercheap Auto NZ | `supercheap-auto` | auto parts | SFCC | planned |
+| 40 | Macpac | `macpac` | outdoor | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
+| 41 | Supercheap Auto NZ | `supercheap-auto` | auto parts | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
 | 42 | Glassons | `glassons` | apparel | probe (custom) | planned |
 | 43 | Animates | `animates` | pet supplies | Magento HTML grids | implemented 2026-09-06 |
 | 44 | Postie | `postie` | apparel | probe (custom) | planned |
@@ -122,4 +122,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **22 / 50** (5 existing + 17 implemented).
+Progress: **25 / 50** (5 existing + 20 implemented).

@@ -3,10 +3,10 @@ import { test } from "node:test";
 import {
   decodeEntities,
   extractTileSlices,
-  parseMagentoTile,
-  parseMagentoTiles,
-  MagentoListClient,
-} from "../../retailers/_lib/magento-html.js";
+  parseHtmlTile,
+  parseHtmlTiles,
+  HtmlGridClient,
+} from "../../retailers/_lib/html-grid.js";
 import { parseObservation } from "../../src/domain/observation.js";
 
 /** Mirrors the Hunting & Fishing tile profile (retailers/hunting-fishing). */
@@ -75,7 +75,7 @@ test("decodeEntities handles numeric and named entities", () => {
 });
 
 test("H&F profile extracts sale pricing into regular+promo", () => {
-  const tiles = parseMagentoTiles(`<div>${HF_TILE}</div>`, HF_PROFILE);
+  const tiles = parseHtmlTiles(`<div>${HF_TILE}</div>`, HF_PROFILE);
   assert.equal(tiles.length, 1);
   const tile = tiles[0];
   assert.equal(tile.id, "727671");
@@ -87,7 +87,7 @@ test("H&F profile extracts sale pricing into regular+promo", () => {
 });
 
 test("Animates profile reads SKU ids and meta-tag prices", () => {
-  const tiles = parseMagentoTiles(`<div>${ANIMATES_TILE}</div>`, ANIMATES_PROFILE);
+  const tiles = parseHtmlTiles(`<div>${ANIMATES_TILE}</div>`, ANIMATES_PROFILE);
   assert.equal(tiles.length, 1);
   const tile = tiles[0];
   assert.equal(tile.id, "I154007");
@@ -96,19 +96,19 @@ test("Animates profile reads SKU ids and meta-tag prices", () => {
   assert.equal(tile.promoCents, undefined);
 });
 
-test("parseMagentoTile drops tiles missing identity, name, or price", () => {
-  assert.equal(parseMagentoTile("<li>no data</li>", HF_PROFILE), undefined);
-  assert.equal(parseMagentoTile(HF_TILE.replace(/data-price-amount="[\d.]+"/g, 'data-price-amount=""'), HF_PROFILE), undefined);
+test("parseHtmlTile drops tiles missing identity, name, or price", () => {
+  assert.equal(parseHtmlTile("<li>no data</li>", HF_PROFILE), undefined);
+  assert.equal(parseHtmlTile(HF_TILE.replace(/data-price-amount="[\d.]+"/g, 'data-price-amount=""'), HF_PROFILE), undefined);
 });
 
-test("MagentoListClient walks categories, stops on no-new-tiles, emits valid observations", async () => {
+test("HtmlGridClient walks categories, stops on no-new-tiles, emits valid observations", async () => {
   const pages = {
     "/hunting?p=1": HF_TILE + HF_TILE.replace(/727671/g, "727672"),
     "/hunting?p=2": HF_TILE.replace(/727671/g, "727672"), // all duplicates -> stop
     "/fishing?p=1": HF_TILE.replace(/727671/g, "727673"),
     "/fishing?p=2": "<div>no tiles</div>", // empty page -> stop
   };
-  const client = new MagentoListClient({
+  const client = new HtmlGridClient({
     slug: "hfexample",
     origin: "https://hf.example",
     categories: ["hunting", "fishing"],

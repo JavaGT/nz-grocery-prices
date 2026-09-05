@@ -70,6 +70,8 @@ into the nightly breadth pipeline).
 | 48 | OfficeMax NZ | `officemax` | office supplies | sitemap + JSON-LD PDPs | implemented 2026-09-06 |
 | 49 | Baby Factory | `baby-factory` | baby | eStar window.category JSON | implemented 2026-09-06 |
 | 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce Stencil HTML cards | implemented 2026-09-06 |
+| 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
+| 52 | Number One Shoes + Hannahs | `number-one-shoes` | footwear | Black Pepper window.category JSON (?p=N) | implemented 2026-09-06 (bonus) |
 
 ## Backups (swap in if a planned retailer proves inaccessible)
 
@@ -146,4 +148,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **50 / 50** (5 existing + 45 implemented). GOAL MET 2026-09-06.
+Progress: **GOAL MET 2026-09-06** — 50-target exceeded: **52 adapters** (5 existing + 47 campaign), all live-verified.

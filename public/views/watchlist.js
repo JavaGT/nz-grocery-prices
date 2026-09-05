@@ -1,4 +1,4 @@
-import { el, esc, clear, delegate } from '../utils/dom.js';
+import { el, clear } from '../utils/dom.js';
 import { formatCents, formatRelativeTime, retailerLabel } from '../utils/format.js';
 import { createProductCard, createSkeletonCard, createEmptyState, createErrorState } from '../components/card.js';
 import { openDetailDialog } from '../components/detail-dialog.js';
@@ -39,9 +39,9 @@ export function renderWatchlist(container, api) {
     for (const entry of entries) {
       const item = el('div', { className: 'watchlist-item' });
       const info = el('div', { className: 'watchlist-info' });
-      info.appendChild(el('strong', {}, esc(entry.label || entry.targetId)));
+      info.appendChild(el('strong', {}, entry.label || entry.targetId));
       if (entry.targetKind) {
-        info.appendChild(el('span', { className: 'watchlist-kind' }, esc(entry.targetKind)));
+        info.appendChild(el('span', { className: 'watchlist-kind' }, entry.targetKind));
       }
       if (entry.currentPrice) {
         info.appendChild(el('span', { className: 'watchlist-price' }, formatCents(entry.currentPrice)));

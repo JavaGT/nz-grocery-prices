@@ -1,18 +1,7 @@
-import { el, esc, clear, qs } from '../utils/dom.js';
+import { el, clear } from '../utils/dom.js';
 
 export function renderSettings(container, api) {
   clear(container);
-  container.appendChild(el('h2', { className: 'view-title' }, 'Settings'));
-
-  let session = null;
-  checkSession();
-
-  async function checkSession() {
-    try {
-      const data = await api.health();
-    } catch {}
-    render();
-  }
 
   function render() {
     clear(container);

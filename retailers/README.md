@@ -43,7 +43,7 @@ into the nightly breadth pipeline).
 | 21 | Babycity | `babycity` | baby | custom | planned |
 | 22 | Shosha | `shosha` | Asian grocery | Shopify products.json | implemented 2026-09-06 |
 | 23 | Oderings | `oderings` | garden | custom | planned |
-| 24 | Commonsense Organics | `commonsense-organics` | organic grocery | probe (custom) | planned |
+| 24 | Commonsense Organics | `commonsense-organics` | organic grocery | SilverStripe sitemap + JSON-LD PDPs | implemented 2026-09-06 |
 | 25 | Bin Inn | `bin-inn` | bulk foods | probe (custom) | planned |
 | 26 | Liquorland | `liquorland` | liquor | window.category JSON (?p=N) | implemented 2026-09-06 |
 | 27 | The Bottle-O | `the-bottle-o` | liquor | Rails SSR talker tiles | implemented 2026-09-06 |
@@ -61,9 +61,9 @@ into the nightly breadth pipeline).
 | 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento HTML grids (GraphQL dead) | implemented 2026-09-06 |
 | 40 | Macpac | `macpac` | outdoor | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
 | 41 | Supercheap Auto NZ | `supercheap-auto` | auto parts | SFCC HTML grids (offset paging) | implemented 2026-09-06 |
-| 42 | Glassons | `glassons` | apparel | probe (custom) | planned |
+| 42 | Glassons | `glassons` | apparel | Black Pepper window.category JSON | implemented 2026-09-06 |
 | 43 | Animates | `animates` | pet supplies | Magento HTML grids | implemented 2026-09-06 |
-| 44 | Postie | `postie` | apparel | probe (custom) | planned |
+| 44 | Postie | `postie` | apparel | Black Pepper window.category JSON | implemented 2026-09-06 |
 | 45 | Number One Shoes | `number-one-shoes` | footwear | probe (custom) | planned |
 | 46 | Paper Plus | `paper-plus` | books/stationery | ASP.NET SSR tiles (tracking attrs) | implemented 2026-09-06 |
 | 47 | Whitcoulls | `whitcoulls` | books/stationery | eStar window.category JSON | implemented 2026-09-06 |

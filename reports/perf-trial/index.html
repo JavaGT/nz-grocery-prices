@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 11:05 NZST · <b>status: complete - changes approved for shipping by owner</b> · auto-refreshes every 5 min</p>
-<div class="banner">Campaign closed: 4 waves merged to main (942 tests, 0 failures), all changes approved for shipping by the owner. Owner also APPROVED deal-signal pre-materialization (DECISIONLOG 2026-09-06), superseding the runtime-only rule - this unlocks the last big lever: serving /api/deals from a rebuild-populated deal_signals table (cold compute 40ms today -&gt; ~2-5ms expected, and flat at any archive age). Implementation is the natural next work item; until then the runtime path stays canonical.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 11:45 NZST · <b>status: complete - deal-signal pre-materialization increment 1 shipped</b> · auto-refreshes every 5 min</p>
+<div class="banner">Post-campaign follow-up (owner-approved): deal_signals is back in the projection schema and the rebuild now populates it with analytics output using the exact runtime parameter set (parity-tested). /api/deals still computes at runtime - flipping the handler to read signals is a small, well-scoped increment 2. Rebuild 0.25s -&gt; 0.29s; DB +~100KB; full suite 944 pass / 0 fail.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -163,6 +163,18 @@
       <tr><th>Trade-offs</th><td>One microtask hop on cache hits; burst joiners share the first callers computedAt; a mid-flight dbSignature change lets the stale compute finish unused (recomputed next request).</td></tr>
       <tr><th>Verified by</th><td>3 new single-flight tests (shared compute, non-sticky failure, independent retailer keys); full suite 942 pass / 0 fail on lane and wave branches.</td></tr>
       <tr><th>Commit</th><td><code>4cf9bac (lane G4, merged)</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#11 · Deal-signal pre-materialization, increment 1 (rebuild layer) <span class="pill "></span></h3>
+    <p>Reintroduced deal_signals into the projection schema and wired the rebuild to materialize analytics output: src/sqlite/deal-materialization.js runs calculateSales/calculateOngoingSales with the runtime parameter set over the 90-day window and stores one row per surviving signal; calc version recorded in _meta. Zero behavior change - the handler switch is increment 2.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>data layer (enables flat-latency deals at any archive age)</td></tr>
+      <tr><th>Before → After</th><td><b>Rebuild 0.25s -&gt; 0.29s (+40ms analytics pass); DB +~100KB. Parity proven: stored rows deep-equal the runtime paths output for the same data (and the live archive correctly stores 0 signals - it has no active deals; the fresh breadth-pilot-nw archive yields 1 history_drop, matching the wave-2 runtime measurement).</b></td></tr>
+      <tr><th>Trade-offs</th><td>Signals age until the next nightly rebuild (bounded, same as collection staleness). calc_version lets a future parameter change force re-interpretation. Increment 2 (handler reads signals) is required before any latency benefit appears.</td></tr>
+      <tr><th>Verified by</th><td>944 pass / 0 fail; dedicated parity + zero-signal tests; real-data cross-check on two archives.</td></tr>
+      <tr><th>Commit</th><td><code>df17718 + docs commit</code></td></tr>
     </table>
   </div>
 

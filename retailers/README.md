@@ -48,14 +48,14 @@ into the nightly breadth pipeline).
 | 26 | Liquorland | `liquorland` | liquor | window.category JSON (?p=N) | implemented 2026-09-06 |
 | 27 | The Bottle-O | `the-bottle-o` | liquor | Rails SSR talker tiles | implemented 2026-09-06 |
 | 28 | Super Liquor | `super-liquor` | liquor | Algolia index (Id-sliced walk) | implemented 2026-09-06 |
-| 29 | Chemist Warehouse NZ | `chemist-warehouse` | pharmacy | probe (custom, heavy JS) | planned |
-| 30 | Kmart NZ | `kmart` | dept store | Next.js + custom API | planned |
-| 31 | Farmers | `farmers` | dept store | probe (custom) | planned |
+| 29 | Citta Design | `citta-design` | homeware | Shopify products.json | implemented 2026-09-06 |
+| 30 | The Body Shop NZ | `the-body-shop-nz` | beauty | Shopify products.json | implemented 2026-09-06 |
+| 31 | Icebreaker | `icebreaker` | merino apparel | Shopify products.json | implemented 2026-09-06 |
 | 32 | PB Tech | `pbtech` | electronics | SSR tiles (page-1 per category) | implemented 2026-09-06 |
 | 33 | Noel Leeming | `noel-leeming` | electronics | SFCC updategrid (curl transport) | implemented 2026-09-06 |
 | 34 | Harvey Norman NZ | `harvey-norman` | electronics | CS-Cart SSR tiles | implemented 2026-09-06 |
 | 35 | Mitre 10 | `mitre-10` | hardware | SAP Commerce OCC + sitemap shards | implemented 2026-09-06 |
-| 36 | Bunnings NZ | `bunnings` | hardware | Next.js + custom API | planned |
+| 36 | Bunnings NZ | `bunnings` | hardware | Next.js __NEXT_DATA__ (Coveo results) | implemented 2026-09-06 |
 | 37 | Briscoes | `briscoes` | homeware | Magento GraphQL (shared w/ Rebel) | implemented 2026-09-06 |
 | 38 | Rebel Sport | `rebel-sport` | sports | Magento GraphQL (Store: rebelsport) | implemented 2026-09-06 |
 | 39 | Hunting & Fishing | `hunting-fishing` | outdoor | Magento HTML grids (GraphQL dead) | implemented 2026-09-06 |
@@ -146,4 +146,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **45 / 50** (5 existing + 40 implemented).
+Progress: **50 / 50** (5 existing + 45 implemented). GOAL MET 2026-09-06.

@@ -31,7 +31,7 @@ function defaultDealsCacheTtlMs() {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DEALS_CACHE_TTL_MS;
 }
 
-export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs() }) {
+export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs(), dbSignature }) {
   function db() {
     const d = typeof getDb === 'function' ? getDb() : getDb;
     if (!d) throw new StatusError(503, 'SERVICE_UNAVAILABLE', 'Projection database not available');
@@ -346,15 +346,17 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   // Deal universe cache: /api/deals re-reads ~90 days of offer revisions and
   // runs two analytics passes per request (~100ms at current archive size).
   // Offer data only changes when the projection DB is rebuilt (nightly), so
-  // the computation is memoized per retailer for dealsCacheTtlMs (0 disables).
+  // the computation is memoized per retailer for dealsCacheTtlMs (0 disables)
+  // and invalidated early when dbSignature (e.g. the DB file's mtime) changes.
   // Filter, limit, and tier ordering stay per-request; cached deal objects
   // are never mutated (the tier path copies before attaching .tier).
   const dealsCache = new Map();
 
   function dealUniverse(retailer, now) {
     const key = retailer || '*';
+    const sig = typeof dbSignature === 'function' ? dbSignature() : undefined;
     const hit = dealsCache.get(key);
-    if (hit && now - hit.computedAt < dealsCacheTtlMs) return hit;
+    if (hit && sig === hit.sig && now - hit.computedAt < dealsCacheTtlMs) return hit;
 
     const baselineMs = 90 * 24 * 60 * 60 * 1000;
     const fromMs = now - baselineMs;
@@ -482,6 +484,7 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
 
     const entry = {
       computedAt: now,
+      sig,
       historyBacked, advertised,
       archiveFreshness: { totalStores: storeCounts?.total || 0, storesWithData: storesWithOffers?.c || 0 },
     };

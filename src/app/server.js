@@ -224,7 +224,14 @@ function createAppServer() {
   const auth = new Auth(appDb, { clock: () => Date.now() });
   const server = new Server({ projDb, appDb, auth });
   const now = Date.now();
-  const publicHandlers = createPublicHandlers({ getDb, appDb, auth, clock: Date.now, startedAt: now, queryDbObservations: defaultQueryDbObservations });
+  // Cheap change probe for the deals cache: when the projection is rebuilt
+  // (file replaced on disk), the cache drops immediately instead of waiting
+  // out the TTL. Note the read-only connection keeps serving the old inode
+  // until restart; the probe just avoids compounding that with cache lag.
+  const dbSignature = () => {
+    try { return statSync(pricesDbPath).mtimeMs; } catch { return null; }
+  };
+  const publicHandlers = createPublicHandlers({ getDb, appDb, auth, clock: Date.now, startedAt: now, queryDbObservations: defaultQueryDbObservations, dbSignature });
   const privateHandlers = createPrivateHandlers({ auth, appDb, clock: Date.now });
 
   server.get('/api/health', publicHandlers.health);

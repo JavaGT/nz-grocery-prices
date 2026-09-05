@@ -48,7 +48,7 @@ function fakeDb() {
   };
 }
 
-function makeHandlers({ dealsCacheTtlMs, observations = fixtures } = {}) {
+function makeHandlers({ dealsCacheTtlMs, dbSignature, observations = fixtures } = {}) {
   let queryCount = 0;
   let now = NOW;
   const handlers = createPublicHandlers({
@@ -59,6 +59,7 @@ function makeHandlers({ dealsCacheTtlMs, observations = fixtures } = {}) {
       return observations();
     },
     dealsCacheTtlMs,
+    dbSignature,
   });
   return {
     handlers,
@@ -92,6 +93,24 @@ test('dealsCacheTtlMs 0 disables caching', async () => {
   await h.handlers.listDeals({ query: {}, clock: h.now });
   await h.handlers.listDeals({ query: {}, clock: h.now });
   assert.equal(h.calls(), 2);
+});
+
+test('dbSignature change invalidates within the TTL', async () => {
+  let sig = 1000;
+  const h = makeHandlers({ dealsCacheTtlMs: 600_000, dbSignature: () => sig });
+  await h.handlers.listDeals({ query: {}, clock: h.now });
+  await h.handlers.listDeals({ query: {}, clock: h.now });
+  assert.equal(h.calls(), 1, 'stable signature still caches');
+  sig = 2000; // projection DB replaced on disk
+  await h.handlers.listDeals({ query: {}, clock: h.now });
+  assert.equal(h.calls(), 2, 'signature change must recompute immediately');
+});
+
+test('absent dbSignature keeps TTL-only behavior', async () => {
+  const h = makeHandlers({ dealsCacheTtlMs: 600_000 });
+  await h.handlers.listDeals({ query: {}, clock: h.now });
+  await h.handlers.listDeals({ query: {}, clock: h.now });
+  assert.equal(h.calls(), 1);
 });
 
 test('caches per retailer', async () => {

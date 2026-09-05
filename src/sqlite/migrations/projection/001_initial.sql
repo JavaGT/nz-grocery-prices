@@ -141,9 +141,31 @@ LEFT JOIN special_snapshots ss ON ss.context_id = or2.context_id
   AND json_valid(ss.added)
   AND EXISTS (SELECT 1 FROM json_each(ss.added) WHERE value = or2.offer_key);
 
--- product_matches and deal_signals tables were removed: documented dead
--- artifacts (AGENTS.md / DECISIONLOG). Matching truth lives in app.db
--- product_match_pairs; deals are computed at runtime by src/analytics.js.
+-- product_matches stays removed: dead artifact, match truth lives in
+-- app.db product_match_pairs.
+-- deal_signals is reintroduced (DECISIONLOG 2026-09-06, owner-approved) as
+-- a rebuild-populated cache of src/analytics.js output: the rebuild runs
+-- calculateSales/calculateOngoingSales with the runtime parameter set
+-- (see src/sqlite/deal-materialization.js) and stores one row per offer
+-- signal. calculated_at is the CURRENT OBSERVATION's epoch (what the
+-- /api/deals response exposes), not the wall-clock compute moment.
+
+CREATE TABLE IF NOT EXISTS deal_signals (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id           TEXT NOT NULL,
+  context_id           INTEGER NOT NULL REFERENCES price_contexts(id),
+  signal_kind          TEXT NOT NULL CHECK(signal_kind IN ('history_drop','all_time_low','advertised_only')),
+  calc_version         TEXT NOT NULL,
+  baseline_window_days INTEGER NOT NULL,
+  min_samples          INTEGER NOT NULL,
+  price_policy         TEXT NOT NULL,
+  reference_cents      INTEGER NOT NULL,
+  current_cents        INTEGER NOT NULL,
+  drop_percent         REAL,
+  calculated_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ds_product ON deal_signals(product_id, context_id);
 
 CREATE TABLE IF NOT EXISTS _meta (
   key   TEXT PRIMARY KEY,

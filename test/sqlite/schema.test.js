@@ -130,9 +130,10 @@ describe('schema migrations', () => {
       assert.ok(tables.includes('schema_migrations'));
       assert.ok(tables.includes('special_snapshots'));
       assert.ok(tables.includes('store_revisions'));
-      // Dead artifacts must NOT come back (AGENTS.md: deal_signals /
-      // product_matches are dead; matching truth lives in app.db).
-      assert.ok(!tables.includes('deal_signals'), 'deal_signals stays deleted');
+      // product_matches must NOT come back (dead artifact; match truth lives
+      // in app.db). deal_signals is back as a rebuild-populated cache
+      // (DECISIONLOG 2026-09-06, owner-approved).
+      assert.ok(tables.includes('deal_signals'), 'deal_signals exists (materialized at rebuild)');
       assert.ok(!tables.includes('product_matches'), 'product_matches stays deleted');
       const views = db.prepare("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name").all().map(r => r.name);
       assert.ok(views.includes('price_observations'));

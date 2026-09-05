@@ -59,9 +59,10 @@ data/                  gitignored: prices.jsonl, prices.db, app.db, collection-h
 files opened by separate classes**. A rebuild script that opens `app.db` is a
 critical bug. Matching writes to `app.db.product_match_pairs`; the projection
 DB's `product_matches` table is a **dead artifact** — do not read or write
-it. `deal_signals` does not exist today; the owner has approved
-re-introducing it as a rebuild-populated cache (DECISIONLOG 2026-09-06) —
-until that lands, deals are runtime-computed. See `DECISIONLOG.md`.
+it. `deal_signals` is a rebuild-populated cache of analytics output
+(DECISIONLOG 2026-09-06, owner-approved; see
+`src/sqlite/deal-materialization.js`); `/api/deals` still computes at
+runtime — flipping the handler to read signals is the pending follow-up. See `DECISIONLOG.md`.
 
 ## Domain terms
 

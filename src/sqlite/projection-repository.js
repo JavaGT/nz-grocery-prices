@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { classifyParsedRecord } from '../archive-records.js';
 import { applyProjectionMigrations } from './schema.js';
+import { materializeDealSignals, DEAL_SIGNALS_CALC_VERSION } from './deal-materialization.js';
 
 /** Inode/content-size/high-resolution timestamp signature for change detection. */
 function statSignature(filePath) {
@@ -342,6 +343,37 @@ export class ProjectionRepository {
           `Archive contains zero valid recognized records (${errors} malformed line${errors !== 1 ? 's' : ''})`
         );
       }
+
+      // Pre-materialize deal signals (DECISIONLOG 2026-09-06, owner-approved):
+      // run the runtime analytics over the freshly inserted rows and store
+      // one row per surviving offer signal. Must run AFTER the insert phase
+      // commits (it queries products/contexts/offers) and BEFORE publish.
+      const signals = materializeDealSignals(tmpDb, { now: Date.now() });
+      const insertSignal = tmpDb.prepare(`
+        INSERT INTO deal_signals(product_id, context_id, signal_kind, calc_version,
+          baseline_window_days, min_samples, price_policy, reference_cents,
+          current_cents, drop_percent, calculated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      tmpDb.exec('BEGIN IMMEDIATE');
+      try {
+        for (const s of signals) {
+          insertSignal.run(
+            s.product_id, s.context_id, s.signal_kind, s.calc_version,
+            s.baseline_window_days, s.min_samples, s.price_policy,
+            s.reference_cents, s.current_cents, s.drop_percent, s.calculated_at
+          );
+        }
+        tmpDb.exec('COMMIT');
+      } catch (err) {
+        try { tmpDb.exec('ROLLBACK'); } catch { /* temp DB is discarded anyway */ }
+        throw err;
+      }
+      // recorded so the published DB advertises which computation produced
+      // the signal rows
+      tmpDb.prepare("INSERT OR REPLACE INTO _meta(key, value) VALUES(?, ?)").run(
+        'deal_signals_calc_version', DEAL_SIGNALS_CALC_VERSION
+      );
 
       const metaStmt = tmpDb.prepare("INSERT OR REPLACE INTO _meta(key, value) VALUES(?, ?)");
       metaStmt.run('jsonl_fingerprint', fingerprint);

@@ -76,7 +76,6 @@ into the nightly breadth pipeline).
 | Retailer | Domain | Platform / note |
 |---|---|---|
 | Bin Inn | bininn.co.nz | category pages are marketing-only; no online product prices |
-| Number One Shoes + Hannahs | numberoneshoesandhannahs.co.nz | Vue3 client-rendered listings; PDP JSON-LD unverified |
 | Hallenstein Brothers | hallensteins.co.nz | custom/headless; /graphql 301s to .com 404, deep links redirect — needs browser-level capture |
 | The Sleep Store | thesleepstore.co.nz | Shopify (products.json blocked) |
 | Merchant 1948 | overlandfootwear.co.nz | Shopify (products.json blocked) |

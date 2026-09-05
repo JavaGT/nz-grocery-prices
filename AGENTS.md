@@ -44,9 +44,11 @@ dependencies, `node:test`. **Node 26.3.1+** for the app server / SQLite; Node
   change.
 - **No FTS5.** Search uses `LIKE` + `COLLATE NOCASE` on `products.name`. Don't
   assume FTS5 exists.
-- **Dead tables.** Projection DB `deal_signals` and `product_matches` are not
-  populated and no longer exist (dropped from the schema in the 2026-09-06
-  perf campaign). Deals = runtime `src/analytics.js`; match truth =
+- **Deal signals pre-materialization is APPROVED** (owner override,
+  2026-09-06 — see DECISIONLOG). `deal_signals` may be reintroduced into the
+  projection schema and populated by the rebuild; computation MUST reuse
+  `src/analytics.js` with the runtime parameter set. Until that lands, deals
+  stay runtime-computed. `product_matches` stays deleted — match truth =
   `app.db.product_match_pairs`.
 - **Warehouse adapter uses `curl` via `execFile`** (anti-bot TLS fingerprint),
   never shell strings. Don't switch to shell-string execution.

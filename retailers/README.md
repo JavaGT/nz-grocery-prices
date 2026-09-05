@@ -199,6 +199,20 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 224 | 86 Parts | `86-parts` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 225 | Baby HQ | `baby-hq` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 226 | Barefoot Kiwi | `barefoot-kiwi` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 227 | Beardy Curls | `beardy-curls` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 228 | Cupcake Sweeties | `cupcake-sweeties` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 229 | Jadiez | `jadiez` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 230 | Lamplight Books | `lamplight-books` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 231 | Moa Grey Lynn | `moa-grey-lynn` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 232 | O Care | `o-care` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 233 | PC Store | `pcstore` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 234 | Spacecraft Creative | `spacecraft-creative` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 235 | Tea Pea | `tea-pea` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 236 | Ten Point One | `ten-point-one` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 237 | Tom & Bridget | `tom-and-bridget` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 210 | Clever Poppy | `clever-poppy` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 211 | ILoveUgly | `iloveugly` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 212 | Kids Ride Shotgun | `kids-ride-shotgun` | general retail | Shopify products.json | implemented 2026-09-06 |

@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 08:45 NZST · <b>status: running - wave 2</b> · auto-refreshes every 5 min</p>
-<div class="banner">Wave 1 (merged to main): deals 107ms -&gt; 0.26ms, page weight -75%, test suite 12.25s -&gt; 2.6s, projection 17MB -&gt; 15.6MB. Wave 2 under way in worktree perf-trial-20260906-0839: the deals cache now invalidates immediately when the projection DB file changes on disk (was: up to 5 minutes of lag after the nightly rebuild). Two subagent lanes dispatched on different systems: rebuild/ingest speed, and query resilience at 2x archive scale.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 09:10 NZST · <b>status: running - wave 2</b> · auto-refreshes every 5 min</p>
+<div class="banner">Wave 1 (merged to main): deals 107ms -&gt; 0.26ms, page weight -75%, test suite 12.25s -&gt; 2.6s, projection 17MB -&gt; 15.6MB. Wave 2 so far: deals cache now invalidates immediately when the projection DB changes on disk, and the projection rebuild dropped from ~1.9s to 0.24s (8x) via prepared-statement reuse + a single transaction - output verified byte-identical. Scale-resilience lane still running.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -103,6 +103,18 @@
       <tr><th>Trade-offs</th><td>One statSync per /api/deals request (~10 microseconds). Absent probe = TTL-only, so library callers keep old behavior.</td></tr>
       <tr><th>Verified by</th><td>8 deals-cache unit tests (signature change recomputes, stable signature caches, absent probe = TTL-only) + npm run check</td></tr>
       <tr><th>Commit</th><td><code>042f2f8</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#6 · Wave 2: projection rebuild ~1.9s -&gt; 0.24s (8x) <span class="pill "></span></h3>
+    <p>Profiling showed ~87% of rebuild time in per-record SQL statement compiles (~100k per rebuild) and per-statement autocommit journaling. The insert phase now prepares its 13 statements once, runs in a single transaction, and sets synchronous=OFF on the throwaway temp connection only. Rowid read from the INSERT result instead of a follow-up query.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>data layer / ingest (speed)</td></tr>
+      <tr><th>Before → After</th><td><b>18,726-record archive: 1.88s -&gt; 0.24s. 35,039-record NW archive: 3.87s -&gt; 0.45s. Output byte-identical (only _meta.built_at differs, which varies run to run).</b></td></tr>
+      <tr><th>Trade-offs</th><td>synchronous=OFF means a crash mid-rebuild could corrupt the temp DB - it was always discarded unpublished, so nothing real is exposed. The authoritative JSONL writer fsync semantics are untouched.</td></tr>
+      <tr><th>Verified by</th><td>Content-identity tool (rows, integer aggregates, schema, meta) says IDENTICAL vs a pre-change build; 116 sqlite tests + full suite 906 pass / 0 fail; caught in review: the identity tool initially lived in test/ where the runner executes it and fails - moved to tools/.</td></tr>
+      <tr><th>Commit</th><td><code>47413f9 + review fix 1d759f3 (subagent lane, rate-limit-killed before receipt; coordinator verified and merged)</code></td></tr>
     </table>
   </div>
 

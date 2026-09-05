@@ -360,20 +360,21 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   // and invalidated early when dbSignature (e.g. the DB file's mtime) changes.
   // Filter, limit, and tier ordering stay per-request; cached deal objects
   // are never mutated (the tier path copies before attaching .tier).
+  // Concurrent cache misses are single-flighted: the first caller computes,
+  // the rest await the same in-flight promise. The pending entry is removed
+  // when the computation settles, so a failure is never sticky — the next
+  // request recomputes. If dbSignature changes mid-flight, the stale
+  // computation finishes unused and a fresh one starts.
   const dealsCache = new Map();
+  const pendingDealsCompute = new Map();
 
-  function dealUniverse(retailer, now) {
-    const key = retailer || '*';
-    const sig = typeof dbSignature === 'function' ? dbSignature() : undefined;
-    const hit = dealsCache.get(key);
-    if (hit && sig === hit.sig && now - hit.computedAt < dealsCacheTtlMs) return hit;
-
+  async function computeDealsUniverse(retailer, key, now, sig) {
     const baselineMs = 90 * 24 * 60 * 60 * 1000;
     const fromMs = now - baselineMs;
 
     let observations = [];
     if (typeof queryDbObservations === 'function') {
-      observations = queryDbObservations(db(), fromMs, now);
+      observations = await queryDbObservations(db(), fromMs, now);
     } else {
       observations = defaultQueryDbObservations(db(), fromMs, now);
     }
@@ -503,6 +504,26 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     return entry;
   }
 
+  // Returns a promise for the deal universe entry for `retailer`, serving a
+  // fresh cache hit directly and otherwise joining (or starting) the
+  // in-flight computation for that key.
+  function dealUniverse(retailer, now) {
+    const key = retailer || '*';
+    const sig = typeof dbSignature === 'function' ? dbSignature() : undefined;
+    const hit = dealsCache.get(key);
+    if (hit && sig === hit.sig && now - hit.computedAt < dealsCacheTtlMs) return Promise.resolve(hit);
+
+    const inflight = pendingDealsCompute.get(key);
+    if (inflight && inflight.sig === sig) return inflight.promise;
+
+    const pending = { sig, promise: null };
+    pending.promise = computeDealsUniverse(retailer, key, now, sig).finally(() => {
+      if (pendingDealsCompute.get(key) === pending) pendingDealsCompute.delete(key);
+    });
+    pendingDealsCompute.set(key, pending);
+    return pending.promise;
+  }
+
   async function listDeals(ctx) {
     db();
     const filter = ctx.query.filter || 'all';
@@ -514,7 +535,7 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     }
 
     const now = ctx.clock();
-    const universe = dealUniverse(retailer, now);
+    const universe = await dealUniverse(retailer, now);
     let historyBacked = universe.historyBacked;
     let advertised = universe.advertised;
 

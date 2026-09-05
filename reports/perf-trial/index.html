@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 10:55 NZST · <b>status: complete - stopped per 12:00 NZST condition (finished early)</b> · auto-refreshes every 5 min</p>
-<div class="banner">Campaign complete after 4 waves, all merged to main (942 tests, 0 failures). Final wave: the deals cold compute is now single-flighted - concurrent cold requests share one computation instead of N (and the async path, which previously FAILED all concurrent cold requests, is fixed). Repo gained npm run bench / bench:archive so trends are re-checkable after nightly growth. Cumulative: homepage deals 107ms -&gt; 0.28ms warm and -4.4x CPU further, page weight -75%, search 5x, listing 65x at scale, projection rebuild 8x and 17MB -&gt; 16.7MB, test suite 12.25s -&gt; 2.6s, scale headroom proven at 14x.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 11:05 NZST · <b>status: complete - changes approved for shipping by owner</b> · auto-refreshes every 5 min</p>
+<div class="banner">Campaign closed: 4 waves merged to main (942 tests, 0 failures), all changes approved for shipping by the owner. Owner also APPROVED deal-signal pre-materialization (DECISIONLOG 2026-09-06), superseding the runtime-only rule - this unlocks the last big lever: serving /api/deals from a rebuild-populated deal_signals table (cold compute 40ms today -&gt; ~2-5ms expected, and flat at any archive age). Implementation is the natural next work item; until then the runtime path stays canonical.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>

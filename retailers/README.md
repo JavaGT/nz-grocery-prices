@@ -51,7 +51,7 @@ into the nightly breadth pipeline).
 | 29 | Chemist Warehouse NZ | `chemist-warehouse` | pharmacy | probe (custom, heavy JS) | planned |
 | 30 | Kmart NZ | `kmart` | dept store | Next.js + custom API | planned |
 | 31 | Farmers | `farmers` | dept store | probe (custom) | planned |
-| 32 | PB Tech | `pbtech` | electronics | probe (custom) | planned |
+| 32 | PB Tech | `pbtech` | electronics | SSR tiles (page-1 per category) | implemented 2026-09-06 |
 | 33 | Noel Leeming | `noel-leeming` | electronics | SFCC updategrid (curl transport) | implemented 2026-09-06 |
 | 34 | Harvey Norman NZ | `harvey-norman` | electronics | CS-Cart SSR tiles | implemented 2026-09-06 |
 | 35 | Mitre 10 | `mitre-10` | hardware | SAP Commerce OCC + sitemap shards | implemented 2026-09-06 |
@@ -67,7 +67,7 @@ into the nightly breadth pipeline).
 | 45 | Number One Shoes | `number-one-shoes` | footwear | probe (custom) | planned |
 | 46 | Paper Plus | `paper-plus` | books/stationery | ASP.NET SSR tiles (tracking attrs) | implemented 2026-09-06 |
 | 47 | Whitcoulls | `whitcoulls` | books/stationery | eStar window.category JSON | implemented 2026-09-06 |
-| 48 | OfficeMax NZ | `officemax` | office supplies | probe (custom) | planned |
+| 48 | OfficeMax NZ | `officemax` | office supplies | sitemap + JSON-LD PDPs | implemented 2026-09-06 |
 | 49 | Baby Factory | `baby-factory` | baby | eStar window.category JSON | implemented 2026-09-06 |
 | 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce Stencil HTML cards | implemented 2026-09-06 |
 
@@ -132,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **36 / 50** (5 existing + 31 implemented).
+Progress: **38 / 50** (5 existing + 33 implemented).

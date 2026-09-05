@@ -68,9 +68,19 @@ export function parseHtmlTile(slice, profile) {
   if (!id) return undefined;
   const link = anchorTag(slice, profile.linkClass);
   const url = attribute(link, "href") ?? firstCapture(slice, profile.url ?? []);
-  const name = decodeEntities(
-    firstCapture(slice, profile.name) ?? attribute(link, "title") ?? "",
-  ).trim();
+  let name = "";
+  if (profile.joinName) {
+    // e.g. PB Tech splits the product name across an h2 + h3 pair
+    name = [...slice.matchAll(/<h[23] class="np_title[^"]*">([\s\S]{0,400}?)<\/h[23]>/g)]
+      .map((m) => decodeEntities(m[1]).replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (!name) {
+    name = decodeEntities(
+      firstCapture(slice, profile.name) ?? attribute(link, "title") ?? "",
+    ).trim();
+  }
   const finalRaw = firstCapture(slice, profile.finalPrice);
   const wasRaw = firstCapture(slice, profile.wasPrice ?? []);
   const memberRaw = firstCapture(slice, profile.memberPrice ?? []);
@@ -209,7 +219,9 @@ export class HtmlGridClient {
         retailerProductId: tile.id,
         url: tile.url && !/^https?:\/\//.test(tile.url)
           ? `${store.origin}/${tile.url.replace(/^\//, "")}`
-          : tile.url,
+          : this.profile.urlFromId
+            ? `${store.origin}${this.profile.urlFromId.replace("{id}", tile.id)}`
+            : undefined,
         name: tile.name,
         brand: tile.brand,
         image: tile.image,

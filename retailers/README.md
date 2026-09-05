@@ -69,7 +69,7 @@ into the nightly breadth pipeline).
 | 47 | Whitcoulls | `whitcoulls` | books/stationery | probe (custom) | planned |
 | 48 | OfficeMax NZ | `officemax` | office supplies | probe (custom) | planned |
 | 49 | Baby Factory | `baby-factory` | baby | probe (custom) | planned |
-| 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce + Algolia | planned |
+| 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce Stencil HTML cards | implemented 2026-09-06 |
 
 ## Backups (swap in if a planned retailer proves inaccessible)
 
@@ -132,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **26 / 50** (5 existing + 21 implemented).
+Progress: **27 / 50** (5 existing + 22 implemented).

@@ -54,6 +54,7 @@ export class MobileFoodstuffsClient {
   #config;
   #timeout;
   #delayMs;
+  #retryBackoffMs;
   #lastCompletedAt = 0;
   constructor(options = {}) {
     const banner = options.banner ?? "PNS";
@@ -75,6 +76,9 @@ export class MobileFoodstuffsClient {
     // pilot proved every wrapper-layer (crawler host slots) hung against
     // this backend while bare sequential fetches flowed fine.
     this.#delayMs = options.delayMs ?? 0;
+    // Backoff between retryable attempts (5xx / network blips). Injectable
+    // so tests exercise the exact retry semantics without real 3-6s sleeps.
+    this.#retryBackoffMs = options.retryBackoffMs ?? RETRY_BACKOFF_MS;
   }
 
   /** Enforce the minimum gap since the last completed request. */
@@ -195,7 +199,7 @@ export class MobileFoodstuffsClient {
         ) {
           lastError = new Error(`Mobile request ${path} failed: 5xx`);
           await new Promise((resolve) =>
-            setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)),
+            setTimeout(resolve, this.#retryBackoffMs * (attempt + 1)),
           );
           continue;
         }
@@ -210,7 +214,7 @@ export class MobileFoodstuffsClient {
         lastError = error;
         if (attempt >= maxAttempts - 1) throw error;
         await new Promise((resolve) =>
-          setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)),
+          setTimeout(resolve, this.#retryBackoffMs * (attempt + 1)),
         );
       }
     }

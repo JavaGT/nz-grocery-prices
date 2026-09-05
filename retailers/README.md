@@ -199,6 +199,11 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 199 | Bea DnD Games | `bea-dnd-games` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 200 | Dice Goblin | `dice-goblin` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 201 | Game Roost | `game-roost` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 202 | Goblin Games | `goblin-games` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 203 | Scorpio Books | `scorpio-books` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 184 | A&C Homestore | `ac-homestore` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 185 | Appliance World NZ | `appliance-world` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 186 | AwaMae | `awamae` | general retail | Shopify products.json | implemented 2026-09-06 |

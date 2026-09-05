@@ -48,6 +48,10 @@ function fakeDb() {
   };
 }
 
+// listDeals returns a CachedResponse for anonymous requests (the transport
+// reuses its encoded bytes); unwrap for shape assertions.
+const bodyOf = (res) => (res instanceof Object && 'body' in res ? res.body : res);
+
 function makeHandlers({ dealsCacheTtlMs, dbSignature, observations = fixtures } = {}) {
   let queryCount = 0;
   let now = NOW;
@@ -71,8 +75,8 @@ function makeHandlers({ dealsCacheTtlMs, dbSignature, observations = fixtures } 
 
 test('caches the deal computation within the TTL', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
-  const first = await h.handlers.listDeals({ query: {}, clock: h.now });
-  const second = await h.handlers.listDeals({ query: {}, clock: h.now });
+  const first = bodyOf(await h.handlers.listDeals({ query: {}, clock: h.now }));
+  const second = bodyOf(await h.handlers.listDeals({ query: {}, clock: h.now }));
   assert.equal(h.calls(), 1, 'second request must not recompute');
   assert.deepEqual(second, first);
   assert.equal(first.historyBacked.length, 1);
@@ -115,9 +119,9 @@ test('absent dbSignature keeps TTL-only behavior', async () => {
 
 test('caches per retailer', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
-  const pn1 = await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now });
-  const pn2 = await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now });
-  const ww = await h.handlers.listDeals({ query: { retailer: 'woolworths' }, clock: h.now });
+  const pn1 = bodyOf(await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now }));
+  const pn2 = bodyOf(await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now }));
+  const ww = bodyOf(await h.handlers.listDeals({ query: { retailer: 'woolworths' }, clock: h.now }));
   assert.equal(h.calls(), 2, 'paknsave hit, woolworths computed');
   assert.deepEqual(pn2, pn1);
   assert.equal(pn1.historyBacked.length, 1);
@@ -127,9 +131,9 @@ test('caches per retailer', async () => {
 
 test('filter and limit still apply to cached results', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
-  const all = await h.handlers.listDeals({ query: {}, clock: h.now });
-  const ads = await h.handlers.listDeals({ query: { filter: 'advertised' }, clock: h.now });
-  const capped = await h.handlers.listDeals({ query: { limit: '1' }, clock: h.now });
+  const all = bodyOf(await h.handlers.listDeals({ query: {}, clock: h.now }));
+  const ads = bodyOf(await h.handlers.listDeals({ query: { filter: 'advertised' }, clock: h.now }));
+  const capped = bodyOf(await h.handlers.listDeals({ query: { limit: '1' }, clock: h.now }));
   assert.equal(h.calls(), 1, 'all three served from one computation');
   assert.equal(ads.total, 1);
   assert.equal(ads.advertised.length, 1);
@@ -164,11 +168,37 @@ test('tiered requests do not mutate cached deal objects', async () => {
   assert.ok(milk, 'watched product present');
   assert.equal(milk.tier, 'watch-other', 'watched product at non-preferred store tiers as watch-other');
 
-  const plain = await handlers.listDeals(plainCtx);
+  const plain = bodyOf(await handlers.listDeals(plainCtx));
   for (const deal of [...plain.historyBacked, ...plain.advertised]) {
     assert.equal(deal.tier, undefined, 'cached objects must not leak tier into other requests');
   }
 
   const tieredAgain = await handlers.listDeals(authedCtx);
   assert.equal(tieredAgain.historyBacked.find(d => d.product.id === 'ps:milk-1')?.tier, 'watch-other');
+});
+
+test('anonymous responses are CachedResponse; tiered responses stay plain', async () => {
+  const { CachedResponse } = await import('../../src/server/server.js');
+  const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
+  const plain = await h.handlers.listDeals({ query: {}, clock: h.now });
+  assert.ok(plain instanceof CachedResponse, 'anonymous path returns CachedResponse');
+  assert.equal(plain.maxAgeMs, 60_000);
+  assert.match(plain.token, /^\*\|undefined\|/);
+  assert.equal(plain.body.total, 2);
+
+  const appDb = {
+    getWatchList: () => [{ target_kind: 'product', target_id: 'ps:milk-1' }],
+    getStorePreferences: () => [],
+  };
+  const handlers = createPublicHandlers({
+    getDb: fakeDb,
+    appDb,
+    auth: { getSessionUser: () => ({ id: 'u1' }) },
+    clock: () => NOW,
+    queryDbObservations: () => fixtures(),
+    dealsCacheTtlMs: 60_000,
+  });
+  const tiered = await handlers.listDeals({ query: {}, clock: () => NOW, cookies: { sid: 's1' } });
+  assert.ok(!(tiered instanceof CachedResponse), 'tiered path must stay a plain body');
+  assert.ok(tiered.tiers, 'tiered response carries tier summary');
 });

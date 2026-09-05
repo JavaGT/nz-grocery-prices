@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name COLLATE NOCASE);
+-- Serves ORDER BY updated_at DESC listing (default browse order): range seek
+-- instead of a full sort at archive scale (measured 1.95ms -> 0.03ms at 37k
+-- products, EXPLAIN-verified during the wave-3 scale lane).
+CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_products_source ON products(source_id);
 CREATE INDEX IF NOT EXISTS idx_products_gtin ON products(gtin);
 

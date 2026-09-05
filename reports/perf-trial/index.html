@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 09:35 NZST · <b>status: wave 2 complete - awaiting owner review</b> · auto-refreshes every 5 min</p>
-<div class="banner">Wave 2 complete (910 tests, 0 failures). Merged: (1) deals cache now drops immediately when the projection DB changes on disk; (2) projection rebuild 1.9s -&gt; 0.24s (8x), byte-identical output; (3) cold deals compute ~18% cheaper per call and now O(90-day window) instead of O(total archive) via a new observed_at index - deal latency stays flat as the archive grows past 2x. All query paths verified flat at 2x archive scale (35k records): warm deals 0.33ms, search 1.6ms, boot 74ms.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 10:40 NZST · <b>status: wave 3 complete - awaiting owner review</b> · auto-refreshes every 5 min</p>
+<div class="banner">Wave 3 complete (930 tests, 0 failures). Merged: 14x-scale proof (all endpoints flat), 37% less SQL on the hot deals query via dead-column removal, product listing 65x faster at scale via a new index, warm /api/deals CPU down 4.4x by serving cached pre-compressed bytes (brotli q5 for dynamic API JSON: -11% wire vs gzip AND faster to produce), and the SPA first-load waterfall collapsed from 4 serial round trips to 2 via modulepreload hints. One data note: the current live archive yields an empty deals feed (no active sales in data/prices.jsonl right now) - that is data, not a regression; the wire lane measured with a deals-rich payload.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -127,6 +127,30 @@
       <tr><th>Trade-offs</th><td>Index costs +152KB on the current projection (296KB per 20k offer rows); rebuild time unchanged (0.28s). Deep pagination OFFSET walks stay linear by design (skipped - API semantics). Small per-call Map for ISO memoization.</td></tr>
       <tr><th>Verified by</th><td>New mapping output deep-equal to the old (dedicated test); full suite 910 pass / 0 fail on the merged branch; EXPLAIN shows range seek, no temp sort; benches at both scales.</td></tr>
       <tr><th>Commit</th><td><code>c6e2cd5 (lane) + index adoption on wave branch</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#8 · Wave 3: 14x-scale proof + dead-column SQL audit + listing index <span class="pill "></span></h3>
+    <p>Built a 244k-record / 148.7MB synthetic archive (3 shifted copies of the breadth pilots, all inside the 90-day deals window). Benched every endpoint, then removed provably unread columns from the hot SELECTs: rev_hash/offer_key/context_id + the retailers JOIN from the deals window query, promotion_data/source_data from product detail, source_data from history, SELECT * -&gt; explicit columns in listing. Coordinator adopted the lanes measured products(updated_at DESC) index.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server query path at scale (speed)</td></tr>
+      <tr><th>Before → After</th><td><b>Deals window SQL 420ms -&gt; 264ms raw (37%) at 133k offers; cold /api/deals 707 -&gt; 617ms at 14.2x scale (vs 40ms today at 1x - linear, cache-amortized). Product listing ORDER BY updated_at: 1.95ms -&gt; 0.03ms at 37k products. Everything else flat at 14x: search 7.4ms, suggestions 2.7ms, history 0.4ms, boot 72ms.</b></td></tr>
+      <tr><th>Trade-offs</th><td>Dropping the retailers JOIN could only change output if a context existed without a retailer row (rebuild-impossible). Response key sets are now pinned by exact-key contract tests + a SELECT-list audit test so future drift fails loudly. Index costs +180KB; rebuild unchanged (0.25s). At ~500k in-window offers the next lever is pre-materialization, which DECISIONLOG forbids (deals are runtime-computed by rule).</td></tr>
+      <tr><th>Verified by</th><td>917 pass / 0 fail on the merged branch; EXPLAIN-verified index use; new handler-sql-audit + exact-key contract tests; rebuild 0.25s, DB +180KB.</td></tr>
+      <tr><th>Commit</th><td><code>0aee7ab (lane E3) + index adoption on wave branch</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#9 · Wave 3: warm deals CPU -4.4x, API brotli -11% wire, waterfall 4 -&gt; 2 round trips <span class="pill "></span></h3>
+    <p>Transport lane (subagent, reviewed + adopted by coordinator): new CachedResponse body type lets a handler hand the Server a byte-stable response; the Server caches its serialized and gzipped forms keyed by a token that must rotate exactly when the payload changes. listDeals anonymous requests adopt it (token = retailer|dbSignature|computeGeneration|filter|limit; maxAgeMs = the same TTL; signed-in tiered responses stay plain). Dynamic API JSON now uses brotli quality 5 (measured smaller AND faster to produce than gzip at these sizes; quality 11 stays static-files-only at ~20ms). index.html gained 10 modulepreload hints.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>transport layer + frontend loading (CPU + speed)</td></tr>
+      <tr><th>Before → After</th><td><b>Warm /api/deals server CPU: 321-363us -&gt; 72-82us per request (4.4x) on a 61,883B deals payload; wire -11.2% for brotli-capable clients (deals 4,919 -&gt; 4,369B), gzip clients byte-identical (multi-member stream, +37B). Module discovery depth 4 serial round trips -&gt; 2 (same 12 requests / bytes).</b></td></tr>
+      <tr><th>Trade-offs</th><td>Cached gzip is a multi-member stream (+0.8% bytes, decoded identically by curl and node - verified). The response _freshness snapshot is frozen for the TTL window (consistent with dbSignature semantics). Token uniqueness is the handlers contract; the encoded-byte cache is bounded at 32 entries, clear-on-full. Preload hints pin the current import graph - a drift test walks the real graph and fails if hints go stale.</td></tr>
+      <tr><th>Verified by</th><td>New server-cached-response (265 lines) + index-preloads tests; full suite 930 pass / 0 fail on the merged branch; real-server curl checks for brotli/gzip bytes and 200s on all hinted modules.</td></tr>
+      <tr><th>Commit</th><td><code>16d8ade + 9e22649 (lane F3) + hook adoption d144b7f</code></td></tr>
     </table>
   </div>
 

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 
 const MAX_BODY = 65536;
 const MAX_COOKIE_LENGTH = 4096;
@@ -8,6 +8,22 @@ const MAX_COOKIE_COUNT = 20;
 // JSON responses below this size go out uncompressed: the CPU cost of gzipping
 // outweighs the wire savings once headers are counted.
 const MIN_COMPRESS_BYTES = 1024;
+
+// Dynamic API bodies are brotli-compressed at an explicit quality (measured on
+// real payloads: q5 is smaller AND faster than gzip level 6 at ~60KB, ~1.2x
+// gzip CPU at ~14KB, for 5-11% fewer bytes). Quality 11, the static-file
+// default, costs ~20ms on the same body — far too slow per request.
+const BROTLI_DYNAMIC = { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } };
+
+// Bound on the Server-side encoded-response cache (see CachedResponse): when
+// full, the whole map drops (same policy as the deals universe cache). Entries
+// hold serialized strings + one compressed tail each, so 32 keeps worst-case
+// memory at a few MB.
+const MAX_CACHED_BODIES = 32;
+
+// `{"_requestId":"<36-char uuid>"` — the per-request head of every cached
+// response body.
+const REQUEST_ID_PREFIX_TEMPLATE = '{"_requestId":"' + '0'.repeat(36) + '"';
 
 // Parses an Accept-Encoding header into { encoding: q } for the encodings this
 // server can produce (q=0 means "not accepted"). Single source of truth shared
@@ -41,6 +57,31 @@ export class StatusError extends Error {
   }
 }
 
+// Marks a handler result as byte-stable for a window of time so the transport
+// layer can reuse the serialized JSON and compressed bytes across requests
+// instead of re-running JSON.stringify + compression per response. Handlers
+// stay encoding-agnostic: they declare payload identity, the Server owns how
+// that becomes bytes.
+//
+// - token: identity of the payload content. It MUST change whenever the body
+//   would change (e.g. include the projection dbSignature and the computation
+//   generation) and MUST be unique per payload variant (per query shape, per
+//   user tiering, ...): the Server trusts it and serves the cached bytes.
+// - maxAgeMs: how long the encoded bytes may be reused; the freshness snapshot
+//   embedded in the response is frozen for the same window, which is safe
+//   because the projection only changes when the token changes (dbSignature).
+// - body: the plain response object. Keys `_requestId` / `_freshness` /
+//   `retryAfter` are reserved for the transport; bodies containing them (or
+//   non-plain-object bodies) fall back to the uncached path, which serializes
+//   exactly as before.
+export class CachedResponse {
+  constructor({ token, body, maxAgeMs = 0 }) {
+    this.token = String(token);
+    this.body = body;
+    this.maxAgeMs = Number(maxAgeMs);
+  }
+}
+
 export class Server {
   #server = null;
   #projDb = null;
@@ -51,6 +92,9 @@ export class Server {
   #startedAt = 0;
   #routes = [];
   #fallback = null;
+  // token -> { createdAt, tail, gzipTail, plainSize } for CachedResponse
+  // bodies (see #respondCached).
+  #bodyCache = new Map();
 
   constructor({ projDb, appDb, auth, logger = console, clock = Date.now } = {}) {
     this.#projDb = projDb;
@@ -266,6 +310,13 @@ export class Server {
   }
 
   #respond(res, status, body, requestId, cookieHeader, acceptEncoding) {
+    if (body instanceof CachedResponse) {
+      return this.#respondCached(res, status, body, requestId, cookieHeader, acceptEncoding);
+    }
+    return this.#respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding);
+  }
+
+  #respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding) {
     const payload = { _requestId: requestId };
     const meta = this.#projMeta();
     payload._freshness = {
@@ -303,14 +354,109 @@ export class Server {
 
     let out = Buffer.from(json);
     const accepted = parseAcceptEncoding(acceptEncoding);
-    if (accepted.gzip > 0 && out.length >= MIN_COMPRESS_BYTES) {
+    if (out.length >= MIN_COMPRESS_BYTES && (accepted.br > 0 || accepted.gzip > 0)) {
       try {
-        out = gzipSync(out);
-        headers['content-encoding'] = 'gzip';
+        if (accepted.br > 0) {
+          out = brotliCompressSync(out, BROTLI_DYNAMIC);
+          headers['content-encoding'] = 'br';
+        } else {
+          out = gzipSync(out);
+          headers['content-encoding'] = 'gzip';
+        }
       } catch (err) {
-        this.#log.error('[server] gzip compression failed:', err.message);
+        this.#log.error('[server] compression failed:', err.message);
       }
     }
+
+    headers['content-length'] = out.length;
+    res.writeHead(status, headers);
+    res.end(out);
+  }
+
+  // Serves a CachedResponse by reusing the encoded bytes stored for its token:
+  // the response splits into a tiny per-request prefix (fresh `_requestId`) and
+  // a cached tail (frozen `_freshness` + payload, serialized once). The
+  // decompressed JSON is byte-identical to the plain path on every request.
+  //
+  // Encoded reuse per client encoding:
+  // - identity: string concat of prefix + tail (no compression at all);
+  // - gzip: multi-member stream — RFC 1952 members decode as one body, so a
+  //   freshly gzipped prefix concatenates with the cached gzipped tail;
+  // - br: brotli frames must NOT be concatenated (decoders disagree on
+  //   trailing frames), so br requests get a full q5 recompress of the
+  //   reused tail string — still skipping stringify and the _meta query.
+  #respondCached(res, status, cached, requestId, cookieHeader, acceptEncoding) {
+    const b = cached.body;
+    const cacheable = b && b.constructor === Object && !Array.isArray(b) &&
+      !('_requestId' in b) && !('_freshness' in b) && !('retryAfter' in b) &&
+      Number.isFinite(cached.maxAgeMs) && cached.maxAgeMs > 0;
+    if (!cacheable) {
+      return this.#respondPlain(res, status, b, requestId, cookieHeader, acceptEncoding);
+    }
+
+    const headers = {
+      'content-type': 'application/json',
+      'x-content-type-options': 'nosniff',
+      'x-request-id': requestId,
+      'x-frame-options': 'SAMEORIGIN',
+      'referrer-policy': 'no-referrer',
+      vary: 'Accept-Encoding',
+    };
+    if (cookieHeader) headers['set-cookie'] = cookieHeader;
+
+    const now = this.#clock();
+    let entry = this.#bodyCache.get(cached.token);
+    if (entry && now - entry.createdAt > cached.maxAgeMs) {
+      this.#bodyCache.delete(cached.token);
+      entry = undefined;
+    }
+    if (!entry) {
+      const meta = this.#projMeta();
+      const freshnessJson = JSON.stringify({
+        exists: meta.exists,
+        fingerprint: meta.fingerprint,
+        builtAt: meta.builtAt,
+        recordsImported: meta.recordsImported,
+      });
+      const bodyJson = JSON.stringify(b);
+      // Everything after the per-request `_requestId` value, including the
+      // closing brace: `,"_freshness":...,"payload":...}`.
+      const tail = ',"_freshness":' + freshnessJson + ',' + bodyJson.slice(1);
+      entry = {
+        createdAt: now,
+        // Uncompressed size the plain path would have produced; drives the
+        // MIN_COMPRESS_BYTES decision. UUID v4 request IDs are always 36 chars.
+        plainSize: REQUEST_ID_PREFIX_TEMPLATE.length + tail.length,
+        tail,
+        gzipTail: undefined,
+      };
+      if (this.#bodyCache.size >= MAX_CACHED_BODIES) this.#bodyCache.clear();
+      this.#bodyCache.set(cached.token, entry);
+    }
+
+    const prefix = REQUEST_ID_PREFIX_TEMPLATE.slice(0, -37) + requestId + '"';
+    let out;
+    let encoding;
+    const accepted = parseAcceptEncoding(acceptEncoding);
+    if (entry.plainSize >= MIN_COMPRESS_BYTES && (accepted.br > 0 || accepted.gzip > 0)) {
+      try {
+        if (accepted.br > 0) {
+          out = brotliCompressSync(Buffer.from(prefix + entry.tail), BROTLI_DYNAMIC);
+          encoding = 'br';
+        } else {
+          if (!entry.gzipTail) entry.gzipTail = gzipSync(Buffer.from(entry.tail));
+          out = Buffer.concat([gzipSync(Buffer.from(prefix)), entry.gzipTail]);
+          encoding = 'gzip';
+        }
+      } catch (err) {
+        this.#log.error('[server] compression failed:', err.message);
+      }
+    }
+    if (!out) {
+      out = Buffer.from(prefix + entry.tail);
+      encoding = undefined;
+    }
+    if (encoding) headers['content-encoding'] = encoding;
 
     headers['content-length'] = out.length;
     res.writeHead(status, headers);

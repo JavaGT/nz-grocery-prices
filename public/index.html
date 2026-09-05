@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>price·minder — NZ Grocery Price Intelligence</title>
 <link rel="stylesheet" href="/style.css">
+<!-- The ES-module graph is 4 requests deep without hints (app.js -> views ->
+     components/format), so first paint waits on ~4 serial round trips.
+     modulepreload fetches every statically-imported module in parallel with
+     app.js, collapsing the waterfall to 2 rounds (HTML, then all JS at once).
+     test/frontend/index-preloads.test.js keeps this list in sync with the
+     actual import graph. -->
+<link rel="modulepreload" href="/api.js">
+<link rel="modulepreload" href="/utils/dom.js">
+<link rel="modulepreload" href="/utils/format.js">
+<link rel="modulepreload" href="/components/card.js">
+<link rel="modulepreload" href="/components/detail-dialog.js">
+<link rel="modulepreload" href="/views/deals.js">
+<link rel="modulepreload" href="/views/browse.js">
+<link rel="modulepreload" href="/views/watchlist.js">
+<link rel="modulepreload" href="/views/saved.js">
+<link rel="modulepreload" href="/views/settings.js">
 </head>
 <body>
 <div id="app">

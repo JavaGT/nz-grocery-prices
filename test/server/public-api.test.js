@@ -276,6 +276,29 @@ describe('public API server', () => {
       }
     });
 
+    it('offer entries keep their exact response contract (column audit: no source/promotion leakage)', async () => {
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:milk', { data: { name: 'Milk 1L' } }),
+          storeRec('paknsave:royaloak', { data: { name: "PAK'nSAVE Royal Oak" } }),
+          offerRec('paknsave:milk', 'paknsave:royaloak',
+            { regularCents: 599, comparative: { type: 'was', price: 699 } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products/paknsave:milk`);
+        assert.equal(status, 200);
+        assert.equal(body.offers.length, 1);
+        assert.deepEqual(Object.keys(body.offers[0]).sort(),
+          ['cents', 'comparative', 'historyUrl', 'isOnSpecial', 'lastSeenAt', 'offerKey', 'priceContext']);
+        assert.deepEqual(Object.keys(body.offers[0].priceContext).sort(),
+          ['retailerId', 'retailerName', 'scopeKind', 'storeId', 'storeName']);
+        assert.deepEqual(body.offers[0].comparative, { type: 'was', price: 699 });
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('includes matches from app DB when they exist', async () => {
       const srv = await createTestServer({
         records: [
@@ -326,6 +349,26 @@ describe('public API server', () => {
         assert.equal(body.product.id, 'paknsave:milk');
         assert.ok(body.history.length > 0);
         assert.ok(body.history.every(h => typeof h.cents.regular === 'number'));
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it('history entries keep their exact response contract (column audit)', async () => {
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:milk', { data: { name: 'Milk 1L' } }),
+          storeRec('paknsave:royaloak'),
+          offerRec('paknsave:milk', 'paknsave:royaloak', { regularCents: 599 }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products/paknsave:milk/history`);
+        assert.equal(status, 200);
+        assert.equal(body.history.length, 1);
+        assert.deepEqual(Object.keys(body.history[0]).sort(),
+          ['cents', 'comparative', 'contextId', 'observedAt', 'offerKey', 'promotion']);
+        assert.equal(typeof body.history[0].contextId, 'number');
       } finally {
         await srv.close();
       }

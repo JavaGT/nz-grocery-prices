@@ -2,9 +2,9 @@
   "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 10:40 NZST",
-  "status": "wave 3 complete - awaiting owner review",
-  "summary": "Wave 3 complete (930 tests, 0 failures). Merged: 14x-scale proof (all endpoints flat), 37% less SQL on the hot deals query via dead-column removal, product listing 65x faster at scale via a new index, warm /api/deals CPU down 4.4x by serving cached pre-compressed bytes (brotli q5 for dynamic API JSON: -11% wire vs gzip AND faster to produce), and the SPA first-load waterfall collapsed from 4 serial round trips to 2 via modulepreload hints. One data note: the current live archive yields an empty deals feed (no active sales in data/prices.jsonl right now) - that is data, not a regression; the wire lane measured with a deals-rich payload.",
+  "updated": "2026-09-06 10:50 NZST",
+  "status": "running - wave 4 (final wave, stop at 12:00 NZST)",
+  "summary": "Stop condition received: 12:00 NZST. Wave 4 is a tight final wave. Coordinator merged the benchmark harness into the repo as `npm run bench` / `npm run bench:archive` (read-only, documented in command-map) so trends can be re-checked after nightly archive growth - first run also demonstrated the server's auto-rebuild on a missing projection now costs ~330ms end to end thanks to the wave-2 ingest win. Lane G4 is adding single-flight to the deals cold compute (concurrent cold requests currently each pay the full compute). Close-out planned ~11:45.",
   "axes": [
     "speed",
     "CPU",

@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 205 | Book Haven | `book-haven` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 206 | Hard to Find | `hard-to-find` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 204 | Page & Blackmore Booksellers | `page-blackmore` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 199 | Bea DnD Games | `bea-dnd-games` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 200 | Dice Goblin | `dice-goblin` | general retail | Shopify products.json | implemented 2026-09-06 |

@@ -36,6 +36,7 @@ const agents = d.agents.map(a => `
   <tr><td>${esc(a.name)}</td><td>${esc(a.area)}</td><td><span class="pill ${esc(a.status)}">${esc(a.status)}</span></td><td>${esc(a.notes)}</td></tr>`).join('\n') || '<tr><td colspan="4" class="muted">none running</td></tr>';
 
 const next = d.next.map(n => `<li>${esc(n)}</li>`).join('\n') || '<li class="muted">—</li>';
+const stops = d.stops.map(n => `<li>${esc(n)}</li>`).join('\n') || '';
 
 const html = `<!doctype html>
 <html lang="en"><head>
@@ -80,6 +81,9 @@ ${improvements}
   <tr><th>Name</th><th>Area</th><th>Status</th><th>Notes</th></tr>
   ${agents}
 </table>
+
+<h2>Measured, deliberately not changed (honest stops)</h2>
+<ul>${stops}</ul>
 
 <h2>Up next</h2>
 <ul>${next}</ul>

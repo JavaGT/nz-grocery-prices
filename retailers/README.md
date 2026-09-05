@@ -54,7 +54,7 @@ into the nightly breadth pipeline).
 | 32 | PB Tech | `pbtech` | electronics | probe (custom) | planned |
 | 33 | Noel Leeming | `noel-leeming` | electronics | SFCC updategrid (curl transport) | implemented 2026-09-06 |
 | 34 | Harvey Norman NZ | `harvey-norman` | electronics | probe (custom) | planned |
-| 35 | Mitre 10 | `mitre-10` | hardware | Algolia search index | planned |
+| 35 | Mitre 10 | `mitre-10` | hardware | SAP Commerce OCC + sitemap shards | implemented 2026-09-06 |
 | 36 | Bunnings NZ | `bunnings` | hardware | Next.js + custom API | planned |
 | 37 | Briscoes | `briscoes` | homeware | probe (custom) | planned |
 | 38 | Rebel Sport | `rebel-sport` | sports | probe (custom) | planned |
@@ -132,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **27 / 50** (5 existing + 22 implemented).
+Progress: **28 / 50** (5 existing + 23 implemented).

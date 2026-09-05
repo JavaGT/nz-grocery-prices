@@ -42,7 +42,7 @@ into the nightly breadth pipeline).
 | 20 | Shoe Clinic | `shoe-clinic` | footwear | Shopify products.json | implemented 2026-09-06 |
 | 21 | Babycity | `babycity` | baby | Odoo SSR grids (cookie session) | implemented 2026-09-06 |
 | 22 | Shosha | `shosha` | Asian grocery | Shopify products.json | implemented 2026-09-06 |
-| 23 | Oderings | `oderings` | garden | custom | planned |
+| 23 | Moore Wilson's | `moore-wilsons` | grocery (Wellington) | Hydrogen SSR PDPs + sitemap | implemented 2026-09-06 |
 | 24 | Commonsense Organics | `commonsense-organics` | organic grocery | SilverStripe sitemap + JSON-LD PDPs | implemented 2026-09-06 |
 | 25 | Hammer Hardware | `hammer-hardware` | hardware | Shopify products.json | implemented 2026-09-06 |
 | 26 | Liquorland | `liquorland` | liquor | window.category JSON (?p=N) | implemented 2026-09-06 |
@@ -97,6 +97,19 @@ into the nightly breadth pipeline).
 - **Moore Wilson's** (moorewilsons.co.nz) — headless Shopify Oxygen:
   /products.json, /collections/*/products.json and /search/suggest.json all
   return the Hydrogen app shell. Needs browser-level capture.
+
+## Blocked during the campaign (probe evidence)
+
+- **Oderings** (oderings.co.nz) — Konstruk CMS brochure site; category
+  pages (`/plants/…-__I.710716__C.<id>`) are subcategory hubs with no
+  product tiles or prices. No online pricing to collect.
+- **Bin Inn** (bininn.co.nz) — Craft CMS; `/products/<slug>` pages are
+  marketing landing pages without prices.
+- **Chemist Warehouse** — grid API (searchapiv2/search, FredHopper) returns
+  HTTP 500 to curl even with exact browser URL/headers; in-browser fetch
+  succeeds (session/TLS dependent). Needs browser-graded collection.
+- **Kmart NZ / Farmers** — Akamai bot manager 403/404s all non-browser
+  requests (verified 2026-09-06).
 
 ## Excluded after probing
 

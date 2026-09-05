@@ -199,6 +199,21 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 184 | A&C Homestore | `ac-homestore` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 185 | Appliance World NZ | `appliance-world` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 186 | AwaMae | `awamae` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 187 | Babu Basics | `babu` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 188 | Coops Clothing | `coops-clothing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 189 | Devonport Chocolates | `devonport-chocolates` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 190 | Elite Fitness Equipment | `elite-fitness` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 191 | Flux Boutique | `flux-boutique` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 192 | Handcrafted Modern | `handcrafted-modern` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 193 | Hoopla Kids | `hoopla-kids` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 194 | Jamie Kay | `jamie-kay` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 195 | Nest | `nest` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 196 | Ozone Coffee | `ozone-coffee` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 197 | RE:FORM Home | `reform-home` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 198 | Snuggle Hunny NZ | `snuggle-hunny` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 182 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 183 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
@@ -281,4 +296,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **GOAL MET 2026-09-06 (raised to 100, then +80)** — **181 working adapters** (5 existing + 176 campaign) across 182 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence). Registry gate: `test/retailers/retailer-registry.test.js` enforces ≥181.
+Progress: **GOAL EXCEEDED 2026-09-06 (raised to 100, then +80)** — **197 working adapters** (5 existing + 192 campaign) across 193 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence). Registry gate enforces the 181 minimum from the +80 round. Registry gate: `test/retailers/retailer-registry.test.js` enforces ≥181.

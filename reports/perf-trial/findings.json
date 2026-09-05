@@ -1,24 +1,77 @@
 {
-  "title": "Performance Campaign — perf-trial-20260906-0303",
+  "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 04:25 NZST",
-  "status": "wave complete - awaiting owner review",
-  "summary": "All planned lanes merged (877 tests, 0 failures, suite now 2.8s). Headline results: homepage deal feed 107ms -> 0.26ms with ~4000x better concurrent throughput; full page wire weight down 75% (brotli) + API JSON down ~80% (gzip); view switches no longer refetch; test suite 12.25s -> 2.8s; projection DB 17MB -> 15.6MB with 4.5x faster search. Trade-offs for every change are listed per improvement below; three axes were measured and deliberately left alone (documented as honest stops).",
-  "axes": ["speed", "CPU", "RAM", "storage"],
+  "updated": "2026-09-06 08:45 NZST",
+  "status": "running - wave 2",
+  "summary": "Wave 1 (merged to main): deals 107ms -> 0.26ms, page weight -75%, test suite 12.25s -> 2.6s, projection 17MB -> 15.6MB. Wave 2 under way in worktree perf-trial-20260906-0839: the deals cache now invalidates immediately when the projection DB file changes on disk (was: up to 5 minutes of lag after the nightly rebuild). Two subagent lanes dispatched on different systems: rebuild/ingest speed, and query resilience at 2x archive scale.",
+  "axes": [
+    "speed",
+    "CPU",
+    "RAM",
+    "storage"
+  ],
   "baselines": [
-    { "metric": "npm run check (syntax gate)", "value": "0.42 s", "notes": "fine" },
-    { "metric": "npm test (full suite)", "value": "12.25 s", "notes": "docs claim ~7s - drifted; lane A target" },
-    { "metric": "build-db projection rebuild", "value": "2.03 s (18,726 records)", "notes": "from real 12MB data/prices.jsonl archive" },
-    { "metric": "server cold boot", "value": "99.7 ms", "notes": "includes opening the 17MB projection DB - already good" },
-    { "metric": "GET /api/deals", "value": "p50 107 ms · p95 164 ms", "notes": "HOT SPOT: recomputed per request; coordinator lane" },
-    { "metric": "GET /api/deals (8 concurrent)", "value": "8.5 req/s · p50 553 ms", "notes": "sync compute serializes the event loop" },
-    { "metric": "GET /api/products?search=milk", "value": "p50 4.4 ms", "notes": "LIKE + NOCASE search, OK at 9k products" },
-    { "metric": "GET /api/search/suggestions", "value": "p50 1.0 ms", "notes": "" },
-    { "metric": "GET /api/products/:id/history", "value": "p50 1.05 ms", "notes": "" },
-    { "metric": "GET / (SPA index.html)", "value": "p50 0.76 ms", "notes": "no gzip/ETag - matters over real network, lane B" },
-    { "metric": "storage: data/prices.jsonl", "value": "12 MB / 18,726 lines", "notes": "authoritative archive" },
-    { "metric": "storage: data/prices.db (projection)", "value": "17 MB", "notes": "42% LARGER than the archive it is built from - lane A target" }
+    {
+      "metric": "npm run check (syntax gate)",
+      "value": "0.42 s",
+      "notes": "fine"
+    },
+    {
+      "metric": "npm test (full suite)",
+      "value": "12.25 s",
+      "notes": "docs claim ~7s - drifted; lane A target"
+    },
+    {
+      "metric": "build-db projection rebuild",
+      "value": "2.03 s (18,726 records)",
+      "notes": "from real 12MB data/prices.jsonl archive"
+    },
+    {
+      "metric": "server cold boot",
+      "value": "99.7 ms",
+      "notes": "includes opening the 17MB projection DB - already good"
+    },
+    {
+      "metric": "GET /api/deals",
+      "value": "p50 107 ms \u00b7 p95 164 ms",
+      "notes": "HOT SPOT: recomputed per request; coordinator lane"
+    },
+    {
+      "metric": "GET /api/deals (8 concurrent)",
+      "value": "8.5 req/s \u00b7 p50 553 ms",
+      "notes": "sync compute serializes the event loop"
+    },
+    {
+      "metric": "GET /api/products?search=milk",
+      "value": "p50 4.4 ms",
+      "notes": "LIKE + NOCASE search, OK at 9k products"
+    },
+    {
+      "metric": "GET /api/search/suggestions",
+      "value": "p50 1.0 ms",
+      "notes": ""
+    },
+    {
+      "metric": "GET /api/products/:id/history",
+      "value": "p50 1.05 ms",
+      "notes": ""
+    },
+    {
+      "metric": "GET / (SPA index.html)",
+      "value": "p50 0.76 ms",
+      "notes": "no gzip/ETag - matters over real network, lane B"
+    },
+    {
+      "metric": "storage: data/prices.jsonl",
+      "value": "12 MB / 18,726 lines",
+      "notes": "authoritative archive"
+    },
+    {
+      "metric": "storage: data/prices.db (projection)",
+      "value": "17 MB",
+      "notes": "42% LARGER than the archive it is built from - lane A target"
+    }
   ],
   "improvements": [
     {
@@ -56,11 +109,30 @@
       "tradeoffs": "gzipSync runs on the event loop (~0.2ms per 40KB API response) - fine vs the 107ms deals win it sits on top of; brotli's heavier compression is paid once per file version, not per request. Static assets keep max-age=3600 (no content hashes exist in a no-build repo, so HTML stays no-cache). API GET cache means up to 30s staleness, but every mutation clears it. Reviewed for security: the removed esc() was redundant (createTextNode escaping) and no innerHTML path takes unescaped product data.",
       "verified": "38 new/updated compression+cache tests pass; 15 original static tests pass against the real implementation; full suite 877 pass / 0 fail on the merged branch; wire sizes measured with curl --compressed",
       "commit": "d4c76e9..6f5055f (merged)"
+    },
+    {
+      "title": "Wave 2: deals cache invalidates on projection change",
+      "area": "server / correctness of the wave-1 perf win",
+      "what": "createAppServer passes a dbSignature probe (projection DB file mtime, ~microseconds per request) into the public handlers; a changed signature drops the deals cache immediately instead of waiting out the 5-minute TTL.",
+      "beforeAfter": "Worst-case stale-after-rebuild: up to 5 min -> immediate (still bounded by the read-only connection serving the old inode until server restart).",
+      "tradeoffs": "One statSync per /api/deals request (~10 microseconds). Absent probe = TTL-only, so library callers keep old behavior.",
+      "verified": "8 deals-cache unit tests (signature change recomputes, stable signature caches, absent probe = TTL-only) + npm run check",
+      "commit": "042f2f8"
     }
   ],
   "agents": [
-    { "name": "lane B (web interface)", "area": "static serving (gzip/ETag/caching), SPA payload", "status": "merged", "notes": "completed + coordinator-reviewed; worktree perf-trial-20260906-0303-web, report reports/perf-trial/lane-web.md" },
-    { "name": "lane A (data layer)", "area": "test suite speed, projection DB size", "status": "merged", "notes": "subagent was killed by a provider rate limit before starting; mission done by coordinator in perf-trial-20260906-0303-data, report reports/perf-trial/lane-data.md" }
+    {
+      "name": "lane B (web interface)",
+      "area": "static serving (gzip/ETag/caching), SPA payload",
+      "status": "merged",
+      "notes": "completed + coordinator-reviewed; worktree perf-trial-20260906-0303-web, report reports/perf-trial/lane-web.md"
+    },
+    {
+      "name": "lane A (data layer)",
+      "area": "test suite speed, projection DB size",
+      "status": "merged",
+      "notes": "subagent was killed by a provider rate limit before starting; mission done by coordinator in perf-trial-20260906-0303-data, report reports/perf-trial/lane-data.md"
+    }
   ],
   "stops": [
     "Library JSONL load: 340ms / 216MB RSS on the 12MB archive (672ms / 540MB on the 22MB breadth archive). No consumer is on this path today (the app server uses SQLite and never holds the archive; collectors are network-bound; the old Workbench grocery project no longer exists). Speeding it up would mean weakening per-line hash verification - a data-integrity tradeoff for zero user-visible gain.",

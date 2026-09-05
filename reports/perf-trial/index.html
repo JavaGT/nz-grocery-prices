@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 04:25 NZST · <b>status: wave complete - awaiting owner review</b> · auto-refreshes every 5 min</p>
-<div class="banner">All planned lanes merged (877 tests, 0 failures, suite now 2.8s). Headline results: homepage deal feed 107ms -&gt; 0.26ms with ~4000x better concurrent throughput; full page wire weight down 75% (brotli) + API JSON down ~80% (gzip); view switches no longer refetch; test suite 12.25s -&gt; 2.8s; projection DB 17MB -&gt; 15.6MB with 4.5x faster search. Trade-offs for every change are listed per improvement below; three axes were measured and deliberately left alone (documented as honest stops).</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 08:45 NZST · <b>status: running - wave 2</b> · auto-refreshes every 5 min</p>
+<div class="banner">Wave 1 (merged to main): deals 107ms -&gt; 0.26ms, page weight -75%, test suite 12.25s -&gt; 2.6s, projection 17MB -&gt; 15.6MB. Wave 2 under way in worktree perf-trial-20260906-0839: the deals cache now invalidates immediately when the projection DB file changes on disk (was: up to 5 minutes of lag after the nightly rebuild). Two subagent lanes dispatched on different systems: rebuild/ingest speed, and query resilience at 2x archive scale.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -91,6 +91,18 @@
       <tr><th>Trade-offs</th><td>gzipSync runs on the event loop (~0.2ms per 40KB API response) - fine vs the 107ms deals win it sits on top of; brotli's heavier compression is paid once per file version, not per request. Static assets keep max-age=3600 (no content hashes exist in a no-build repo, so HTML stays no-cache). API GET cache means up to 30s staleness, but every mutation clears it. Reviewed for security: the removed esc() was redundant (createTextNode escaping) and no innerHTML path takes unescaped product data.</td></tr>
       <tr><th>Verified by</th><td>38 new/updated compression+cache tests pass; 15 original static tests pass against the real implementation; full suite 877 pass / 0 fail on the merged branch; wire sizes measured with curl --compressed</td></tr>
       <tr><th>Commit</th><td><code>d4c76e9..6f5055f (merged)</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#5 · Wave 2: deals cache invalidates on projection change <span class="pill "></span></h3>
+    <p>createAppServer passes a dbSignature probe (projection DB file mtime, ~microseconds per request) into the public handlers; a changed signature drops the deals cache immediately instead of waiting out the 5-minute TTL.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>server / correctness of the wave-1 perf win</td></tr>
+      <tr><th>Before → After</th><td><b>Worst-case stale-after-rebuild: up to 5 min -&gt; immediate (still bounded by the read-only connection serving the old inode until server restart).</b></td></tr>
+      <tr><th>Trade-offs</th><td>One statSync per /api/deals request (~10 microseconds). Absent probe = TTL-only, so library callers keep old behavior.</td></tr>
+      <tr><th>Verified by</th><td>8 deals-cache unit tests (signature change recomputes, stable signature caches, absent probe = TTL-only) + npm run check</td></tr>
+      <tr><th>Commit</th><td><code>042f2f8</code></td></tr>
     </table>
   </div>
 

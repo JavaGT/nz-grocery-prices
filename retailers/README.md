@@ -40,14 +40,14 @@ into the nightly breadth pipeline).
 | 18 | Computer Lounge | `computer-lounge` | PC hardware | Shopify products.json | implemented 2026-09-06 |
 | 19 | Kathmandu | `kathmandu` | outdoor | Shopify products.json | implemented 2026-09-06 |
 | 20 | Shoe Clinic | `shoe-clinic` | footwear | Shopify products.json | implemented 2026-09-06 |
-| 21 | Four Square | `four-square` | grocery | Foodstuffs mobile API (banner probe) | planned |
-| 22 | Gilmours | `gilmours` | wholesale grocery | Foodstuffs / web API | planned |
-| 23 | Moore Wilson's | `moore-wilsons` | grocery (Wgtn) | Shopify (products.json blocked — probe collections path) | planned |
+| 21 | Babycity | `babycity` | baby | custom | planned |
+| 22 | Kings Plant Barn | `kings-plant-barn` | garden | custom | planned |
+| 23 | Oderings | `oderings` | garden | custom | planned |
 | 24 | Commonsense Organics | `commonsense-organics` | organic grocery | probe (custom) | planned |
 | 25 | Bin Inn | `bin-inn` | bulk foods | probe (custom) | planned |
 | 26 | Liquorland | `liquorland` | liquor | probe (custom) | planned |
 | 27 | The Bottle-O | `the-bottle-o` | liquor | probe (custom) | planned |
-| 28 | Super Liquor | `super-liquor` | liquor | Algolia search index | planned |
+| 28 | Super Liquor | `super-liquor` | liquor | Algolia index (Id-sliced walk) | implemented 2026-09-06 |
 | 29 | Chemist Warehouse NZ | `chemist-warehouse` | pharmacy | probe (custom, heavy JS) | planned |
 | 30 | Kmart NZ | `kmart` | dept store | Next.js + custom API | planned |
 | 31 | Farmers | `farmers` | dept store | probe (custom) | planned |
@@ -76,9 +76,6 @@ into the nightly breadth pipeline).
 | Retailer | Domain | Platform / note |
 |---|---|---|
 | Hallenstein Brothers | hallensteins.co.nz | custom/headless; /graphql 301s to .com 404, deep links redirect — needs browser-level capture |
-| Babycity | babycity.co.nz | custom |
-| Kings Plant Barn | kings.co.nz | custom |
-| Oderings | oderings.co.nz | custom |
 | The Sleep Store | thesleepstore.co.nz | Shopify (products.json blocked) |
 | Merchant 1948 | overlandfootwear.co.nz | Shopify (products.json blocked) |
 | Spotlight | spotlight.co.nz | DNS/dead domain — find real domain |
@@ -86,6 +83,19 @@ into the nightly breadth pipeline).
 | Warehouse Stationery | warehousestationery.co.nz | 403 bot-block (Cloudflare) |
 | Repco NZ | repco.co.nz | 403 bot-block (Cloudflare) |
 | Pharmacy Direct | pharmacydirect.co.nz | 403 bot-block (Cloudflare) |
+
+## Blocked during the campaign (probe evidence)
+
+- **Four Square** (foursquare.co.nz) — Next.js storefront, no discoverable
+  product API in page source; the Foodstuffs NI mobile API
+  (api-prod.prod.fsniwaikato.kiwi) served only 150 MNW stores for every
+  banner value probed (PNS/FS/FOURSQUARE with a fresh guest token,
+  2026-09-06). Needs browser-level capture.
+- **Gilmours** (gilmours.co.nz) — B2B wholesale storefront, no public
+  product API found; wholesale pricing is likely login-gated.
+- **Moore Wilson's** (moorewilsons.co.nz) — headless Shopify Oxygen:
+  /products.json, /collections/*/products.json and /search/suggest.json all
+  return the Hydrogen app shell. Needs browser-level capture.
 
 ## Excluded after probing
 
@@ -122,4 +132,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **25 / 50** (5 existing + 20 implemented).
+Progress: **26 / 50** (5 existing + 21 implemented).

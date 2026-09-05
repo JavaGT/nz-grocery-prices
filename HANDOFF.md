@@ -109,15 +109,15 @@ run (its offset manifest stalled the lane at 0 products while reporting
 healthy — `--resume` opts back in for crashed manual crawls). Gate state:
 `node scripts/breadth-pilot-gate.js` (3 consecutive healthy nights).
 
-## Retailers campaign — 50 NZ retailer scrapers (2026-09-06)
+## Retailers campaign — 100 NZ retailer scrapers (2026-09-06)
 
 `retailers/` holds a 50-retailer price·product scraper roster (goal: 50
 major NZ retailers, one subfolder each, all emitting canonical
-PriceObservation records). Status: **50/50 implemented and live-verified**;
+PriceObservation records). Status: **GOAL RAISED TO 100 — 101 adapters live-verified** (96 campaign + 5 existing);
 manifest + per-retailer evidence: `retailers/README.md`.
 
 - Pre-existing adapters (woolworths, paknsave, newworld, freshchoice,
-  warehouse) count as 5; 47 campaign adapters live in (52 total with the 5 existing — goal of 50 exceeded) `retailers/<slug>/`
+  warehouse) count as 5; 96 campaign adapters live in (101 total with the 5 existing — goal raised to 100 and met) `retailers/<slug>/`
   (index.js + collect.js + README.md).
 - Shared families in `retailers/_lib/`: shopify (15 + 3 later Shopify
   stores), magento-graphql (rebel/briscoes shared backend, `Store` header),

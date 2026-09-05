@@ -1,4 +1,4 @@
-# NZ retailer scraper campaign — 50 retailers
+# NZ retailer scraper campaign — 100 retailers
 
 Goal: price & product scrapers for 50 major New Zealand retailers, each in
 its own subfolder (`retailers/<slug>/`), built on the retailer's own
@@ -70,6 +70,56 @@ into the nightly breadth pipeline).
 | 48 | OfficeMax NZ | `officemax` | office supplies | sitemap + JSON-LD PDPs | implemented 2026-09-06 |
 | 49 | Baby Factory | `baby-factory` | baby | eStar window.category JSON | implemented 2026-09-06 |
 | 50 | Petdirect | `pet-direct` | pet supplies | BigCommerce Stencil HTML cards | implemented 2026-09-06 |
+| 53 | Ruby | `ruby` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 54 | Commoners | `commoners` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 55 | Kate Sylvester | `kate-sylvester` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 56 | Mocka | `mocka` | kids furniture | Shopify products.json | implemented 2026-09-06 |
+| 57 | Twenty Seven Names | `twenty-seven-names` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 58 | Sabato | `sabato` | gourmet grocery | Shopify products.json | implemented 2026-09-06 |
+| 59 | Merchant 1948 | `merchant-1948` | footwear | Shopify products.json | implemented 2026-09-06 |
+| 60 | Beds R Us | `beds-r-us` | bedding | Shopify products.json | implemented 2026-09-06 |
+| 61 | Huffer | `huffer` | streetwear | Shopify products.json | implemented 2026-09-06 |
+| 62 | The Fabric Store | `the-fabric-store` | fabric | Shopify products.json | implemented 2026-09-06 |
+| 63 | Stolen Girlfriends Club | `stolen-girlfriends-club` | streetwear | Shopify products.json | implemented 2026-09-06 |
+| 64 | My Ride | `my-ride` | bikes | Shopify products.json | implemented 2026-09-06 |
+| 65 | Milly's Kitchen | `millys-kitchen` | kitchenware | Shopify products.json | implemented 2026-09-06 |
+| 66 | Palmers | `palmers` | garden | Shopify products.json | implemented 2026-09-06 |
+| 67 | NOOD | `nood` | furniture | Shopify products.json | implemented 2026-09-06 |
+| 68 | Blackmarket | `blackmarket` | wine deals | Shopify products.json | implemented 2026-09-06 |
+| 69 | Design55 | `design55` | homeware | Shopify products.json | implemented 2026-09-06 |
+| 70 | Wixii | `wixii` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 71 | Aleph Beauty | `aleph-beauty` | beauty | Shopify products.json | implemented 2026-09-06 |
+| 72 | Lewis Road Creamery | `lewis-road-creamery` | gourmet food | Shopify products.json — blocked — products.json carries $0.00 prices (subscription-app pricing); needs PDP-level capture | implemented 2026-09-06 |
+| 73 | Trilogy | `trilogy` | skincare | Shopify products.json | implemented 2026-09-06 |
+| 74 | ilabb | `ilabb` | outdoor apparel | Shopify products.json | implemented 2026-09-06 |
+| 75 | Iko Iko | `iko-iko` | gifts & homeware | Shopify products.json | implemented 2026-09-06 |
+| 76 | Coffee Supreme | `coffee-supreme` | coffee | Shopify products.json | implemented 2026-09-06 |
+| 77 | Regional Wines & Spirits | `regional-wines` | liquor | Shopify products.json | implemented 2026-09-06 |
+| 78 | Kokako | `kokako` | coffee | Shopify products.json | implemented 2026-09-06 |
+| 79 | Small Acorns | `small-acorns` | gifts & homeware | Shopify products.json | implemented 2026-09-06 |
+| 80 | Comvita | `comvita` | natural health | Shopify products.json | implemented 2026-09-06 |
+| 81 | Rembrandt | `rembrandt` | menswear | Shopify products.json | implemented 2026-09-06 |
+| 82 | Atomic Coffee Roasters | `atomic-coffee` | coffee | Shopify products.json | implemented 2026-09-06 |
+| 83 | Merinomink | `merinomink` | merino apparel | Shopify products.json | implemented 2026-09-06 |
+| 84 | Linden Leaves | `linden-leaves` | skincare | Shopify products.json | implemented 2026-09-06 |
+| 85 | Stirling Sports | `stirling-sports` | sports | Shopify products.json | implemented 2026-09-06 |
+| 86 | Ceres Organics | `ceres-organics` | organic grocery | Shopify products.json | implemented 2026-09-06 |
+| 87 | Alpine Sports | `alpine-sports` | snow sports | Shopify products.json | implemented 2026-09-06 |
+| 88 | Saben | `saben` | bags & accessories | Shopify products.json | implemented 2026-09-06 |
+| 89 | Flight Coffee | `flight-coffee` | coffee | Shopify products.json | implemented 2026-09-06 |
+| 90 | Bendon Lingerie | `bendon-lingerie` | lingerie | Shopify products.json | implemented 2026-09-06 |
+| 91 | Wellington Chocolate Factory | `wellington-chocolate-factory` | chocolate | Shopify products.json | implemented 2026-09-06 |
+| 92 | Ripe Maternity | `ripe-maternity` | maternity | Shopify products.json | implemented 2026-09-06 |
+| 93 | Peoples Coffee | `peoples-coffee` | coffee | Shopify products.json | implemented 2026-09-06 |
+| 94 | Emma Lewisham | `emma-lewisham` | beauty | Shopify products.json | implemented 2026-09-06 |
+| 95 | Tea Total | `tea-total` | tea | Shopify products.json | implemented 2026-09-06 |
+| 96 | Untouched World | `untouched-world` | merino apparel | Shopify products.json | implemented 2026-09-06 |
+| 97 | Allbirds NZ | `allbirds` | footwear | Shopify products.json | implemented 2026-09-06 |
+| 98 | Nature Baby | `naturebaby` | baby clothing | Shopify products.json | implemented 2026-09-06 |
+| 99 | Workshop | `workshop` | denim & menswear | Shopify products.json | implemented 2026-09-06 |
+| 100 | Moochi | `moochi` | fashion | Shopify products.json | implemented 2026-09-06 |
+| 101 | Endemic World | `endemicworld` | art prints | Shopify products.json | implemented 2026-09-06 (bonus) |
+| 102 | Cheapskates | `cheapskates` | skate/surf | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 51 | Bivouac Outdoor | `bivouac` | outdoor | Shopify products.json | implemented 2026-09-06 (bonus) |
 | 52 | Number One Shoes + Hannahs | `number-one-shoes` | footwear | Black Pepper window.category JSON (?p=N) | implemented 2026-09-06 (bonus) |
 
@@ -148,4 +198,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **GOAL MET 2026-09-06** — 50-target exceeded: **52 adapters** (5 existing + 47 campaign), all live-verified.
+Progress: **GOAL MET 2026-09-06 (raised to 100)** — **101 working adapters** (5 existing + 96 campaign) across 102 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence).

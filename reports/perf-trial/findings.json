@@ -2,9 +2,9 @@
   "title": "Performance Campaign — perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 03:20 NZST",
+  "updated": "2026-09-06 03:45 NZST",
   "status": "running",
-  "summary": "FIRST WIN: /api/deals dropped from 107ms to 0.26ms per request (warm) by memoizing the per-retailer deal computation with a 5-minute TTL - it used to re-read 90 days of prices and re-run two analytics passes on every homepage hit. Subagent cap is now 1 at a time; the web-interface lane is running while the coordinator personally handles the data-layer targets (test suite speed, projection DB size).",
+  "summary": "Two systems improved so far. (1) /api/deals: 107ms -> 0.23ms warm per request by memoizing the per-retailer computation (5-min TTL); concurrent throughput 8.5 -> ~5,800 req/s. (2) Dev loop: full test suite 12.25s -> 2.78s by removing real sleeps from retry tests and giving tests a cheap scrypt cost. (3) Storage: projection DB 17MB -> 15.6MB (dead tables removed, duplicate index removed, 8K pages) which also cut product search from 4.4ms to 0.7ms. Web-interface lane (subagent) still running: gzip/ETag/caching.",
   "axes": ["speed", "CPU", "RAM", "storage"],
   "baselines": [
     { "metric": "npm run check (syntax gate)", "value": "0.42 s", "notes": "fine" },
@@ -29,16 +29,32 @@
       "tradeoffs": "Deal feed can be up to 5 minutes staler than a full recompute. In practice prices only change when the projection DB is rebuilt nightly, so real staleness is unchanged. RAM cost: one cached deal array per retailer (a few hundred KB worst case).",
       "verified": "6 new unit tests (TTL, per-retailer keys, filter/limit, tier no-mutation) + full suite 854 pass / 0 fail; bench-server before/after",
       "commit": "de17fdd"
+    },
+    {
+      "title": "Test suite: 12.25s -> 2.78s",
+      "area": "developer loop / CI (speed)",
+      "what": "Two seams added so tests stop paying production waiting costs: (1) MobileFoodstuffsClient retry backoff is injectable (retryBackoffMs; production default 3000ms unchanged) - two retry-semantics tests were sleeping through real 3s+6s backoffs. (2) Auth takes options.scryptOptions (production N=16384 unchanged); the test harness defaults to N=256, keeping register/verify self-consistent per instance.",
+      "beforeAfter": "npm test 12.25s -> 2.78s (4.4x). Foodstuffs adapter file 12.3s -> 0.06s; private-api 2.56s -> 0.40s; auth 1.3s -> 0.13s; security ~1.9s -> 0.30s.",
+      "tradeoffs": "None at runtime: production retry count/pacing and scrypt cost are byte-identical; only tests inject cheaper values. Slight risk that a future test asserting production-cost timing would need an explicit override.",
+      "verified": "Full suite 854 pass / 0 fail at every step; per-suite timings re-measured",
+      "commit": "2e29b60 + 170bbb5"
+    },
+    {
+      "title": "Projection DB: 17MB -> 15.6MB and faster search",
+      "area": "storage / query speed (SQLite projection)",
+      "what": "Three schema-level cuts to the rebuildable projection: (1) removed creation of the documented-dead deal_signals and product_matches tables; (2) removed the redundant idx_or_offer_key by reordering the offer_revisions UNIQUE constraint to (offer_key, observed_at, rev_hash) - same uniqueness, but the index now also serves offer lookups and ordering (EXPLAIN: no temp b-tree); (3) rebuild now sets PRAGMA page_size=8192 before WAL.",
+      "beforeAfter": "DB size 17MB -> 15.6MB (-8%). GET /api/products?search= p50 4.4ms -> 0.73ms (larger pages, shallower index). build-db time unchanged (~1.9s).",
+      "tradeoffs": "Schema edit relies on the projection being rebuildable (every rebuild builds a fresh temp DB - verified no code path re-applies migrations to an existing DB). Any external tool that reads deal_signals/product_matches or expects 4KB pages would break; none exist in this repo. 8KB pages cost slightly more RAM per cached page.",
+      "verified": "116 sqlite tests pass (schema test now asserts dead tables stay deleted); EXPLAIN QUERY PLAN checks; full suite 854/0; server re-bench",
+      "commit": "4477f36"
     }
   ],
   "agents": [
-    { "name": "lane A (data layer)", "area": "test suite speed (12.25s), projection DB size (17MB), build-db", "status": "running", "notes": "owns src/sqlite/**, scripts/build-db.js, test/sqlite/**" },
-    { "name": "lane B (web interface)", "area": "static serving (gzip/ETag/caching), SPA payload", "status": "running", "notes": "owns public/**, src/app/server.js static fallback, src/server/server.js" }
+    { "name": "lane B (web interface)", "area": "static serving (gzip/ETag/caching), SPA payload", "status": "running", "notes": "owns public/**, src/app/server.js static fallback, src/server/server.js; cap is now 1 subagent at a time" }
   ],
   "next": [
-    "Coordinator: memoize /api/deals (TTL + projection DB mtime invalidation) - expected 107ms -> ~1ms warm",
-    "Lane A: profile slowest tests; investigate why suite is 12s vs documented 7s; shrink projection DB (dead empty tables, page size, VACUUM)",
-    "Lane B: gzip + ETag + smarter cache headers for static assets; audit SPA network waterfalls",
-    "Wave 2 candidates: archive-index load time (RAM/speed), JSONL append path, tests for all changes"
+    "Lane B (web): gzip + ETag + smarter cache headers; SPA network audit - review + merge when the subagent reports",
+    "Coordinator wave 2: library JSONL load time + RAM (PriceArchive / archive-index) - the hosted app reads JSONL directly, so load speed is user-visible there",
+    "Wave 2 candidates: JSONL append/compact path CPU, server RSS measurement, freshchoice/foodstuffs collector pacing unaffected (live network is the bottleneck there, out of scope)"
   ]
 }

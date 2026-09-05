@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 03:20 NZST · <b>status: running</b> · auto-refreshes every 5 min</p>
-<div class="banner">FIRST WIN: /api/deals dropped from 107ms to 0.26ms per request (warm) by memoizing the per-retailer deal computation with a 5-minute TTL - it used to re-read 90 days of prices and re-run two analytics passes on every homepage hit. Subagent cap is now 1 at a time; the web-interface lane is running while the coordinator personally handles the data-layer targets (test suite speed, projection DB size).</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 03:45 NZST · <b>status: running</b> · auto-refreshes every 5 min</p>
+<div class="banner">Two systems improved so far. (1) /api/deals: 107ms -&gt; 0.23ms warm per request by memoizing the per-retailer computation (5-min TTL); concurrent throughput 8.5 -&gt; ~5,800 req/s. (2) Dev loop: full test suite 12.25s -&gt; 2.78s by removing real sleeps from retry tests and giving tests a cheap scrypt cost. (3) Storage: projection DB 17MB -&gt; 15.6MB (dead tables removed, duplicate index removed, 8K pages) which also cut product search from 4.4ms to 0.7ms. Web-interface lane (subagent) still running: gzip/ETag/caching.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -58,18 +58,39 @@
     </table>
   </div>
 
+  <div class="card">
+    <h3>#2 · Test suite: 12.25s -&gt; 2.78s <span class="pill "></span></h3>
+    <p>Two seams added so tests stop paying production waiting costs: (1) MobileFoodstuffsClient retry backoff is injectable (retryBackoffMs; production default 3000ms unchanged) - two retry-semantics tests were sleeping through real 3s+6s backoffs. (2) Auth takes options.scryptOptions (production N=16384 unchanged); the test harness defaults to N=256, keeping register/verify self-consistent per instance.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>developer loop / CI (speed)</td></tr>
+      <tr><th>Before → After</th><td><b>npm test 12.25s -&gt; 2.78s (4.4x). Foodstuffs adapter file 12.3s -&gt; 0.06s; private-api 2.56s -&gt; 0.40s; auth 1.3s -&gt; 0.13s; security ~1.9s -&gt; 0.30s.</b></td></tr>
+      <tr><th>Trade-offs</th><td>None at runtime: production retry count/pacing and scrypt cost are byte-identical; only tests inject cheaper values. Slight risk that a future test asserting production-cost timing would need an explicit override.</td></tr>
+      <tr><th>Verified by</th><td>Full suite 854 pass / 0 fail at every step; per-suite timings re-measured</td></tr>
+      <tr><th>Commit</th><td><code>2e29b60 + 170bbb5</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#3 · Projection DB: 17MB -&gt; 15.6MB and faster search <span class="pill "></span></h3>
+    <p>Three schema-level cuts to the rebuildable projection: (1) removed creation of the documented-dead deal_signals and product_matches tables; (2) removed the redundant idx_or_offer_key by reordering the offer_revisions UNIQUE constraint to (offer_key, observed_at, rev_hash) - same uniqueness, but the index now also serves offer lookups and ordering (EXPLAIN: no temp b-tree); (3) rebuild now sets PRAGMA page_size=8192 before WAL.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>storage / query speed (SQLite projection)</td></tr>
+      <tr><th>Before → After</th><td><b>DB size 17MB -&gt; 15.6MB (-8%). GET /api/products?search= p50 4.4ms -&gt; 0.73ms (larger pages, shallower index). build-db time unchanged (~1.9s).</b></td></tr>
+      <tr><th>Trade-offs</th><td>Schema edit relies on the projection being rebuildable (every rebuild builds a fresh temp DB - verified no code path re-applies migrations to an existing DB). Any external tool that reads deal_signals/product_matches or expects 4KB pages would break; none exist in this repo. 8KB pages cost slightly more RAM per cached page.</td></tr>
+      <tr><th>Verified by</th><td>116 sqlite tests pass (schema test now asserts dead tables stay deleted); EXPLAIN QUERY PLAN checks; full suite 854/0; server re-bench</td></tr>
+      <tr><th>Commit</th><td><code>4477f36</code></td></tr>
+    </table>
+  </div>
+
 <h2>Subagents (max 2 concurrent)</h2>
 <table>
   <tr><th>Name</th><th>Area</th><th>Status</th><th>Notes</th></tr>
   
-  <tr><td>lane A (data layer)</td><td>test suite speed (12.25s), projection DB size (17MB), build-db</td><td><span class="pill running">running</span></td><td>owns src/sqlite/**, scripts/build-db.js, test/sqlite/**</td></tr>
-
-  <tr><td>lane B (web interface)</td><td>static serving (gzip/ETag/caching), SPA payload</td><td><span class="pill running">running</span></td><td>owns public/**, src/app/server.js static fallback, src/server/server.js</td></tr>
+  <tr><td>lane B (web interface)</td><td>static serving (gzip/ETag/caching), SPA payload</td><td><span class="pill running">running</span></td><td>owns public/**, src/app/server.js static fallback, src/server/server.js; cap is now 1 subagent at a time</td></tr>
 </table>
 
 <h2>Up next</h2>
-<ul><li>Coordinator: memoize /api/deals (TTL + projection DB mtime invalidation) - expected 107ms -&gt; ~1ms warm</li>
-<li>Lane A: profile slowest tests; investigate why suite is 12s vs documented 7s; shrink projection DB (dead empty tables, page size, VACUUM)</li>
-<li>Lane B: gzip + ETag + smarter cache headers for static assets; audit SPA network waterfalls</li>
-<li>Wave 2 candidates: archive-index load time (RAM/speed), JSONL append path, tests for all changes</li></ul>
+<ul><li>Lane B (web): gzip + ETag + smarter cache headers; SPA network audit - review + merge when the subagent reports</li>
+<li>Coordinator wave 2: library JSONL load time + RAM (PriceArchive / archive-index) - the hosted app reads JSONL directly, so load speed is user-visible there</li>
+<li>Wave 2 candidates: JSONL append/compact path CPU, server RSS measurement, freshchoice/foodstuffs collector pacing unaffected (live network is the bottleneck there, out of scope)</li></ul>
 </body></html>

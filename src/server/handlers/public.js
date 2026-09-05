@@ -1,4 +1,4 @@
-import { StatusError } from '../server.js';
+import { StatusError, CachedResponse } from '../server.js';
 import { calculateSales, calculateOngoingSales } from '../../analytics.js';
 
 const PRODUCT_ID_RE = /^[a-z]+:[a-zA-Z0-9_-]+$/;
@@ -557,12 +557,25 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     const resultHistory = capped.filter(d => d.signal.kind !== 'advertised_only');
     const resultAdvertised = capped.filter(d => d.signal.kind === 'advertised_only');
 
-    return {
+    const body = {
       historyBacked: resultHistory, advertised: resultAdvertised, stale: false,
       archiveFreshness: universe.archiveFreshness,
       total: totalCount, limit,
-      ...(tierSummary ? { tiers: tierSummary } : {}),
     };
+    if (tierSummary) body.tiers = tierSummary;
+    // Anonymous responses are byte-stable for the TTL window, so the Server
+    // can reuse serialized+compressed bytes (CachedResponse). Tiered
+    // responses are user-specific and stay plain. The token rotates exactly
+    // when the payload does: retailer, projection signature, and compute
+    // generation are all part of it.
+    if (!tiers) {
+      return new CachedResponse({
+        token: `${retailer || '*'}|${universe.sig}|${universe.computedAt}|${filter}|${limit}`,
+        body,
+        maxAgeMs: dealsCacheTtlMs,
+      });
+    }
+    return body;
   }
 
   return { health, listProducts, getProduct, getProductHistory, listStores, searchSuggestions, listDeals };

@@ -199,6 +199,12 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 318 | GoGoKids | `gogokids` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 319 | Kidzstuffonline | `kidzstuffonline` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 320 | Little Reef and Friends | `little-reef-and-friends` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 321 | Tahi Toy | `tahi-toy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 322 | The Toy Box | `the-toy-box` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 323 | Wee Little Ones | `wee-little-ones` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 315 | Health New Zealand | `health-new-zealand` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 316 | Lifestream | `lifestream` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 317 | My Natural Health | `my-natural-health` | general retail | Shopify products.json | implemented 2026-09-06 |

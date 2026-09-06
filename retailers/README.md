@@ -199,6 +199,12 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 348 | Babies.co.nz | `babies-co-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 349 | Baby On The Move | `baby-on-the-move` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 350 | Babyhood NZ | `babyhood-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 351 | Babyonline NZ | `babyonline-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 352 | Baby Way | `babyway-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 353 | Edwards & Co | `edwards-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 345 | The Good Wine Co | `the-good-wine-co` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 346 | Vino Fino | `vino-fino` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 347 | Winebox | `winebox` | general retail | Shopify products.json | implemented 2026-09-06 |

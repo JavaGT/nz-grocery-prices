@@ -199,6 +199,10 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 278 | Noble & Sunday Tea Merchants | `noble-and-sunday` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 279 | Tea Store Aotearoa | `tea-store-aotearoa` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 280 | Ti Ani | `ti-ani` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 281 | Websters Tea | `websters-tea` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 275 | Honeys of New Zealand | `honeys-of-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 276 | Manuka Doctor | `manuka-doctor` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 277 | Manuka Honey of NZ | `manuka-honey-of-nz` | general retail | Shopify products.json | implemented 2026-09-06 |

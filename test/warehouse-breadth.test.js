@@ -669,6 +669,33 @@ describe("createCurlTransport", () => {
     assert.equal(body, "");
   });
 
+  it("passes a process-level timeout and maxBuffer cap to execFile", async () => {
+    const optsSeen = [];
+    const ef = async (_cmd, _args, opts) => {
+      optsSeen.push(opts);
+      return { stdout: "<html>OK</html>\n200" };
+    };
+    const t = createCurlTransport({ execFile: ef, curlPath: "curl", userAgent: "test" });
+    await t("https://example.com/t");
+    assert.equal(optsSeen[0].timeout, 45_000);
+    assert.equal(optsSeen[0].maxBuffer, 20 * 1024 * 1024);
+  });
+
+  it("caps stderr flooding when execFile rejects", async () => {
+    const ef = async () => {
+      const error = new Error("Command failed: curl --silent --show-error …");
+      error.code = 7;
+      error.stderr = `curl: (7) Failed to connect ${"x".repeat(5000)}`;
+      throw error;
+    };
+    const t = createCurlTransport({ execFile: ef, curlPath: "curl", userAgent: "test" });
+    await assert.rejects(t("https://example.com/t"), (error) => {
+      assert.match(error.message, /curl request failed \(https:\/\/example\.com\/t\) \[exit 7\]/);
+      assert.ok(error.message.length < 600, `error message too long: ${error.message.length}`);
+      return true;
+    });
+  });
+
 });
 
 // ---- parseArgs -------------------------------------------------------------

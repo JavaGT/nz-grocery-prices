@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fetchWithRetry } from "./fetch-with-retry.js";
+import { fetchWithRetry, readBodyText } from "./fetch-with-retry.js";
 
 const DEFAULT_ORIGIN = "https://www.thewarehouse.co.nz";
 const DEFAULT_CATEGORY = "foodhouseholdpets-fooddrink";
@@ -8,11 +8,48 @@ const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36";
 const execFileAsync = promisify(execFile);
 
+/** Process-level backstop behind curl's own `--max-time 30`. */
+const CURL_EXEC_TIMEOUT_MS = 45_000;
+
+/** Upper bound on stderr/stdout quoted from a failed curl into an Error. */
+const MAX_CURL_ERROR_CHARS = 400;
+
+/**
+ * Build a bounded error message from a rejected curl execFile call. execFile
+ * rejections quote the child's stderr (and the whole command line) in
+ * `.message` — a blocked or failed transfer must not flood logs or breadth
+ * warnings with an unbounded page body.
+ */
+export function summarizeCurlError(error, label) {
+  const detail =
+    (typeof error?.stderr === "string" && error.stderr.trim()) ||
+    (typeof error?.stdout === "string" && error.stdout.trim()) ||
+    error?.message ||
+    String(error);
+  const bounded = detail.replace(/\s+/g, " ").trim().slice(0, MAX_CURL_ERROR_CHARS);
+  const status = [
+    error?.code != null ? `exit ${error.code}` : null,
+    error?.signal != null ? `signal ${error.signal}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `The Warehouse curl request failed (${label})${status ? ` [${status}]` : ""}: ${bounded}`;
+}
+
 function assertOk(response, operation) {
   if (response.ok) return response;
   throw new Error(
     `The Warehouse ${operation} failed: ${response.status} ${response.statusText}`,
   );
+}
+
+// Numeric character references with NaN or out-of-range code points must not
+// crash the whole parse (String.fromCodePoint throws RangeError); malformed
+// entities are preserved verbatim instead.
+function decodeCodePoint(entity, code) {
+  return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+    ? String.fromCodePoint(code)
+    : entity;
 }
 
 function decodeHtml(value = "") {
@@ -24,8 +61,8 @@ function decodeHtml(value = "") {
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&nbsp;", " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/g, (entity, code) => decodeCodePoint(entity, Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (entity, code) => decodeCodePoint(entity, Number.parseInt(code, 16)));
 }
 
 function cents(value) {
@@ -149,6 +186,7 @@ export class WarehouseClient {
   #fetch;
   #headers;
   #transport;
+  #execFile;
   #signal;
   #timeout;
   #retry;
@@ -166,6 +204,7 @@ export class WarehouseClient {
     this.#retry = options.retry;
     this.#transport = options.transport ?? (options.fetch ? "fetch" : "curl");
     this.curlPath = options.curlPath ?? "curl";
+    this.#execFile = options.execFile ?? execFileAsync;
     this.#headers = { ...options.headers };
   }
 
@@ -202,7 +241,7 @@ export class WarehouseClient {
         }),
         url.pathname,
       );
-      return response.text();
+      return readBodyText(response, { label: `The Warehouse ${url.pathname}` });
     }
     if (this.#transport !== "curl") {
       throw new TypeError(`Unsupported Warehouse transport: ${this.#transport}`);
@@ -211,23 +250,28 @@ export class WarehouseClient {
     const headerArguments = Object.entries(headers)
       .filter(([name]) => name.toLocaleLowerCase("en-NZ") !== "user-agent")
       .flatMap(([name, value]) => ["--header", `${name}: ${value}`]);
-    const { stdout } = await execFileAsync(
-      this.curlPath,
-      [
-        "--silent",
-        "--show-error",
-        "--fail-with-body",
-        "--location",
-        "--compressed",
-        "--max-time",
-        "30",
-        "--user-agent",
-        headers["user-agent"],
-        ...headerArguments,
-        url.toString(),
-      ],
-      { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
-    );
+    let stdout;
+    try {
+      ({ stdout } = await this.#execFile(
+        this.curlPath,
+        [
+          "--silent",
+          "--show-error",
+          "--fail-with-body",
+          "--location",
+          "--compressed",
+          "--max-time",
+          "30",
+          "--user-agent",
+          headers["user-agent"],
+          ...headerArguments,
+          url.toString(),
+        ],
+        { encoding: "utf8", maxBuffer: 20 * 1024 * 1024, timeout: CURL_EXEC_TIMEOUT_MS },
+      ));
+    } catch (error) {
+      throw new Error(summarizeCurlError(error, url.pathname));
+    }
     return stdout;
   }
 

@@ -20,6 +20,12 @@ export interface WarehouseClientOptions {
   headers?: Record<string, string>;
   transport?: "curl" | "fetch";
   curlPath?: string;
+  /** Injectable execFile for tests; defaults to promisified node:child_process execFile. */
+  execFile?: (
+    file: string,
+    args: readonly string[],
+    options: { encoding: "utf8"; maxBuffer: number; timeout: number },
+  ) => Promise<{ stdout: string }>;
   fetch?: typeof fetch;
 }
 

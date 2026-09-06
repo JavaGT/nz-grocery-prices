@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  FreshChoiceClient,
   parseFreshChoiceProducts,
   parseFreshChoiceStoreList,
   toFreshChoiceObservation,
@@ -38,6 +39,58 @@ describe("parseFreshChoiceProducts", () => {
   it("returns empty array for HTML with no products", () => {
     const result = parseFreshChoiceProducts("<html><body></body></html>");
     assert.deepEqual(result, []);
+  });
+
+});
+
+describe("decodeHtml entity hardening", () => {
+
+  it("decodes valid decimal and hex character references", () => {
+    const html = freshchoiceHtml.replace(
+      'title="Anchor Blue Milk 2L"',
+      'title="Anchor &#65;1 Milk &#x2B; pack"',
+    );
+    const result = parseFreshChoiceProducts(html);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "Anchor A1 Milk + pack");
+  });
+
+  it("leaves out-of-range character references verbatim instead of crashing", () => {
+    // String.fromCodePoint would throw RangeError on these code points.
+    const html = freshchoiceHtml.replace(
+      'title="Anchor Blue Milk 2L"',
+      'title="Milk &#1114112; hostile &#x110000;"',
+    );
+    const result = parseFreshChoiceProducts(html);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "Milk &#1114112; hostile &#x110000;");
+  });
+
+});
+
+describe("FreshChoiceClient response-body cap", () => {
+  // Double whose declared Content-Length exceeds readBodyText's 20 MiB cap;
+  // text() throwing proves the body is never read.
+  const oversized = {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: {
+      get: (name) => (String(name).toLowerCase() === "content-length" ? "22020096" : null),
+    },
+    text: async () => {
+      throw new Error("body must not be read past the cap");
+    },
+  };
+
+  it("refuses listStores responses declaring more than the 20 MiB cap", async () => {
+    const client = new FreshChoiceClient({ fetch: async () => oversized });
+    await assert.rejects(client.listStores(), /declared Content-Length 22020096 exceeds/);
+  });
+
+  it("refuses oversized search responses before reading the body", async () => {
+    const client = new FreshChoiceClient({ fetch: async () => oversized });
+    await assert.rejects(client.searchProducts({ query: "milk" }), /exceeds the 20971520 byte cap/);
   });
 
 });

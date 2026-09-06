@@ -15,13 +15,16 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { parseWarehouseProducts, toWarehouseObservation } from "./warehouse.js";
+import { parseWarehouseProducts, summarizeCurlError, toWarehouseObservation } from "./warehouse.js";
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_ORIGIN = "https://www.thewarehouse.co.nz";
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36";
+
+/** Process-level backstop behind curl's own `--max-time 30`. */
+const CURL_EXEC_TIMEOUT_MS = 45_000;
 
 const CURL_DEFAULT_HEADERS = {
   accept: "text/html,application/xhtml+xml",
@@ -72,23 +75,29 @@ export function createCurlTransport(options = {}) {
       .filter(([name]) => name.toLocaleLowerCase("en-NZ") !== "user-agent")
       .flatMap(([name, value]) => ["--header", `${name}: ${value}`]);
 
-    const { stdout } = await execFileFn(curlPath,
-      [
-        "--silent",
-        "--show-error",
-        "--location",
-        "--compressed",
-        "--max-time",
-        "30",
-        "--user-agent",
-        userAgent,
-        ...headerArgs,
-        "--write-out",
-        "\n%{http_code}",
-        url,
-      ],
-      { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
-    );
+    let stdout;
+    try {
+      ({ stdout } = await execFileFn(curlPath,
+        [
+          "--silent",
+          "--show-error",
+          "--location",
+          "--compressed",
+          "--max-time",
+          "30",
+          "--user-agent",
+          userAgent,
+          ...headerArgs,
+          "--write-out",
+          "\n%{http_code}",
+          url,
+        ],
+        { encoding: "utf8", maxBuffer: 20 * 1024 * 1024, timeout: CURL_EXEC_TIMEOUT_MS },
+      ));
+    } catch (error) {
+      // Bound stderr/stdout flooding so crawlCgid warnings stay log-sized.
+      throw new Error(summarizeCurlError(error, url));
+    }
 
     const lastNewline = stdout.lastIndexOf("\n");
     const body = lastNewline >= 0 ? stdout.slice(0, lastNewline) : "";

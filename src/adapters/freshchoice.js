@@ -1,4 +1,4 @@
-import { fetchWithRetry } from "./fetch-with-retry.js";
+import { fetchWithRetry, readBodyText } from "./fetch-with-retry.js";
 
 const DEFAULT_ORIGIN = "https://queenstown.store.freshchoice.co.nz";
 const DEFAULT_STORE_LIST_URL = "https://store.freshchoice.co.nz/";
@@ -11,6 +11,15 @@ function assertOk(response, operation) {
   );
 }
 
+// Numeric character references with NaN or out-of-range code points must not
+// crash the whole parse (String.fromCodePoint throws RangeError); malformed
+// entities are preserved verbatim instead.
+function decodeCodePoint(entity, code) {
+  return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+    ? String.fromCodePoint(code)
+    : entity;
+}
+
 function decodeHtml(value = "") {
   return value
     .replaceAll("&quot;", '"')
@@ -20,8 +29,8 @@ function decodeHtml(value = "") {
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&nbsp;", " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/g, (entity, code) => decodeCodePoint(entity, Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (entity, code) => decodeCodePoint(entity, Number.parseInt(code, 16)));
 }
 
 function text(value = "") {
@@ -256,7 +265,9 @@ export class FreshChoiceClient {
       }),
       "store list",
     );
-    return parseFreshChoiceStoreList(await response.text());
+    return parseFreshChoiceStoreList(
+      await readBodyText(response, { label: "FreshChoice store list" }),
+    );
   }
 
   async #request(path, parameters = {}) {
@@ -278,7 +289,7 @@ export class FreshChoiceClient {
       }),
       url.pathname,
     );
-    return response.text();
+    return readBodyText(response, { label: `FreshChoice ${url.pathname}` });
   }
 
   listDeals(options = {}) {

@@ -3,8 +3,11 @@ import { fetchWithRetry, parseJsonResponse } from "./fetch-with-retry.js";
 const DEFAULT_ORIGIN = "https://www.woolworths.co.nz";
 const DEFAULT_USER_AGENT = "nz-grocery-prices/0.1";
 
-function assertOk(response, operation) {
+async function assertOk(response, operation) {
   if (response.ok) return response;
+  // Cancel the unread error body so the connection is released instead of
+  // staying pinned until garbage collection.
+  try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
   throw new Error(
     `Woolworths ${operation} failed: ${response.status} ${response.statusText}`,
   );
@@ -16,8 +19,11 @@ function cents(value) {
 
 function productName(product) {
   const name = product.name?.trim();
+  // A missing or blank name must stay optional (domain Product.name?);
+  // never render the string "undefined" when a size is present.
+  if (!name) return undefined;
   const size = product.size?.volumeSize?.trim();
-  if (!size || name?.toLocaleLowerCase("en-NZ").includes(size.toLocaleLowerCase("en-NZ"))) {
+  if (!size || name.toLocaleLowerCase("en-NZ").includes(size.toLocaleLowerCase("en-NZ"))) {
     return name;
   }
   return `${name} ${size}`;
@@ -118,7 +124,7 @@ export class WoolworthsClient {
   }
 
   async #request(path) {
-    const response = assertOk(
+    const response = await assertOk(
       await fetchWithRetry(`${this.origin}${path}`, {
         headers: {
           accept: "application/json",
@@ -206,9 +212,14 @@ export class WoolworthsClient {
       }
       fulfilment = pageFulfilment;
 
-      for (const product of result.products?.items ?? []) {
+      const items = result.products?.items ?? [];
+      for (const product of items) {
         if (product.sku) products.set(String(product.sku), product);
       }
+      // An empty page means the API has nothing further. Without this guard an
+      // inflated products.totalItems would page empty results forever when
+      // maxPages is unbounded (the scripts' "--pages all" default).
+      if (items.length === 0) break;
       totalPages = Math.max(1, Math.ceil((result.products?.totalItems ?? products.size) / size));
       page += 1;
     } while (page <= totalPages && page <= maxPages);

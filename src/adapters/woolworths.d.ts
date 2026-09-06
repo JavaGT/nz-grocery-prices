@@ -16,6 +16,12 @@ export interface WoolworthsClientOptions {
   cookie?: string;
   headers?: Record<string, string>;
   fetch?: typeof fetch;
+  /** Overall caller abort signal, respected across retries. */
+  signal?: AbortSignal;
+  /** Per-attempt timeout in ms (default 15000). */
+  timeout?: number;
+  /** GET retry policy (default 3 attempts); `false` disables retrying. */
+  retry?: { attempts?: number; baseDelay?: number; maxDelay?: number } | false;
 }
 
 export interface WoolworthsCollectOptions {

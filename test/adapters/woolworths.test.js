@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toWoolworthsObservation } from "../../src/adapters/woolworths.js";
+import { toWoolworthsObservation, WoolworthsClient } from "../../src/adapters/woolworths.js";
 
 const fulfilment = { fulfilmentStoreId: "1234", address: "Royal Oak" };
 
@@ -136,6 +136,154 @@ describe("toWoolworthsObservation", () => {
     };
     const result = toWoolworthsObservation(product, fulfilment, { observedAt: "2026-07-17T12:00:00.000Z" });
     assert.equal(result.observedAt, "2026-07-17T12:00:00.000Z");
+  });
+
+  it("tolerates a missing departments array (no categories, no crash)", () => {
+    const product = {
+      sku: "5251234",
+      name: "Anchor Blue Milk 2L",
+      price: { originalPrice: 5.49 },
+    };
+    const result = toWoolworthsObservation(product, fulfilment);
+    assert.equal(result.product.categories, undefined);
+    assert.equal(result.product.id, "woolworths:5251234");
+  });
+
+  it("keeps name optional when the product has no name but has a size", () => {
+    const product = {
+      sku: "5251234",
+      price: { originalPrice: 5.49 },
+      size: { volumeSize: "2L" },
+      departments: [],
+    };
+    const result = toWoolworthsObservation(product, fulfilment);
+    assert.equal(result.product.name, undefined);
+    assert.equal(JSON.parse(JSON.stringify(result)).product.name, undefined,
+      "serialized output must omit name, not render the string \"undefined\"");
+  });
+
+  it("treats a blank name as missing", () => {
+    const product = {
+      sku: "5251234",
+      name: "   ",
+      price: { originalPrice: 5.49 },
+      size: { volumeSize: "2L" },
+      departments: [],
+    };
+    const result = toWoolworthsObservation(product, fulfilment);
+    assert.equal(result.product.name, undefined);
+  });
+
+});
+
+describe("WoolworthsClient", () => {
+
+  function jsonResponse(payload, { status = 200 } = {}) {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+        controller.close();
+      },
+    });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: "",
+      headers: new Map(),
+      body: stream,
+    };
+  }
+
+  it("stops paging when a page returns no items, even with an inflated totalItems", async () => {
+    const pages = [
+      jsonResponse({
+        isSuccessful: true,
+        context: { fulfilment: { fulfilmentStoreId: "1234", address: "Royal Oak" } },
+        products: { items: [{ sku: "1", name: "One", price: { originalPrice: 1.0 }, departments: [] }], totalItems: 500 },
+      }),
+      jsonResponse({
+        isSuccessful: true,
+        context: { fulfilment: { fulfilmentStoreId: "1234", address: "Royal Oak" } },
+        products: { items: [], totalItems: 500 },
+      }),
+    ];
+    let calls = 0;
+    const fetch = async () => {
+      calls += 1;
+      return pages[calls - 1] ?? jsonResponse({});
+    };
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test" });
+    const observations = await client.collectDeals({ size: 100 });
+    assert.equal(calls, 2, "must not request pages beyond the empty one");
+    assert.equal(observations.length, 1);
+  });
+
+  it("cancels the response body before throwing on a non-retryable error status", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("server exploded"));
+        controller.close();
+      },
+      cancel() { cancelled = true; },
+    });
+    const fetch = async () => ({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: new Map(),
+      body: stream,
+    });
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test" });
+    await assert.rejects(() => client.listDeals(), /Woolworths \/api\/v1\/products\?.* failed: 500/);
+    assert.equal(cancelled, true, "error body must be cancelled to release the connection");
+  });
+
+  it("sends the cookie as a request header and never leaks it into error messages", async () => {
+    const cookie = "w_session=SECRET-COOKIE-VALUE; path=/";
+    let requestHeaders;
+    const failure = {
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      headers: new Map(),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("denied"));
+          controller.close();
+        },
+      }),
+    };
+    const fetch = async (_url, options) => {
+      requestHeaders = options.headers;
+      return failure;
+    };
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test", cookie });
+    await assert.rejects(() => client.listDeals());
+    assert.equal(requestHeaders.cookie, cookie, "cookie must travel as the request cookie header");
+    const parseFailure = {
+      ok: true,
+      status: 200,
+      statusText: "",
+      headers: new Map([["content-type", "text/html"]]),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("<html>challenge</html>"));
+          controller.close();
+        },
+      }),
+    };
+    const parseClient = new WoolworthsClient({
+      fetch: async () => parseFailure,
+      origin: "https://example.test",
+      cookie,
+      retry: false,
+    });
+    await assert.rejects(() => parseClient.listDeals(), (error) => {
+      assert.ok(!error.message.includes("SECRET-COOKIE-VALUE"),
+        "no error message may contain the cookie value");
+      return true;
+    });
   });
 
 });

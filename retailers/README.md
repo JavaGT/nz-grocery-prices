@@ -199,6 +199,9 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 275 | Honeys of New Zealand | `honeys-of-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 276 | Manuka Doctor | `manuka-doctor` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 277 | Manuka Honey of NZ | `manuka-honey-of-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 273 | Glenn Jones Art | `glenn-jones-art` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 274 | Love Print NZ | `print-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 270 | Ao Cacao | `ao-cacao` | general retail | Shopify products.json | implemented 2026-09-06 |

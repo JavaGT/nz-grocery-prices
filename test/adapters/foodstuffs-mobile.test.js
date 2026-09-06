@@ -193,6 +193,19 @@ describe("MobileFoodstuffsClient", () => {
     await assert.rejects(() => client.listStores(), /no access token/);
   });
 
+  it("throws a clear error when guest auth returns a null payload", async () => {
+    const fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => null,
+    });
+    const client = new MobileFoodstuffsClient({ fetch });
+    await assert.rejects(
+      () => client.listStores(),
+      /guest auth returned a non-object payload/,
+    );
+  });
+
   // CONCERN 4b: expires_in validation
   it("throws TypeError when expires_in is not a positive finite number", async () => {
     for (const badValue of [undefined, null, "3600", -1, 0, Infinity]) {

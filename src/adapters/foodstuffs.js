@@ -66,6 +66,20 @@ function validatedExtraFilters(extraFilters) {
   return extraFilters;
 }
 
+// Guard for the pagination loops in collectDeals/collectProducts: they
+// spread `products` and compare the page-count field, so a malformed
+// envelope must fail naming the field instead of crashing with
+// "undefined is not iterable" or silently truncating to one page.
+function assertPagedEnvelope(envelope, pagesField, label) {
+  if (!Array.isArray(envelope?.products)) {
+    throw new Error(`${label}: response envelope has no products array`);
+  }
+  if (!Number.isFinite(envelope[pagesField])) {
+    throw new Error(`${label}: response envelope has no numeric ${pagesField}`);
+  }
+  return envelope;
+}
+
 export function toPriceObservation(product, store, options = {}) {
   const currentCents = centsFromProduct(product);
   if (currentCents === undefined) return undefined;
@@ -178,12 +192,25 @@ export class FoodstuffsClient {
       "anonymous authentication",
     );
     const session = await parseJsonResponse(response, "Foodstuffs anonymous authentication");
+    if (typeof session !== "object" || session === null) {
+      throw new Error("Foodstuffs anonymous authentication returned a non-object payload");
+    }
     if (!session.access_token) {
       throw new Error("Foodstuffs anonymous authentication returned no access token");
     }
 
+    // A missing/unparseable expires_time used to silently become NaN, which
+    // disabled the token cache (NaN comparisons are always false) and made
+    // every request re-authenticate.
+    const expiresAt = Date.parse(session.expires_time);
+    if (!Number.isFinite(expiresAt)) {
+      throw new Error(
+        "Foodstuffs anonymous authentication returned an unparseable expires_time; expected a date string",
+      );
+    }
+
     this.#accessToken = session.access_token;
-    this.#expiresAt = Date.parse(session.expires_time);
+    this.#expiresAt = expiresAt;
     return this.#accessToken;
   }
 
@@ -328,7 +355,11 @@ export class FoodstuffsClient {
     let totalPages = 1;
 
     do {
-      const result = await this.listMobileDeals({ storeId: store.id, page });
+      const result = assertPagedEnvelope(
+        await this.listMobileDeals({ storeId: store.id, page }),
+        "numberOfPages",
+        `Foodstuffs mobile specials (page ${page})`,
+      );
       products.push(...result.products);
       totalPages = result.numberOfPages;
       page += 1;
@@ -354,14 +385,18 @@ export class FoodstuffsClient {
     let totalPages = 1;
 
     do {
-      const result = await this.searchProducts({
-        storeId: store.id,
-        region: store.region,
-        page,
-        hitsPerPage: options.hitsPerPage ?? 50,
-        onPromotion: options.onPromotion ?? false,
-        query: options.query,
-      });
+      const result = assertPagedEnvelope(
+        await this.searchProducts({
+          storeId: store.id,
+          region: store.region,
+          page,
+          hitsPerPage: options.hitsPerPage ?? 50,
+          onPromotion: options.onPromotion ?? false,
+          query: options.query,
+        }),
+        "totalPages",
+        `Foodstuffs product search (page ${page})`,
+      );
       products.push(...result.products);
       totalPages = result.totalPages;
       page += 1;

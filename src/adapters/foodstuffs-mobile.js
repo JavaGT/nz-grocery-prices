@@ -139,6 +139,11 @@ export class MobileFoodstuffsClient {
       }
 
       const session = await parseJsonResponse(response, "Mobile guest auth");
+      if (typeof session !== "object" || session === null) {
+        // `session.access_token` on null would crash with an unrelated
+        // TypeError; name the operation instead.
+        throw new Error("Mobile guest auth returned a non-object payload");
+      }
       if (!session.access_token) {
         throw new Error("Mobile guest auth returned no access token");
       }

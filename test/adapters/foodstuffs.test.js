@@ -231,3 +231,76 @@ describe("FoodstuffsClient.searchProducts", () => {
   });
 
 });
+
+describe("FoodstuffsClient hardening (malformed auth/payloads)", () => {
+
+  function stubFetchWithAuthPayload(authPayload, dataPayload = searchEnvelope) {
+    return async (url) => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      async json() {
+        if (String(url).endsWith("/api/user/get-current-user")) return authPayload;
+        return dataPayload;
+      },
+    });
+  }
+
+  it("throws a clear error when auth returns a null payload", async () => {
+    const client = new FoodstuffsClient({ fetch: stubFetchWithAuthPayload(null) });
+    await assert.rejects(
+      () => client.listStores(),
+      /anonymous authentication returned a non-object payload/,
+    );
+  });
+
+  it("throws a clear error when expires_time is missing or unparseable", async () => {
+    for (const badExpiry of [undefined, "not-a-date"]) {
+      const client = new FoodstuffsClient({
+        fetch: stubFetchWithAuthPayload({ access_token: "t", expires_time: badExpiry }),
+      });
+      await assert.rejects(
+        () => client.listStores(),
+        /unparseable expires_time/,
+        `expected expires_time=${String(badExpiry)} to be rejected`,
+      );
+    }
+  });
+
+  it("collectDeals names the malformed envelope instead of crashing on spread", async () => {
+    const fetch = stubFetchWithAuthPayload(
+      { access_token: "t", expires_time: new Date(Date.now() + 3_600_000).toISOString() },
+      { numberOfPages: 1 }, // specials envelope with no products array
+    );
+    const client = new FoodstuffsClient({ fetch });
+    await assert.rejects(
+      () => client.collectDeals({ storeId: "royaloak", store }),
+      /mobile specials \(page 0\): response envelope has no products array/,
+    );
+  });
+
+  it("collectProducts names the missing totalPages instead of silently truncating", async () => {
+    const fetch = stubFetchWithAuthPayload(
+      { access_token: "t", expires_time: new Date(Date.now() + 3_600_000).toISOString() },
+      { products: [], totalHits: 0 }, // search envelope with no totalPages
+    );
+    const client = new FoodstuffsClient({ fetch });
+    await assert.rejects(
+      () => client.collectProducts({ storeId: "royaloak", store }),
+      /product search \(page 0\): response envelope has no numeric totalPages/,
+    );
+  });
+
+  it("collect loops still complete on well-formed envelopes", async () => {
+    const fetch = stubFetchWithAuthPayload(
+      { access_token: "t", expires_time: new Date(Date.now() + 3_600_000).toISOString() },
+      { products: [{ productId: "5004821-EA-000", name: "Milk", price: 860 }], totalHits: 1, totalPages: 1, numberOfPages: 1 },
+    );
+    const client = new FoodstuffsClient({ fetch });
+    const deals = await client.collectDeals({ storeId: "royaloak", store });
+    assert.equal(deals.length, 1);
+    const products = await client.collectProducts({ storeId: "royaloak", store });
+    assert.equal(products.length, 1);
+  });
+
+});

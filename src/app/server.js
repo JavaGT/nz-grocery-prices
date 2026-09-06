@@ -48,7 +48,12 @@ const MIN_COMPRESS_BYTES = 256;
 // lazily on first request and reused; entries are invalidated when the file's
 // mtime or size changes (checked via one statSync per request, so an updated
 // file is picked up without a server restart).
-function createStaticFallback(publicDir, logger) {
+function createStaticFallback(publicDir, logger, { immutableAssets = false } = {}) {
+  // In dist mode every non-HTML file is content-hashed, so it can be cached
+  // forever; index.html stays no-cache and re-resolves the hashed URLs.
+  const assetCacheControl = immutableAssets
+    ? 'public, max-age=31536000, immutable'
+    : 'public, max-age=3600';
   const fileCache = new Map();
 
   function loadCached(filePath, stat, ext) {
@@ -108,7 +113,7 @@ function createStaticFallback(publicDir, logger) {
       if (matches) {
         res.writeHead(304, {
           etag: entry.etag,
-          'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+          'cache-control': ext === '.html' ? 'no-cache' : assetCacheControl,
           vary: 'Accept-Encoding',
         });
         res.end();
@@ -121,7 +126,7 @@ function createStaticFallback(publicDir, logger) {
       'content-type': MIME_TYPES[ext] || 'application/octet-stream',
       'x-content-type-options': 'nosniff',
       etag: entry.etag,
-      'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+      'cache-control': ext === '.html' ? 'no-cache' : assetCacheControl,
     };
 
     if (entry.compressible) {
@@ -190,6 +195,11 @@ function createStaticFallback(publicDir, logger) {
 }
 
 function createAppServer() {
+  // Prefer the content-hashed build output (tools/build-assets.js -> npm run
+  // build:assets) when it has been generated; fall back to public/ for dev.
+  const distDir = join(HERE, '..', '..', 'public-dist');
+  const publicDir = existsSync(distDir) ? distDir : join(HERE, '..', '..', 'public');
+  const immutableAssets = publicDir === distDir;
   const pricesDbPath = process.env.PRICES_DB || join(DATA_DIR, 'prices.db');
   const appDbPath = process.env.APP_DB || join(DATA_DIR, 'app.db');
   const jsonlPath = process.env.JSONL_PATH || join(DATA_DIR, 'prices.jsonl');
@@ -256,7 +266,8 @@ function createAppServer() {
   server.delete('/api/saved-searches/:searchId', privateHandlers.deleteSavedSearch);
   server.get('/api/new-products', privateHandlers.getNewProducts);
 
-  server.setFallback(createStaticFallback(PUBLIC_DIR, console));
+  server.setFallback(createStaticFallback(publicDir, console, { immutableAssets }));
+  console.log(`[server] static assets: ${publicDir === distDir ? 'public-dist (immutable, content-hashed)' : 'public (dev mode)'}`);
 
   return { server, appDb, projDb };
 }

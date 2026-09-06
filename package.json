@@ -59,6 +59,7 @@
     "breadth:report": "node scripts/breadth-report.js",
     "start": "node src/app/server.js",
     "bench": "node tools/bench-server.js --reps 20",
+    "build:assets": "node tools/build-assets.js",
     "bench:archive": "node tools/bench-archive.js",
     "pack:check": "npm pack --dry-run --cache .cache/npm"
   },

@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 338 | Little & Loved | `little-and-loved` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 339 | Toyworld New Zealand | `toyworld-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 335 | Greenstone Shop | `greenstone-shop` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 336 | HAPA | `hapa` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 337 | Maori Arts Gallery | `maori-arts-gallery` | general retail | Shopify products.json | implemented 2026-09-06 |

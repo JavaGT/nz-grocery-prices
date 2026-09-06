@@ -1,23 +1,25 @@
 /**
- * The Good Wine Co — NZ retailer.
+ * The Good Wine Co — NZ wine retailer.
  *
- * Platform: Shopify public storefront JSON. Verified live (see README.md).
+ * Platform: WooCommerce with the public Store API enabled. Verified live
+ * 2026-09-06 (see README.md).
  */
 
-import { ShopifyCatalogClient } from "../_lib/shopify.js";
+import { WooStoreClient } from "../_lib/woocommerce.js";
 
 export const RETAILER = {
   slug: "the-good-wine-co",
   name: "The Good Wine Co",
   origin: "https://thegoodwine.co.nz",
-  platform: "shopify",
+  platform: "woocommerce",
 };
 
 export function createClient(options = {}) {
-  return new ShopifyCatalogClient({
+  return new WooStoreClient({
     slug: RETAILER.slug,
     origin: RETAILER.origin,
     scopeName: "The Good Wine Co Online",
+    pageSize: 50,
     ...options,
   });
 }

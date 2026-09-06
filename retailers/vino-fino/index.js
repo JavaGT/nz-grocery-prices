@@ -1,23 +1,25 @@
 /**
- * Vino Fino — NZ retailer.
+ * Vino Fino — NZ wine retailer.
  *
- * Platform: Shopify public storefront JSON. Verified live (see README.md).
+ * Platform: WooCommerce with the public Store API enabled. Verified live
+ * 2026-09-06 (see README.md).
  */
 
-import { ShopifyCatalogClient } from "../_lib/shopify.js";
+import { WooStoreClient } from "../_lib/woocommerce.js";
 
 export const RETAILER = {
   slug: "vino-fino",
   name: "Vino Fino",
   origin: "https://vinofino.co.nz",
-  platform: "shopify",
+  platform: "woocommerce",
 };
 
 export function createClient(options = {}) {
-  return new ShopifyCatalogClient({
+  return new WooStoreClient({
     slug: RETAILER.slug,
     origin: RETAILER.origin,
     scopeName: "Vino Fino Online",
+    pageSize: 50,
     ...options,
   });
 }

@@ -199,6 +199,7 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 360 | INIKA Organic NZ | `inika-organic-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 356 | Jackson Estate | `jackson-estate` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 357 | Mission Estate Winery | `mission-estate` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 358 | Rockburn Wines | `rockburn-wines` | general retail | Shopify products.json | implemented 2026-09-06 |

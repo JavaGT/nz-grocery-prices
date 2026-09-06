@@ -2,13 +2,13 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestServer, productRec, storeRec, offerRec, daysAgo } from './server-helpers.js';
-import { defaultQueryDbObservations } from '../../src/server/handlers/public.js';
+import { queryDealObservations } from '../../src/sqlite/deal-materialization.js';
 
-// Locks the observation-mapping contract of defaultQueryDbObservations — the
+// Locks the observation-mapping contract of queryDealObservations — the
 // row feed for the deals analytics. The mapping is hot (one row per offer
 // revision in the 90-day window), so it memoizes ISO timestamp strings and
 // skips work that would not change its output; these tests pin that output.
-describe('defaultQueryDbObservations', () => {
+describe('queryDealObservations', () => {
   let srv;
 
   before(async () => {
@@ -46,7 +46,7 @@ describe('defaultQueryDbObservations', () => {
     try {
       const toMs = Date.now();
       const fromMs = toMs - 90 * 24 * 60 * 60 * 1000;
-      return defaultQueryDbObservations(db, fromMs, toMs);
+      return queryDealObservations(db, fromMs, toMs).observations;
     } finally {
       db.close();
     }

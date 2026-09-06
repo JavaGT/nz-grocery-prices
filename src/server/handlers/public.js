@@ -1,5 +1,4 @@
 import { StatusError, CachedResponse } from '../server.js';
-import { calculateSales, calculateOngoingSales } from '../../analytics.js';
 
 const PRODUCT_ID_RE = /^[a-z]+:[a-zA-Z0-9_-]+$/;
 
@@ -31,7 +30,21 @@ function defaultDealsCacheTtlMs() {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DEALS_CACHE_TTL_MS;
 }
 
-export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDbObservations, dealsCacheTtlMs = defaultDealsCacheTtlMs(), dbSignature }) {
+export function defaultQueryDealSignals(db, retailer) {
+  return db.prepare(`
+    SELECT ds.product_id, ds.signal_kind, ds.reference_cents, ds.current_cents,
+           ds.drop_percent, ds.calculated_at, ds.price_policy,
+           p.name AS product_name, p.brand AS product_brand,
+           p.category AS product_category, p.image_url AS product_image,
+           pc.retailer_id, pc.store_id, pc.store_name
+    FROM deal_signals ds
+    JOIN products p ON p.id = ds.product_id
+    JOIN price_contexts pc ON pc.id = ds.context_id
+    ${retailer ? 'WHERE pc.retailer_id = ?' : ''}
+  `).all(...(retailer ? [retailer] : []));
+}
+
+export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, queryDealSignals, dealsCacheTtlMs = defaultDealsCacheTtlMs(), dbSignature }) {
   function db() {
     const d = typeof getDb === 'function' ? getDb() : getDb;
     if (!d) throw new StatusError(503, 'SERVICE_UNAVAILABLE', 'Projection database not available');
@@ -369,107 +382,42 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   const pendingDealsCompute = new Map();
 
   async function computeDealsUniverse(retailer, key, now, sig) {
-    const baselineMs = 90 * 24 * 60 * 60 * 1000;
-    const fromMs = now - baselineMs;
-
-    let observations = [];
-    if (typeof queryDbObservations === 'function') {
-      observations = await queryDbObservations(db(), fromMs, now);
-    } else {
-      observations = defaultQueryDbObservations(db(), fromMs, now);
-    }
-
-    if (retailer) {
-      observations = observations.filter(o => o.store && o.store.retailer === retailer);
-    }
-
-    const atDate = new Date(now).toISOString();
-
-    const salesResult = calculateSales(observations, {
-      at: atDate,
-      freshWithinDays: 7,
-      baselineDays: 90,
-      minSamples: 3,
-      minDropPercent: 0,
-      includeAllTimeLows: true,
-      pricePolicy: 'public',
-    });
-
-    const ongoingResult = calculateOngoingSales(observations, {
-      at: atDate,
-      freshWithinDays: 7,
-      retailer: retailer || undefined,
-      pricePolicy: 'public',
-    });
+    const rows = typeof queryDealSignals === 'function'
+      ? await queryDealSignals(db(), retailer)
+      : defaultQueryDealSignals(db(), retailer);
 
     const historyBacked = [];
     const advertised = [];
 
-    for (const sale of salesResult) {
-      const pid = sale.product?.id || 'unknown';
-      const storeRetailer = sale.store?.retailer || 'unknown';
-      const dropPct = sale.dropPercent || 0;
-      if (dropPct <= 0 && !sale.isAllTimeLow) continue;
-      const savingsText = dropPct > 0 ? `${Math.round(dropPct)}% off` : 'All-time low';
-      historyBacked.push({
+    for (const r of rows) {
+      const dropPercent = r.drop_percent || 0;
+      const deal = {
         product: {
-          id: pid,
-          name: sale.product?.name || null,
-          brand: sale.product?.brand || null,
-          category: (sale.product?.categories || [])[0] || null,
-          imageUrl: ((sale.product?.images || [])[0]) || null,
+          id: r.product_id,
+          name: r.product_name || null,
+          brand: r.product_brand || null,
+          category: r.product_category || null,
+          imageUrl: r.product_image || null,
         },
         priceContext: {
-          retailerId: storeRetailer,
-          retailerName: retailerName(storeRetailer),
-          storeId: sale.store?.id || null,
-          storeName: sale.store?.name || null,
+          retailerId: r.retailer_id,
+          retailerName: retailerName(r.retailer_id),
+          storeId: r.store_id,
+          storeName: r.store_name,
         },
         signal: {
-          kind: sale.isAllTimeLow ? 'all_time_low' : 'history_drop',
-          policy: 'public',
-          dropPercent: sale.dropPercent,
-          referenceCents: sale.baseline?.averageCents || sale.current?.cents || 0,
-          currentCents: sale.current?.cents || 0,
-          savingsText,
+          kind: r.signal_kind,
+          policy: r.price_policy || 'public',
+          dropPercent,
+          referenceCents: r.reference_cents,
+          currentCents: r.current_cents,
+          savingsText: dropPercent > 0 ? `${Math.round(dropPercent)}% off` : 'All-time low',
         },
-        cents: { regular: sale.baseline?.averageCents || sale.current?.cents || 0, current: sale.current?.cents || 0 },
-        calculatedAt: sale.current?.observedAt || atDate,
-      });
-    }
-
-    for (const sale of ongoingResult) {
-      const pid = sale.product?.id || 'unknown';
-      const storeRetailer = sale.store?.retailer || 'unknown';
-      const regCents = sale.regularCents || 0;
-      const curCents = sale.current?.cents || 0;
-      const savePct = sale.savePercent || 0;
-      if (savePct <= 0) continue;
-      advertised.push({
-        product: {
-          id: pid,
-          name: sale.product?.name || null,
-          brand: sale.product?.brand || null,
-          category: (sale.product?.categories || [])[0] || null,
-          imageUrl: ((sale.product?.images || [])[0]) || null,
-        },
-        priceContext: {
-          retailerId: storeRetailer,
-          retailerName: retailerName(storeRetailer),
-          storeId: sale.store?.id || null,
-          storeName: sale.store?.name || null,
-        },
-        signal: {
-          kind: 'advertised_only',
-          policy: 'public',
-          dropPercent: sale.savePercent || 0,
-          referenceCents: regCents,
-          currentCents: curCents,
-          savingsText: sale.savePercent != null ? `${Math.round(sale.savePercent)}% off` : 'On special',
-        },
-        cents: { regular: regCents, current: curCents },
-        calculatedAt: sale.current?.observedAt || atDate,
-      });
+        cents: { regular: r.reference_cents, current: r.current_cents },
+        calculatedAt: r.calculated_at != null ? new Date(r.calculated_at).toISOString() : null,
+      };
+      if (r.signal_kind === 'advertised_only') advertised.push(deal);
+      else historyBacked.push(deal);
     }
 
     // Deduplicate: if the same product+store offer appears in both, keep
@@ -602,69 +550,3 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   return { health, listProducts, getProduct, getProductHistory, listStores, searchSuggestions, listDeals };
 }
 
-export function defaultQueryDbObservations(db, fromMs, toMs) {
-  // Column audit: this feed is the deals hot path (one row per offer revision
-  // in the 90-day window — 100k+ rows at archive scale). offer_key,
-  // context_id, and rev_hash never enter the observation mapping, and the
-  // retailers join existed only to spell out retailer_name (the mapping uses
-  // pc.retailer_id). Dropping them avoids materializing a 64-char hash and
-  // two ids per row plus one indexed lookup per row — ~35% of the raw query
-  // time at 130k rows, measured. Schema is unchanged; the rebuild still
-  // writes every column.
-  const rows = db.prepare(`
-    SELECT or2.product_id, or2.price_regular_cents, or2.price_promo_cents,
-           or2.price_member_cents, or2.comparative, or2.promotion_data, or2.observed_at,
-           p.name AS product_name, p.brand AS product_brand,
-           p.category AS product_category, p.image_url AS product_image,
-           pc.retailer_id, pc.store_id, pc.store_name
-    FROM offer_revisions or2
-    JOIN products p ON p.id = or2.product_id
-    JOIN price_contexts pc ON pc.id = or2.context_id
-    WHERE or2.observed_at >= ? AND or2.observed_at <= ?
-    ORDER BY or2.observed_at
-  `).all(fromMs, toMs);
-
-  // Archive collections stamp thousands of revisions with the same run
-  // timestamp (5-31 distinct observed_at values per archive), so the ISO
-  // string is memoized per epoch-ms instead of rebuilt twice per row.
-  const isoCache = new Map();
-
-  return rows.map(r => {
-    const isAdvertisedDeal = r.price_promo_cents != null && r.price_promo_cents < r.price_regular_cents;
-    const isMemberDeal = r.price_member_cents != null && r.price_member_cents < r.price_regular_cents;
-    const hasReduction = isAdvertisedDeal || isMemberDeal;
-    const observedAtIso = (() => {
-      let s = isoCache.get(r.observed_at);
-      if (s === undefined) {
-        s = new Date(r.observed_at).toISOString();
-        isoCache.set(r.observed_at, s);
-      }
-      return s;
-    })();
-    const observation = {
-      product: {
-        id: r.product_id,
-        name: r.product_name,
-        brand: r.product_brand,
-        categories: r.product_category ? [r.product_category] : [],
-        images: r.product_image ? [r.product_image] : [],
-      },
-      store: {
-        id: r.store_id,
-        name: r.store_name,
-        retailer: r.retailer_id,
-      },
-      price: {
-        regularCents: r.price_regular_cents,
-        promoCents: r.price_promo_cents ?? undefined,
-        memberCents: r.price_member_cents ?? undefined,
-        comparative: r.comparative ? JSON.parse(r.comparative) : undefined,
-      },
-      observedAt: observedAtIso,
-      lastSeenAt: observedAtIso,
-      isOnSpecial: hasReduction,
-    };
-    if (hasReduction && r.promotion_data) observation.promotion = JSON.parse(r.promotion_data);
-    return observation;
-  });
-}

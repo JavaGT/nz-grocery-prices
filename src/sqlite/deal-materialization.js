@@ -20,8 +20,11 @@ export const DEAL_SIGNAL_PARAMS = {
   pricePolicy: 'public',
 };
 
-export function materializeDealSignals(db, { now }) {
-  const fromMs = now - DEAL_SIGNAL_PARAMS.windowDays * DAY_MS;
+// Observation-shaped feed over the projection's 90-day deal window — the
+// single source both the runtime analytics pass and the rebuild-time
+// materialization consume. Returns the mapped observations plus a
+// (productId, storeId) -> price_contexts.id map for signal rows.
+export function queryDealObservations(db, fromMs, toMs) {
   const rows = db.prepare(`
     SELECT or2.product_id, or2.price_regular_cents, or2.price_promo_cents,
            or2.price_member_cents, or2.comparative, or2.promotion_data, or2.observed_at,
@@ -33,10 +36,8 @@ export function materializeDealSignals(db, { now }) {
     JOIN price_contexts pc ON pc.id = or2.context_id
     WHERE or2.observed_at >= ? AND or2.observed_at <= ?
     ORDER BY or2.observed_at
-  `).all(fromMs, now);
+  `).all(fromMs, toMs);
 
-  // deal groups key on productId + storeId; keep the numeric context id
-  // alongside so signal rows can reference price_contexts.
   const contextByKey = new Map();
   const observations = rows.map(r => {
     contextByKey.set(`${r.product_id}\u0000${r.store_id}`, r.context_id);
@@ -70,6 +71,13 @@ export function materializeDealSignals(db, { now }) {
     if (hasReduction && r.promotion_data) observation.promotion = JSON.parse(r.promotion_data);
     return observation;
   });
+
+  return { observations, contextByKey };
+}
+
+export function materializeDealSignals(db, { now }) {
+  const fromMs = now - DEAL_SIGNAL_PARAMS.windowDays * DAY_MS;
+  const { observations, contextByKey } = queryDealObservations(db, fromMs, now);
 
   const at = new Date(now).toISOString();
   const base = {

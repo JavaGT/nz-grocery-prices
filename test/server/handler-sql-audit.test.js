@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPublicHandlers, defaultQueryDbObservations } from '../../src/server/handlers/public.js';
+import { createPublicHandlers, defaultQueryDealSignals } from '../../src/server/handlers/public.js';
 
 // Column audit: the handlers above are hot paths whose SELECT lists were
 // trimmed of columns their mappings never read (rev_hash, offer_key,
@@ -33,52 +33,29 @@ function recordingDb({ row = null, rows = [] }) {
 const NOW = Date.parse('2026-09-06T00:00:00.000Z');
 
 describe('hot-path SELECT column audit', () => {
-  it('deals window query does not read rev_hash, offer_key, context_id, or the retailers join', () => {
+  it('signal loader reads deal_signals + joins and carries the retailer filter', () => {
     const db = recordingDb({ rows: [] });
-    defaultQueryDbObservations(db, NOW - 86400000, NOW);
+    defaultQueryDealSignals(db, 'paknsave');
     assert.equal(db.sqls.length, 1);
     const sql = db.sqls[0];
-    assert.ok(sql.includes('FROM offer_revisions'), 'queries offer_revisions');
-    const selected = selectList(sql);
-    for (const dead of ['rev_hash', 'offer_key', 'context_id', 'retailer_name']) {
-      assert.equal(selected.includes(dead), false, `SELECT list must not read ${dead}: ${selected}`);
+    assert.ok(sql.includes('FROM deal_signals'), 'queries the materialized signals');
+    assert.ok(sql.includes('WHERE pc.retailer_id = ?'), 'retailer filter is pushed into SQL');
+    for (const needed of ['signal_kind', 'reference_cents', 'current_cents', 'drop_percent', 'calculated_at', 'price_policy']) {
+      assert.ok(sql.includes(needed), `signal SELECT keeps ${needed}: ${sql}`);
     }
-    assert.equal(sql.includes('JOIN retailers'), false,
-      'retailers join existed only for retailer_name; mapping uses pc.retailer_id');
+    const dbNoFilter = recordingDb({ rows: [] });
+    defaultQueryDealSignals(dbNoFilter, undefined);
+    assert.equal(dbNoFilter.sqls[0].includes('WHERE'), false, 'no retailer param -> no WHERE clause');
   });
 
-  it('defaultQueryDbObservations still maps real rows into the observation contract', () => {
-    const db = recordingDb({
-      rows: [{
-        product_id: 'paknsave:milk',
-        price_regular_cents: 500,
-        price_promo_cents: 400,
-        price_member_cents: null,
-        comparative: null,
-        promotion_data: null,
-        observed_at: NOW,
-        product_name: 'Milk 1L',
-        product_brand: 'Pams',
-        product_category: 'Dairy',
-        product_image: 'https://example/milk.jpg',
-        retailer_id: 'paknsave',
-        store_id: 'paknsave:001',
-        store_name: 'Royal Oak',
-      }],
-    });
-    const observations = defaultQueryDbObservations(db, NOW - 86400000, NOW);
-    assert.equal(observations.length, 1);
-    assert.deepEqual(observations[0], {
-      product: {
-        id: 'paknsave:milk', name: 'Milk 1L', brand: 'Pams',
-        categories: ['Dairy'], images: ['https://example/milk.jpg'],
-      },
-      store: { id: 'paknsave:001', name: 'Royal Oak', retailer: 'paknsave' },
-      price: { regularCents: 500, promoCents: 400, memberCents: undefined, comparative: undefined },
-      observedAt: new Date(NOW).toISOString(),
-      lastSeenAt: new Date(NOW).toISOString(),
-      isOnSpecial: true,
-    });
+  it('signal loader never reads build-only metadata columns', () => {
+    const db = recordingDb({ rows: [] });
+    defaultQueryDealSignals(db, undefined);
+    const selected = selectList(db.sqls[0]);
+    for (const dead of ['calc_version', 'baseline_window_days', 'min_samples', 'context_id']) {
+      assert.equal(selected.includes(dead), false,
+        `signal SELECT must not read build-only ${dead}: ${selected}`);
+    }
   });
 
   it('product detail offers query does not read promotion_data or source_data', async () => {

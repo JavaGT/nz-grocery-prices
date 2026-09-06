@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { ProjectionRepository } from '../../src/sqlite/projection-repository.js';
 import { productRec, storeRec, offerRec, writeFixture } from '../server/server-helpers.js';
-import { defaultQueryDbObservations } from '../../src/server/handlers/public.js';
+import { queryDealObservations } from '../../src/sqlite/deal-materialization.js';
 import { calculateSales, calculateOngoingSales } from '../../src/analytics.js';
 import { DEAL_SIGNALS_CALC_VERSION, DEAL_SIGNAL_PARAMS } from '../../src/sqlite/deal-materialization.js';
 
@@ -36,7 +36,7 @@ function fixtureRecords() {
 }
 
 function expectedSignals(db, now) {
-  const observations = defaultQueryDbObservations(db, now - DEAL_SIGNAL_PARAMS.windowDays * DAY, now);
+  const observations = queryDealObservations(db, now - DEAL_SIGNAL_PARAMS.windowDays * DAY, now).observations;
   const at = new Date(now).toISOString();
   const out = [];
   for (const sale of calculateSales(observations, {

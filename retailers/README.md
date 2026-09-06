@@ -199,6 +199,7 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 300 | Watches of New Zealand | `watches-of-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 296 | BBQs and More | `bbqs-and-more` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 297 | Bull BBQ NZ | `bull-bbq` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 298 | Grill King BBQs | `grill-king-bbqs` | general retail | Shopify products.json | implemented 2026-09-06 |

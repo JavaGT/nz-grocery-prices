@@ -199,6 +199,12 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 305 | DECJUBA NZ | `decjuba-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 306 | Ebony Boutique | `ebony-boutique` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 307 | Kōnei Aotearoa | `konei` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 308 | Max NZ | `max-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 309 | Shop 9 Boutique | `shop9` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 310 | Trouble & Fox | `trouble-and-fox` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 301 | Loft Furniture | `loft-furniture` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 302 | Mooch NZ | `mooch-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 303 | The Homestore | `the-homestore` | general retail | Shopify products.json | implemented 2026-09-06 |

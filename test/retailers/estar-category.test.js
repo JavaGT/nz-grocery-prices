@@ -41,6 +41,8 @@ test("parseWindowJson parses plain and spread-payload assignments", () => {
   );
   assert.equal(spread.items.length, 1);
   assert.equal(parseWindowJson("<p>nothing here</p>"), undefined);
+  assert.equal(parseWindowJson(undefined), undefined);
+  assert.equal(parseWindowJson(null), undefined);
 });
 
 test("parseEstarItems tolerates missing arrays", () => {

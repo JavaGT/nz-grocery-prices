@@ -42,6 +42,7 @@ test("parseNextData extracts the JSON blob", () => {
   const json = parseNextData(makeHtml(NEXT));
   assert.equal(json.buildId, "test");
   assert.equal(parseNextData("<p>no data</p>"), undefined);
+  assert.equal(parseNextData(undefined), undefined);
 });
 
 test("findDehydratedQuery locates the category-search entry", () => {

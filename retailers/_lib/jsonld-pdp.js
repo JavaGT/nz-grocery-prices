@@ -15,6 +15,7 @@ import { buildObservation, toCents } from "./observation.js";
 /** Extract JSON-LD blocks (tolerant) and return the @type Product nodes. */
 export function parseJsonLdProducts(html) {
   const products = [];
+  if (typeof html !== "string") return products;
   const blocks = [...html.matchAll(
     /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
   )];

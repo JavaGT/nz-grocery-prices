@@ -8,6 +8,7 @@
  * pricing metadata.
  */
 
+import { getJson } from "./http.js";
 import { buildObservation } from "./observation.js";
 
 const CONSTRUCTOR_HOST = "https://ac.cnstrc.com";
@@ -71,9 +72,11 @@ export class ConstructorSearchClient {
     this.headers = { "user-agent": options.userAgent ?? undefined, accept: "application/json", ...options.headers };
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeout = options.timeout ?? 25000;
+    this.#retry = options.retry;
   }
   #fetch;
   #timeout;
+  #retry;
 
   getStore() {
     return {
@@ -89,9 +92,17 @@ export class ConstructorSearchClient {
     const url =
       `${CONSTRUCTOR_HOST}/search/${encodeURIComponent(term)}?key=${encodeURIComponent(this.key)}` +
       `&num_results_per_page=${this.pageSize}&page=${page}`;
-    const response = await this.#fetch(url, { headers: this.headers });
-    if (!response.ok) throw new Error(`constructor ${this.slug} "${term}" p${page} failed: ${response.status}`);
-    return response.json();
+    // Through the shared getJson seam so the configured timeout is honored
+    // (a raw fetch here could hang the whole campaign run) and a WAF page
+    // served with status 200 fails as a typed JSON error, not a bare
+    // SyntaxError. The key stays in the query string; never in error text.
+    return getJson(url, {
+      fetch: this.#fetch,
+      headers: this.headers,
+      timeout: this.#timeout,
+      retry: this.#retry,
+      operation: `constructor ${this.slug} "${term}" p${page}`,
+    });
   }
 
   /**

@@ -47,6 +47,7 @@ function balancedObject(text, from) {
  * back to parsing the spread payload itself.
  */
 export function parseWindowJson(html, marker = "window.category") {
+  if (typeof html !== "string") return undefined;
   const markerIndex = html.indexOf(marker);
   if (markerIndex === -1) return undefined;
   const eq = html.indexOf("=", markerIndex);

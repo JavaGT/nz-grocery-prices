@@ -30,6 +30,11 @@ test("parseJsonLdProducts tolerates a single-object @graph without throwing", ()
   assert.equal(products[0].name, "G");
 });
 
+test("parseJsonLdProducts treats non-string input as no products", () => {
+  assert.deepEqual(parseJsonLdProducts(undefined), []);
+  assert.deepEqual(parseJsonLdProducts(null), []);
+});
+
 test("super-liquor mapHit puts the was-price in regular and the current price in promo", () => {
   const spec = mapHit({
     Id: 4242,

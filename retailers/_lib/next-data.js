@@ -13,6 +13,7 @@ import { buildObservation } from "./observation.js";
 
 /** Parse the __NEXT_DATA__ JSON blob from an SSR page. */
 export function parseNextData(html) {
+  if (typeof html !== "string") return undefined;
   const i = html.indexOf("__NEXT_DATA__");
   if (i === -1) return undefined;
   const start = html.indexOf(">", i);

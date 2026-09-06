@@ -199,6 +199,12 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 244 | Love Knot War | `love-knot-war` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 245 | Penny Sage | `penny-sage` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 246 | Sophie Divett Jewellery | `sophie-divett` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 247 | Tonic & Cloth | `tonic-and-cloth` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 248 | Velvet Heartbeat | `velvet-heartbeat` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 249 | Yumei Brand | `yumei-brand` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 238 | Aka Aka Brewing | `aka-aka-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 239 | Beer Cellar NZ | `beer-cellar` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 240 | Beer Hug | `beer-hug` | general retail | Shopify products.json | implemented 2026-09-06 |

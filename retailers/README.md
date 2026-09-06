@@ -199,6 +199,13 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 254 | Flex Fitness Equipment | `flex-equipment` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 255 | Johnny Jungle | `johnny-jungle` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 256 | Moffatts Flower Company | `moffatts` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 257 | PlantHouse | `planthouse` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 258 | The Green Grower | `the-green-grower` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 259 | The Indoor Oasis | `the-indoor-oasis` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 260 | The Lily Pot | `the-lily-pot` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 250 | Amberjack Candle Company | `amberjack` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 251 | Living Light Candles | `living-light-candles` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 252 | LucyKing | `lucy-king` | general retail | Shopify products.json | implemented 2026-09-06 |

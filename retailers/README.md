@@ -199,6 +199,9 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 345 | The Good Wine Co | `the-good-wine-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 346 | Vino Fino | `vino-fino` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 347 | Winebox | `winebox` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 344 | Alcohol Delivery NZ | `alcohol-delivery-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 340 | Green With Envy | `green-with-envy` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 341 | Indie Home Collective | `indie-home-collective` | general retail | Shopify products.json | implemented 2026-09-06 |

@@ -1,8 +1,7 @@
 /**
- * HealthPost — NZ natural health & wellness online store.
+ * HealthPost — NZ retailer.
  *
- * Platform: Shopify. Catalog via GET /products.json (published products,
- * 250/page). Verified live 2026-09-06 (see README.md).
+ * Platform: Shopify public storefront JSON. Verified live (see README.md).
  */
 
 import { ShopifyCatalogClient } from "../_lib/shopify.js";
@@ -10,7 +9,7 @@ import { ShopifyCatalogClient } from "../_lib/shopify.js";
 export const RETAILER = {
   slug: "healthpost",
   name: "HealthPost",
-  origin: "https://www.healthpost.co.nz",
+  origin: "https://healthpost.co.nz",
   platform: "shopify",
 };
 

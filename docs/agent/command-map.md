@@ -79,6 +79,12 @@ v1 whole-observation records are refused everywhere in the hot path:
 | Breadth report | `npm run breadth:report` | Read-only report from the latest breadth health log and pilot archives; writes `reports/breadth-report-<NZ-date>.md`, never calls retailer APIs. |
 | Install breadth schedule | `sudo sh ops/install-breadth-daemon.sh` | Installs the 3:30am macOS LaunchDaemon; requires an interactive administrator password. |
 
+## Asset build (optional, perf campaign 2026-09-06)
+
+| Task | Command | What it does |
+|---|---|---|
+| Build hashed assets | `npm run build:assets` | Content-hashes `public/` into `public-dist/` (rewrites index.html + ES-module import specifiers). The app server prefers `public-dist/` when present and serves assets `immutable`; delete `public-dist/` (or skip building) for dev mode on plain `public/`. Restart the server after building. |
+
 ## Benchmarks (perf campaign 2026-09-06)
 
 | Task | Command | Measures | Needs |

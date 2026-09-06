@@ -199,6 +199,9 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 289 | The Bond Store | `bond-store` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 290 | Kiwi Spirit Distillery | `kiwi-spirit-distillery` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 291 | SIP Distilling Co. | `sip-distilling` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 285 | Living Nature | `living-nature` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 286 | Nellie Tier | `nellie-tier` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 287 | PureNature NZ | `pure-nature` | general retail | Shopify products.json | implemented 2026-09-06 |

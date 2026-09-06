@@ -42,6 +42,26 @@ test("graphql() honors the timeout seam (aborts a hanging fetch)", async () => {
   await assert.rejects(() => client.listCategoryTree(), /abort/);
 });
 
+test("graphql() reports a 200 HTML (WAF) body as an error naming the retailer", async () => {
+  const client = new MagentoGraphqlClient({
+    slug: "rsexample",
+    origin: "https://rsexample.co.nz",
+    categories: ["clearance"],
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: { get: (name) => (name === "content-type" ? "text/html" : undefined) },
+      body: { getReader: undefined },
+      text: async () => "<html>Access denied</html>",
+    }),
+  });
+  await assert.rejects(
+    () => client.listCategoryTree(),
+    /graphql rsexample: expected JSON but got 200 OK \(text\/html\)/,
+  );
+});
+
 function stubClient(responses) {
   return new MagentoGraphqlClient({
     slug: "rsexample",

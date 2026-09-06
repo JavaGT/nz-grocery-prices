@@ -13,6 +13,14 @@
 import { BROWSER_UA, getText } from "./http.js";
 import { buildObservation, toCents } from "./observation.js";
 
+/** String.fromCodePoint throws RangeError above U+10FFFF; a garbled tile
+ * entity must stay literal instead of killing the whole category walk. */
+function codePointEntity(code, fallback) {
+  return Number.isFinite(code) && code >= 0 && code <= 0x10ffff
+    ? String.fromCodePoint(code)
+    : fallback;
+}
+
 export function decodeEntities(value = "") {
   return value
     .replaceAll("&quot;", '"')
@@ -29,8 +37,8 @@ export function decodeEntities(value = "") {
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&nbsp;", " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/g, (entity, code) => codePointEntity(Number(code), entity))
+    .replace(/&#x([\da-f]+);/gi, (entity, code) => codePointEntity(Number.parseInt(code, 16), entity));
 }
 
 /** Slice HTML into tile strings between consecutive tile-start matches. */

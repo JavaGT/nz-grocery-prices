@@ -74,6 +74,21 @@ test("decodeEntities handles numeric and named entities", () => {
   assert.equal(decodeEntities("&amp;&quot;&#39;"), "&\"'");
 });
 
+test("decodeEntities leaves out-of-range code points literal instead of crashing", () => {
+  // String.fromCodePoint would RangeError on these; they must stay literal.
+  assert.equal(decodeEntities("A&#999999999;B"), "A&#999999999;B");
+  assert.equal(decodeEntities("&#x110000;"), "&#x110000;");
+  // Boundary sanity: the largest valid code point still decodes.
+  assert.equal(decodeEntities("&#x10FFFF;"), "\u{10FFFF}");
+});
+
+test("a tile with a garbled numeric entity still parses", () => {
+  const garbled = HF_TILE.replaceAll("Apex Bino Defender", "Apex &#999999999; Defender");
+  const tiles = parseHtmlTiles(`<div>${garbled}</div>`, HF_PROFILE);
+  assert.equal(tiles.length, 1);
+  assert.equal(tiles[0].name, "Hunters Element Apex &#999999999; Defender");
+});
+
 test("H&F profile extracts sale pricing into regular+promo", () => {
   const tiles = parseHtmlTiles(`<div>${HF_TILE}</div>`, HF_PROFILE);
   assert.equal(tiles.length, 1);

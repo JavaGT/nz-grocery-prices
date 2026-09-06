@@ -9,7 +9,7 @@
  */
 
 import { BROWSER_UA } from "./http.js";
-import { fetchWithRetry } from "../../src/adapters/fetch-with-retry.js";
+import { fetchWithRetry, parseJsonResponse } from "../../src/adapters/fetch-with-retry.js";
 import { buildObservation, toCents } from "./observation.js";
 
 const CATEGORY_TREE_QUERY = `{
@@ -115,7 +115,10 @@ export class MagentoGraphqlClient {
     if (!response.ok) {
       throw new Error(`graphql ${this.slug} failed: ${response.status} ${response.statusText}`);
     }
-    const json = await response.json();
+    // parseJsonResponse (not raw response.json()) so a WAF challenge
+    // served with status 200 fails with an error naming the retailer,
+    // status, content-type, and body prefix instead of a bare SyntaxError.
+    const json = await parseJsonResponse(response, `graphql ${this.slug}`);
     if (json.errors?.length) {
       throw new Error(`graphql ${this.slug} errors: ${json.errors.map((e) => e.message).join("; ")}`);
     }

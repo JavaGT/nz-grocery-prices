@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 268 | Saucy | `saucy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 269 | ShopNZ | `shopnz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 263 | Glowing Sky | `glowing-sky` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 264 | Mons Royale NZ | `mons-royale-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 265 | NZ Natural Clothing | `nz-natural-clothing` | general retail | Shopify products.json | implemented 2026-09-06 |

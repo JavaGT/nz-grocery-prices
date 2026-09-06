@@ -199,6 +199,7 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 373 | Linarte | `linarte` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 371 | Mount Surf Shop | `mount-surf-shop` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 372 | Saltwater Surf Shop | `saltwater-surf` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 369 | Kiwi Corner Dairy | `kiwi-corner-dairy` | general retail | Shopify products.json | implemented 2026-09-06 |

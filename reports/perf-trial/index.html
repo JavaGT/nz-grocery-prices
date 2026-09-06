@@ -24,8 +24,8 @@
 </style>
 </head><body>
 <h1>Performance Campaign — perf-trial-20260906-0303</h1>
-<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 12:10 NZST · <b>status: complete - pre-materialization fully shipped (increments 1 + 2)</b> · auto-refreshes every 5 min</p>
-<div class="banner">Deal-signal pre-materialization is fully landed. The rebuild populates deal_signals with analytics output (parity-tested), and /api/deals now reads those signals: the cold compute dropped from ~96ms on a 35k-offer archive to a 0.01ms indexed signal read - independent of archive size or age. Warm-path behavior (TTL cache, dbSignature invalidation, single-flight, CachedResponse bytes, tiering) is unchanged. Also fixed a pre-existing flaky test in the cached-response suite.</div>
+<p class="meta">nz-grocery-prices · started 2026-09-06 03:03 NZST · report updated 2026-09-06 12:35 NZST · <b>status: complete - pre-materialization fully shipped (increments 1 + 2)</b> · auto-refreshes every 5 min</p>
+<div class="banner">Deal-signal pre-materialization is fully landed. The rebuild populates deal_signals with analytics output (parity-tested), and /api/deals now reads those signals: the cold compute dropped from ~96ms on a 35k-offer archive to a 0.01ms indexed signal read - independent of archive size or age. Warm-path behavior (TTL cache, dbSignature invalidation, single-flight, CachedResponse bytes, tiering) is unchanged. Also fixed a pre-existing flaky test in the cached-response suite. Follow-up shipped: content-hashed asset build (npm run build:assets) with immutable caching - the report's 'up next' idea, owner-approved.</div>
 
 <h2>Baseline (before any changes)</h2>
 <table>
@@ -187,6 +187,18 @@
       <tr><th>Trade-offs</th><td>Signals are as fresh as the last nightly rebuild (bounded by collection cadence, same as prices themselves). New signals for newly collected prices appear on the next rebuild. calc_version guards future parameter changes. Also fixed: lane F3s cached-response test flaked on strict gzip length equality (random-uuid compression size wobbles) - now asserts the cached tail member is byte-identical instead.</td></tr>
       <tr><th>Verified by</th><td>Parity oracle (public-api deals tests) passes unmodified; deals-cache suite reworked to the signal seam (13 tests); full suite 945 pass / 0 fail x3 consecutive runs; npm run check clean.</td></tr>
       <tr><th>Commit</th><td><code>e58303b (+ flake fix)</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>#13 · Content-hashed asset build with immutable caching <span class="pill "></span></h3>
+    <p>tools/build-assets.js (npm run build:assets) copies public/ into public-dist/ with content-hashed filenames (sha256 of final content, so a change anywhere in an import chain re-hashes every importer), rewrites ES-module import specifiers and index.html URLs, emits a manifest, and cleans stale files. The app server prefers public-dist/ when present: hashed assets get cache-control: public, max-age=31536000, immutable; index.html stays no-cache and re-resolves hashed URLs. Dev mode (no public-dist) is exactly as before.</p>
+    <table class="kv">
+      <tr><th>Area</th><td>interface / caching (opt-in production build)</td></tr>
+      <tr><th>Before → After</th><td><b>Hashed assets: max-age=3600 + ETag revalidation -&gt; 1 year immutable (zero revalidation round trips). Repeat visits fetch only index.html (~1-2KB) + API data; every asset load after the first comes from the browser cache.</b></td></tr>
+      <tr><th>Trade-offs</th><td>Opt-in build step: production must run build:assets (and restart) after frontend edits, or it keeps serving the previous public-dist - the startup log names the active mode. No dependency added; deterministic output.</td></tr>
+      <tr><th>Verified by</th><td>8 new tests (build hashing/rewriting/determinism/stale-cleanup + dist immutable/304/no-cache headers); full suite 953 pass / 0 fail; live-server curl checks of hashed asset, index, and API.</td></tr>
+      <tr><th>Commit</th><td><code>9bdc339</code></td></tr>
     </table>
   </div>
 

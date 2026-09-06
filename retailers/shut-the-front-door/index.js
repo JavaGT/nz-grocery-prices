@@ -1,0 +1,23 @@
+/**
+ * Shut the Front Door — NZ retailer.
+ *
+ * Platform: Shopify public storefront JSON. Verified live (see README.md).
+ */
+
+import { ShopifyCatalogClient } from "../_lib/shopify.js";
+
+export const RETAILER = {
+  slug: "shut-the-front-door",
+  name: "Shut the Front Door",
+  origin: "https://shutthefrontdoor.co.nz",
+  platform: "shopify",
+};
+
+export function createClient(options = {}) {
+  return new ShopifyCatalogClient({
+    slug: RETAILER.slug,
+    origin: RETAILER.origin,
+    scopeName: "Shut the Front Door Online",
+    ...options,
+  });
+}

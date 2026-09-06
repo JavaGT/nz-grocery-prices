@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 354 | ROEM | `roem-activewear` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 355 | WE-AR | `we-ar-yoga` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 348 | Babies.co.nz | `babies-co-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 349 | Baby On The Move | `baby-on-the-move` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 350 | Babyhood NZ | `babyhood-nz` | general retail | Shopify products.json | implemented 2026-09-06 |

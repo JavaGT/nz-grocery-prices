@@ -11,7 +11,7 @@ import { open } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { groupRuns } from "./breadth-pilot-gate.js";
 
-export const DEFAULT_HEALTH_LOG = "/tmp/nz-grocery-breadth.health.jsonl";
+export const DEFAULT_HEALTH_LOG = "data/logs/nz-grocery-breadth.health.jsonl";
 export const DEFAULT_DATA_DIR = "data";
 export const DEFAULT_REPORT_DIR = "reports";
 
@@ -336,7 +336,7 @@ The physical-store denominator is approximate and comes from the project's docum
 
 ## Evidence and method
 
-- Run evidence: **/tmp/nz-grocery-breadth.health.jsonl** and the breadth run log.
+- Run evidence: **data/logs/nz-grocery-breadth.health.jsonl** and the breadth run log.
 - Corpus evidence: **data/breadth-pilot-*.jsonl** and their manifests.
 - This report is read-only with respect to collection: it does not call retailer APIs and does not modify **data/prices.jsonl**.
 `;

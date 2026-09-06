@@ -12,7 +12,7 @@
 //
 // Usage:
 //   node scripts/breadth-pilot-gate.js [--health-log <path>] [--target N]
-//   env: BREADTH_HEALTH_LOG (default /tmp/nz-grocery-breadth.health.jsonl)
+//   env: BREADTH_HEALTH_LOG (default data/logs/nz-grocery-breadth.health.jsonl)
 //        BREADTH_TZ_OFFSET_H (NZST offset from UTC; default 12)
 //
 // Exit code 0 when streak >= target (default 3); 1 otherwise. This lets it
@@ -20,7 +20,9 @@
 
 import { readFileSync, existsSync } from "node:fs";
 
-const DEFAULT_LOG = "/tmp/nz-grocery-breadth.health.jsonl";
+// Health log moved out of volatile /tmp after the 2026-09-07 incident check
+// (history vanished with /tmp cleanup); BREADTH_HEALTH_LOG overrides.
+const DEFAULT_LOG = "data/logs/nz-grocery-breadth.health.jsonl";
 const DEFAULT_TARGET = 3;
 const TZ_OFFSET_H = Number(process.env.BREADTH_TZ_OFFSET_H ?? 12);
 export const EXPECTED_RETAILERS = [

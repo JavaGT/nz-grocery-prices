@@ -56,6 +56,11 @@ const { BUDGET_SKIPPED } = OUTCOME_CATEGORIES;
 export const DEFAULT_DELAY_MS = 5000;
 export const DEFAULT_FILE = "data/breadth-pilot.jsonl";
 export const BREAKER_THRESHOLD = 5;
+
+// Walker-level retry rounds for a failed page request, ON TOP of the
+// client's per-request retries: a stretch of 5xx from the mobile API must
+// not silently drop single categories for the night (2026-09-07 incident).
+export const DEFAULT_PAGE_RETRY_ROUNDS = 2;
 // Nightly health floor: pilot nights collect 11k-13k products per banner;
 // anything under this means the crawl is failing to see the catalogue.
 export const DEFAULT_MIN_EXPECTED_PRODUCTS = 1000;
@@ -63,8 +68,10 @@ export const DEFAULT_MIN_EXPECTED_PRODUCTS = 1000;
 // rounds ON TOP of the client's per-request retries: a stretch of 5xx
 // from Foodstuffs must not abort the whole nightly lane (the Sep-5 pilot
 // night lost paknsave to one persistent 500 on the tree endpoint).
-export const DEFAULT_BOOTSTRAP_ROUNDS = 3;
-export const DEFAULT_BOOTSTRAP_GAP_MS = 10_000;
+// 5 rounds × 30s ≈ 2.5 min of tolerance on top of client backoff —
+// 3 × 10s still lost the lane during the 2026-09-05/07 500 stretches.
+export const DEFAULT_BOOTSTRAP_ROUNDS = 5;
+export const DEFAULT_BOOTSTRAP_GAP_MS = 30_000;
 const MANIFEST_SUFFIX = ".breadth-manifest.json";
 const MANIFEST_VERSION = 1;
 const HIT_CLAMP = 1000;
@@ -323,6 +330,7 @@ export async function crawlStore({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   bootstrapRounds = DEFAULT_BOOTSTRAP_ROUNDS,
   bootstrapGapMs = DEFAULT_BOOTSTRAP_GAP_MS,
+  pageRetryRounds = DEFAULT_PAGE_RETRY_ROUNDS,
 }) {
   const seen = new Map();
   const planned = new Set();
@@ -390,12 +398,14 @@ export async function crawlStore({
     const spawned = [];
     const observations = [];
     const continuationIds = [];
+    const failed = [];
     let budgetStop = false;
 
     for (const [index, result] of settled.entries()) {
       const thunk = batch[index];
       if (result.status === "rejected") {
         if (result.reason?.code === "EBREADTHBUDGET") budgetStop = true;
+        else failed.push({ thunk, error: result.reason });
         consecutiveFailures += 1;
         warn(
           `${thunk.id} failed: ${result.reason?.message ?? String(result.reason)}`,
@@ -525,6 +535,7 @@ export async function crawlStore({
       carried,
       budgetStop,
       circuitOpen: circuitOpenedAt !== null,
+      failed,
     };
   }
 
@@ -592,6 +603,10 @@ export async function crawlStore({
   let pending = initial;
   let budgetExhausted = false;
   let circuitError;
+  // Walker-level retries for failed pages: each task may be re-queued
+  // pageRetryRounds times before its path is declared incomplete. Without
+  // this a single 5xx silently dropped that category for the whole night.
+  const retryAttempts = new Map();
 
   while (pending.length > 0) {
     // CONCERN 6: filter out leaf pages for categories that have already ended.
@@ -621,7 +636,31 @@ export async function crawlStore({
       warn(circuitError);
       break;
     }
-    pending = wave.spawned.concat(wave.carried);
+    const requeues = [];
+    for (const { thunk, error } of wave.failed) {
+      const message = error?.message ?? String(error);
+      const attempts = (retryAttempts.get(thunk.id) ?? 0) + 1;
+      retryAttempts.set(thunk.id, attempts);
+      if (attempts <= pageRetryRounds) {
+        warn(
+          `${thunk.id} failed: ${message} — requeued ` +
+            `(retry ${attempts}/${pageRetryRounds})`,
+        );
+        requeues.push(thunk);
+      } else {
+        warn(
+          `${thunk.id} failed after ${attempts} attempts: ${message} — ` +
+            `coverage is incomplete for this path`,
+        );
+        incompleteNodes.push({
+          path: thunk.categoryPath.join("/"),
+          depth: thunk.categoryPath.length - 1,
+          reason: "page-failed",
+          error: message,
+        });
+      }
+    }
+    pending = [...requeues, ...wave.spawned, ...wave.carried];
   }
 
   // BLOCKER 1+2: mark incomplete coverage when any node was saturated and
@@ -638,6 +677,7 @@ export async function crawlStore({
     seededDiscovery: initial.length,
     skippedDiscovery,
     treeCategories: tree.length,
+    treeNodes: plans.length,
     warnings,
     budgetExhausted,
     incompleteCoverage,
@@ -882,6 +922,7 @@ export async function runCollection(options = {}) {
         uniqueCount: 0,
         pagesFetched: 0,
         treeCategories: 0,
+        treeNodes: 0,
         warnings: [`crawl aborted: ${error.message}`],
         budgetExhausted: false,
         incompleteCoverage: false,
@@ -891,23 +932,34 @@ export async function runCollection(options = {}) {
     }
   }
 
-  // Strict product floor binds whenever this crawl ran ANY discovery
-  // (seededDiscovery > 0): partial-discovery and truncated-tree nights
-  // must fail until a complete discovery lands. The exemption is only for
-  // pure skip nights (every node fresh, nothing to see): the discovery
-  // TTL guarantees a full-coverage night at least every
-  // DEFAULT_DISCOVERY_TTL_MS, where a broken catalogue fails the floor and
-  // resets the gate streak.
+  // Health judgment, two regimes (2026-09-07 recalibration):
+  // - Discovery night (most tree nodes seeded): the strict product floor
+  //   binds — partial-discovery and truncated-tree nights must fail until a
+  //   complete discovery lands, where a broken catalogue fails the floor and
+  //   resets the gate streak.
+  // - Small-seed night (a handful of stale stragglers re-discovered within
+  //   an otherwise-fresh TTL window): the catalogue floor would fire on every
+  //   such night, so health is judged per-node instead — any page failure,
+  //   error, or budget/circuit stop already marks the store unhealthy via
+  //   the checks above; a seeded-but-empty result still fails.
   const unhealthy =
     storeResults.some(
-      (result) =>
-        result.budgetExhausted ||
-        result.error ||
-        result.incompleteCoverage ||
-        ((result.uniqueCount ?? 0) < minExpectedProducts &&
-          !(
-            result.skippedDiscovery > 0 && result.seededDiscovery === 0
-          )),
+      (result) => {
+        if (
+          result.budgetExhausted ||
+          result.error ||
+          result.incompleteCoverage
+        ) {
+          return true;
+        }
+        const seeded = result.seededDiscovery ?? 0;
+        const totalNodes = result.treeNodes ?? 0;
+        const discoveryNight = seeded >= Math.ceil(totalNodes / 2);
+        if (!discoveryNight) {
+          return seeded > 0 && (result.uniqueCount ?? 0) === 0;
+        }
+        return (result.uniqueCount ?? 0) < minExpectedProducts;
+      },
     ) || manifestPersistFailures > 0;
 
   const summary = {
@@ -924,6 +976,7 @@ export async function runCollection(options = {}) {
       uniqueProducts: result.uniqueCount,
       pagesFetched: result.pagesFetched,
       treeCategories: result.treeCategories,
+      treeNodes: result.treeNodes,
       seededDiscovery: result.seededDiscovery,
       skippedDiscovery: result.skippedDiscovery,
       emptyPages: result.emptyPages,

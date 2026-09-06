@@ -109,6 +109,39 @@ run (its offset manifest stalled the lane at 0 products while reporting
 healthy — `--resume` opts back in for crashed manual crawls). Gate state:
 `node scripts/breadth-pilot-gate.js` (3 consecutive healthy nights).
 
+### 2026-09-07 incident check + hardening
+
+The nightly check found both Foodstuffs lanes unhealthy on the Sep 7 run
+(paknsave 183/11k products, newworld 89/13.7k; exit 1) and paknsave lost
+outright to a tree-endpoint 500 stretch on Sep 5 (3×10s bootstrap rounds
+were not enough). Root causes fixed the same morning:
+
+- **Floor recalibration** (`scripts/foodstuffs-mobile-breadth.js`): nights
+  that seed only a few stale straggler nodes inside an otherwise-fresh TTL
+  window are judged per-node (any page failure, error, empty seed, budget
+  or circuit stop fails the lane) instead of tripping the catalogue-wide
+  floor. Discovery nights (≥ half of tree nodes seeded) keep the strict
+  floor. Discriminator: `treeNodes` (total plan nodes) now in the summary.
+- **Page-level retry**: failed page requests are re-queued by the walker
+  (`DEFAULT_PAGE_RETRY_ROUNDS=2`), then mark `incompleteCoverage` with a
+  named path instead of silently dropping the category for the night.
+- **Bootstrap rounds raised**: `DEFAULT_BOOTSTRAP_ROUNDS` 3→5,
+  `DEFAULT_BOOTSTRAP_GAP_MS` 10s→30s (~2.5 min of 500-stretch tolerance).
+- **Durable diagnostics**: logs moved from volatile `/tmp` to
+  `data/logs/` (`nz-grocery-breadth.{log,error.log,health.jsonl}`); the
+  health line now carries error/warnings/discovery counts; an unhealthy
+  lane's full summary JSON is appended to the run log. Existing /tmp
+  health history was copied across. The daemon plist template now points
+  stdout/stderr at `data/logs/` too — **reinstalling the daemon
+  (`sudo sh ops/install-breadth-daemon.sh`) is still pending** (needs an
+  interactive admin password; until then the plist's own stderr — the
+  one-line "lane exited N" notes — still lands in /tmp).
+
+No material data hole: the Sep 6 full walks superseded the Sep 5 loss, and
+the Sep 7 cheap night only missed a straggler refresh. Watch the first
+post-fix nightly (2026-09-08 03:30 NZST) — an unhealthy lane now leaves a
+full forensic summary in `data/logs/nz-grocery-breadth.log`.
+
 ## Retailers campaign — 502 NZ retailer scrapers (2026-09-06)
 
 `retailers/` holds a price·product scraper roster grown from 50 → 100 → 500

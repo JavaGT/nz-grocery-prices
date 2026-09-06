@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -465,7 +465,7 @@ describe("crawlStore (mobile)", () => {
       }),
       "store-1:mcat=cat0=A|cat1=A1:page0": catPageEnvelope({
         hits: [hit("2")],
-        totalHits: 200,
+        totalHits: 100, // single page — no continuation leaf to script
       }),
       "store-1:mcat=cat0=A|cat1=A1|cat2=A2:page0": catPageEnvelope({
         hits: [hit("3")],
@@ -725,6 +725,67 @@ describe("crawlStore (mobile)", () => {
     });
     assert.equal(result.budgetExhausted, true);
     assert.ok(warnings.some((msg) => msg.includes("budget")));
+  });
+
+  it("requeues a failed page and completes the category on retry", async () => {
+    // 2026-09-07 nightly: one 500 silently dropped categories for the night.
+    // A transient page failure must be retried by the walker, not skipped.
+    const tree = [treeNode("Pantry")];
+    let pageCalls = 0;
+    const scripted = {
+      "store-1:mcat=cat0=Pantry:page0": () => {
+        pageCalls += 1;
+        if (pageCalls === 1) {
+          throw new Error("Mobile request ... failed: 500");
+        }
+        return catPageEnvelope({
+          hits: [hit("1")],
+          totalHits: 1,
+          numberOfPages: 1,
+        });
+      },
+    };
+    const warnings = [];
+    const { result } = await drive(tree, scripted, {
+      pageRetryRounds: 2,
+      collectWarning: (msg) => warnings.push(msg),
+    });
+    assert.equal(pageCalls, 2, "failed page is fetched a second time");
+    assert.equal(result.uniqueCount, 1);
+    assert.equal(result.incompleteCoverage, false);
+    assert.equal(result.incompleteNodes.length, 0);
+    assert.ok(warnings.some((w) => w.includes("requeued (retry 1/2)")));
+  });
+
+  it("marks a persistently failing page incomplete without aborting the crawl", async () => {
+    const tree = [treeNode("Pantry"), treeNode("Household")];
+    let pantryCalls = 0;
+    const scripted = {
+      "store-1:mcat=cat0=Pantry:page0": () => {
+        pantryCalls += 1;
+        throw new Error("Mobile request ... failed: 500");
+      },
+      "store-1:mcat=cat0=Household:page0": catPageEnvelope({
+        hits: [hit("9")],
+        totalHits: 1,
+        numberOfPages: 1,
+      }),
+    };
+    const warnings = [];
+    const { result } = await drive(tree, scripted, {
+      pageRetryRounds: 1,
+      collectWarning: (msg) => warnings.push(msg),
+    });
+    assert.equal(pantryCalls, 2, "initial attempt plus one requeue");
+    assert.equal(result.incompleteCoverage, true);
+    assert.equal(result.incompleteNodes[0]?.reason, "page-failed");
+    assert.equal(result.incompleteNodes[0]?.path, "Pantry");
+    assert.equal(
+      result.uniqueCount,
+      1,
+      "the other category still collected normally",
+    );
+    assert.ok(warnings.some((w) => w.includes("failed after 2 attempts")));
   });
 });
 
@@ -1221,5 +1282,128 @@ describe("end-to-end runCollection (mobile, fake transport)", () => {
     // Direct guard also works
     assert.throws(() => assertNotLiveArchive("data/prices.jsonl"), /Refusing/);
     assert.doesNotThrow(() => assertNotLiveArchive("data/breadth-pilot.jsonl"));
+  });
+
+  it("keeps a straggler-refresh night healthy when every seeded node delivered", async () => {
+    // 2026-09-07 nightly: a cheap night re-seeding 7 stale stragglers of a
+    // ~950-node tree tripped the catalogue-wide floor. Small-seed nights
+    // must be judged per-node; discovery nights keep the strict floor.
+    const dir = await mkdtemp(join(tmpdir(), "mobile-breadth-straggler-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      const names = Array.from({ length: 20 }, (_, i) => `Cat${i}`);
+      const staleIndex = 7;
+      const completed = {};
+      for (const [i, name] of names.entries()) {
+        if (i === staleIndex) continue;
+        completed[taskId("s1", [name], 0)] = "2026-08-26T00:00:00.000Z";
+      }
+      await writeFile(
+        `${file}.breadth-manifest.json`,
+        JSON.stringify({ version: 1, updatedAt: "2026-08-26T00:00:00.000Z", completed }),
+      );
+      const transport = fakeMobileTransport({
+        stores: [{ id: "s1", name: "PAK'nSAVE Testville" }],
+        tree: names.map((name) => treeNode(name)),
+        pageScript: {
+          [`s1:mcat=cat0=${names[staleIndex]}:page0`]: catPageEnvelope({
+            hits: [hit("1"), hit("2"), hit("3")],
+            totalHits: 3,
+            numberOfPages: 1,
+          }),
+        },
+      });
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1000,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+      assert.equal(summary.stores[0].seededDiscovery, 1);
+      assert.equal(summary.stores[0].skippedDiscovery, 19);
+      assert.equal(summary.stores[0].uniqueProducts, 3);
+      assert.equal(summary.healthy, true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still fails a truncated discovery night on the product floor", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mobile-breadth-truncated-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      // No manifest: all 4 nodes seed → discovery night → floor binds.
+      const transport = fakeMobileTransport({
+        stores: [{ id: "s1", name: "PAK'nSAVE Testville" }],
+        tree: [treeNode("A"), treeNode("B"), treeNode("C"), treeNode("D")],
+        pageScript: Object.fromEntries(
+          ["A", "B", "C", "D"].map((name) => [
+            `s1:mcat=cat0=${name}:page0`,
+            catPageEnvelope({ hits: [hit(name.toLowerCase())], totalHits: 1, numberOfPages: 1 }),
+          ]),
+        ),
+      });
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1000,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+      assert.equal(summary.stores[0].seededDiscovery, 4);
+      assert.equal(summary.stores[0].uniqueProducts, 4);
+      assert.equal(summary.healthy, false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails a straggler night whose seeded page collected nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mobile-breadth-straggler-empty-"));
+    try {
+      const file = join(dir, "breadth-pilot.jsonl");
+      const completed = {
+        [taskId("s1", ["Fresh1"], 0)]: "2026-08-26T00:00:00.000Z",
+        [taskId("s1", ["Fresh2"], 0)]: "2026-08-26T00:00:00.000Z",
+        [taskId("s1", ["Fresh3"], 0)]: "2026-08-26T00:00:00.000Z",
+      };
+      await writeFile(
+        `${file}.breadth-manifest.json`,
+        JSON.stringify({ version: 1, updatedAt: "2026-08-26T00:00:00.000Z", completed }),
+      );
+      const transport = fakeMobileTransport({
+        stores: [{ id: "s1", name: "PAK'nSAVE Testville" }],
+        tree: [treeNode("Fresh1"), treeNode("Fresh2"), treeNode("Fresh3"), treeNode("Stale")],
+        pageScript: {
+          "s1:mcat=cat0=Stale:page0": catPageEnvelope({
+            hits: [],
+            totalHits: 0,
+            numberOfPages: 1,
+          }),
+        },
+      });
+      const summary = await runCollection({
+        transport,
+        file,
+        delayMs: 0,
+        budget: 100,
+        minExpectedProducts: 1000,
+        observedAt: "2026-08-27T00:00:00.000Z",
+        log: () => {},
+        collectWarning: () => {},
+      });
+      assert.equal(summary.stores[0].seededDiscovery, 1);
+      assert.equal(summary.stores[0].uniqueProducts, 0);
+      assert.equal(summary.healthy, false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

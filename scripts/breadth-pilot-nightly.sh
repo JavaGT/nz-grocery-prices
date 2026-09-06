@@ -18,17 +18,24 @@
 # Foodstuffs mobile API host with tarpit history, so that pair stays serial
 # inside its lane with the inter-banner cooldown.
 #
-# Logs: /tmp/nz-grocery-breadth.log (stdout), .error.log (stderr). Lanes
-# interleave in the human-readable run log; the machine-parsed health log
-# stays one JSON object per line (small single appends).
+# Logs: data/logs/nz-grocery-breadth.log (run log), .error.log (collector
+# stderr), nz-grocery-breadth.health.jsonl (machine-parsed health lines).
+# The daemon plist's own stdout/stderr stay in /tmp until its next reinstall
+# (see ops/nz.grocery-prices.breadth.daemon.plist.template). Lanes interleave
+# in the human-readable run log; the machine-parsed health log stays one
+# JSON object per line (small single appends). An unhealthy lane also gets
+# its full summary JSON appended to the run log for forensics — the health
+# line deliberately caps warnings to stay one line.
 
 set -u
 
 REPO_ROOT="${BREADTH_REPO_ROOT:-/Users/server/Development/nz-grocery-prices}"
 NODE="${BREADTH_NODE:-/opt/homebrew/bin/node}"
-HEALTH_LOG="${BREADTH_HEALTH_LOG:-/tmp/nz-grocery-breadth.health.jsonl}"
-RUN_LOG="${BREADTH_RUN_LOG:-/tmp/nz-grocery-breadth.log}"
-ERROR_LOG="${BREADTH_ERROR_LOG:-/tmp/nz-grocery-breadth.error.log}"
+LOG_DIR="${BREADTH_LOG_DIR:-$REPO_ROOT/data/logs}"
+mkdir -p "$LOG_DIR"
+HEALTH_LOG="${BREADTH_HEALTH_LOG:-$LOG_DIR/nz-grocery-breadth.health.jsonl}"
+RUN_LOG="${BREADTH_RUN_LOG:-$LOG_DIR/nz-grocery-breadth.log}"
+ERROR_LOG="${BREADTH_ERROR_LOG:-$LOG_DIR/nz-grocery-breadth.error.log}"
 COOLDOWN_S="${BREADTH_COOLDOWN_S:-120}"
 # BREADTH-14 trial (7 nights from 2026-09-05): 3000ms vs the script's 5000ms
 # default. Watch circuit-breaker/incompleteCoverage health lines; revert by
@@ -57,6 +64,14 @@ summary_line() {
             requestsMade: summary.requestsMade ?? null,
             observationsRecorded: summary.observationsRecorded ?? null,
             incompleteCoverage: store.incompleteCoverage ?? summary.incompleteCoverage ?? false,
+            error: store.error ?? null,
+            budgetExhausted: store.budgetExhausted ?? false,
+            seededDiscovery: store.seededDiscovery ?? null,
+            skippedDiscovery: store.skippedDiscovery ?? null,
+            treeNodes: store.treeNodes ?? null,
+            warnings: (store.warnings ?? [])
+              .slice(0, 2)
+              .map((w) => String(w).slice(0, 140)),
           })
         );
       } catch {
@@ -87,6 +102,30 @@ run_collector() {
 
   result="$(printf '%s' "$output" | summary_line)"
   echo "${LOG_STAMP} ${label} exit=${code} ${result}" >> "$HEALTH_LOG"
+
+  # Forensics: an unhealthy lane's full summary (all warnings, incomplete
+  # nodes, discovery counts) goes to the human-readable run log — the health
+  # line caps warnings to stay machine-parseable on one line.
+  case "$result" in
+    *'"healthy":false'*)
+      {
+        echo "---- $label full summary ${LOG_STAMP} ----"
+        printf '%s' "$output" | "$NODE" -e '
+          let raw = "";
+          process.stdin.on("data", (chunk) => { raw += chunk; });
+          process.stdin.on("end", () => {
+            const start = raw.indexOf("{");
+            try {
+              const summary = JSON.parse(raw.slice(start));
+              console.log(JSON.stringify(summary, null, 1).slice(0, 8000));
+            } catch {
+              console.log(raw.trim().slice(-2000));
+            }
+          });
+        '
+      } >> "$RUN_LOG" 2>/dev/null || true
+      ;;
+  esac
 
   if [ "$code" -ne 0 ]; then
     echo "breadth pilot: $label exited $code" >&2

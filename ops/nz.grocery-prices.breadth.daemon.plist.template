@@ -28,8 +28,8 @@
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>/tmp/nz-grocery-breadth.log</string>
+  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.daemon.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/nz-grocery-breadth.error.log</string>
+  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.daemon.err.log</string>
 </dict>
 </plist>

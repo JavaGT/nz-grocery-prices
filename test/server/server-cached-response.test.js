@@ -84,10 +84,21 @@ describe('CachedResponse transport cache', () => {
       const res3 = await rawRequest(srv.port, '/api/cached', { headers });
 
       assert.equal(res2.headers['content-encoding'], 'gzip');
-      // Multi-member gzip: fresh prefix member + cached tail member decode as one body.
+      // Multi-member gzip: fresh prefix member (carries the per-request uuid)
+      // + cached tail member, which must be byte-identical across requests.
+      // (A strict whole-body length equality would flake: the uuid is random,
+      // so the compressed prefix size can wobble by a couple of bytes.)
       const d2 = JSON.parse(gunzipSync(res2.body).toString());
       const d3 = JSON.parse(gunzipSync(res3.body).toString());
-      assert.equal(res2.body.length, res3.body.length, 'same shape, only the uuid differs');
+      const tailMember = (buf) => {
+        for (let i = 10; i < buf.length - 1; i++) {
+          if (buf[i] === 0x1f && buf[i + 1] === 0x8b) return buf.subarray(i);
+        }
+        return null;
+      };
+      assert.ok(tailMember(res2.body), 'second gzip member present (cached tail)');
+      assert.deepEqual(tailMember(res2.body), tailMember(res3.body),
+        'cached tail member is byte-identical across requests');
       assert.notDeepEqual(res2.body, res3.body);
       assert.notEqual(d2._requestId, d3._requestId);
       assert.deepEqual({ ...d2, _requestId: null }, { ...d3, _requestId: null });

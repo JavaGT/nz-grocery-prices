@@ -1,7 +1,8 @@
 // Unit tests for the /api/deals memoization (dealUniverse) in
 // src/server/handlers/public.js. The computation is canned via an injected
-// queryDbObservations counter; deal shaping itself is covered by
-// test/server/public-api.test.js.
+// queryDealSignals counter (the handler maps materialized deal_signals rows
+// into the response); deal shaping parity with the analytics is covered by
+// test/sqlite/deal-materialization.test.js and the public-api contract tests.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,31 +12,25 @@ const HOUR = 3600_000;
 const DAY = 86_400_000;
 const NOW = 1_700_000_000_000;
 
-function fixtures() {
-  const obs = (over = {}) => ({
-    product: { id: 'ps:milk-1', name: 'Milk 1L', brand: 'Anchor', categories: ['dairy'], images: [] },
-    store: { id: 'ps-royal-oak', name: 'Royal Oak', retailer: 'paknsave' },
-    price: { regularCents: 300 },
-    observedAt: new Date(NOW - 1 * HOUR).toISOString(),
-    lastSeenAt: new Date(NOW - 1 * HOUR).toISOString(),
-    ...over,
-  });
-
+// Materialized deal_signals rows, DB-shaped (what queryDealSignals returns).
+function signalRows() {
   return [
-    // history-backed: 4 baseline samples at 300, current at 200 (~33% drop)
-    ...[30, 25, 20, 15].map(daysAgo => obs({
-      observedAt: new Date(NOW - daysAgo * DAY).toISOString(),
-      lastSeenAt: new Date(NOW - daysAgo * DAY).toISOString(),
-    })),
-    obs({ price: { regularCents: 200 } }),
-    // advertised: promo live now
-    obs({
-      product: { id: 'ww:bread-1', name: 'Bread', brand: 'Vogel', categories: ['bakery'], images: [] },
-      store: { id: 'ww-online', name: 'Woolworths Online', retailer: 'woolworths' },
-      price: { regularCents: 250, promoCents: 200 },
-      promotion: { savePercent: 20 },
-      isOnSpecial: true,
-    }),
+    {
+      signal_kind: 'history_drop',
+      reference_cents: 300, current_cents: 200, drop_percent: 33.33,
+      calculated_at: NOW - 1 * HOUR, price_policy: 'public',
+      product_id: 'ps:milk-1', product_name: 'Milk 1L', product_brand: 'Anchor',
+      product_category: 'dairy', product_image: null,
+      retailer_id: 'paknsave', store_id: 'ps-royal-oak', store_name: 'Royal Oak',
+    },
+    {
+      signal_kind: 'advertised_only',
+      reference_cents: 250, current_cents: 200, drop_percent: 20,
+      calculated_at: NOW - 1 * HOUR, price_policy: 'public',
+      product_id: 'ww:bread-1', product_name: 'Bread', product_brand: 'Vogel',
+      product_category: 'bakery', product_image: null,
+      retailer_id: 'woolworths', store_id: 'ww-online', store_name: 'Woolworths Online',
+    },
   ];
 }
 
@@ -48,19 +43,15 @@ function fakeDb() {
   };
 }
 
-// listDeals returns a CachedResponse for anonymous requests (the transport
-// reuses its encoded bytes); unwrap for shape assertions.
-const bodyOf = (res) => (res instanceof Object && 'body' in res ? res.body : res);
-
-function makeHandlers({ dealsCacheTtlMs, dbSignature, observations = fixtures } = {}) {
+function makeHandlers({ dealsCacheTtlMs, dbSignature, rows = signalRows } = {}) {
   let queryCount = 0;
   let now = NOW;
   const handlers = createPublicHandlers({
     getDb: fakeDb,
     clock: () => now,
-    queryDbObservations: () => {
+    queryDealSignals: (db, retailer) => {
       queryCount += 1;
-      return observations();
+      return rows().filter(r => !retailer || r.retailer_id === retailer);
     },
     dealsCacheTtlMs,
     dbSignature,
@@ -72,6 +63,10 @@ function makeHandlers({ dealsCacheTtlMs, dbSignature, observations = fixtures } 
     advance: (ms) => { now += ms; },
   };
 }
+
+// listDeals returns a CachedResponse for anonymous requests (the transport
+// reuses its encoded bytes); unwrap for shape assertions.
+const bodyOf = (res) => (res instanceof Object && 'body' in res ? res.body : res);
 
 test('caches the deal computation within the TTL', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
@@ -119,14 +114,14 @@ test('absent dbSignature keeps TTL-only behavior', async () => {
 
 test('caches per retailer', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
-  const pn1 = bodyOf(await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now }));
-  const pn2 = bodyOf(await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now }));
-  const ww = bodyOf(await h.handlers.listDeals({ query: { retailer: 'woolworths' }, clock: h.now }));
+  const pn1 = await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now });
+  const pn2 = await h.handlers.listDeals({ query: { retailer: 'paknsave' }, clock: h.now });
+  const ww = await h.handlers.listDeals({ query: { retailer: 'woolworths' }, clock: h.now });
   assert.equal(h.calls(), 2, 'paknsave hit, woolworths computed');
-  assert.deepEqual(pn2, pn1);
-  assert.equal(pn1.historyBacked.length, 1);
-  assert.equal(pn1.advertised.length, 0);
-  assert.deepEqual(ww.advertised.map(d => d.priceContext.retailerId), ['woolworths']);
+  assert.deepEqual(bodyOf(pn2), bodyOf(pn1));
+  assert.equal(bodyOf(pn1).historyBacked.length, 1);
+  assert.equal(bodyOf(pn1).advertised.length, 0);
+  assert.deepEqual(bodyOf(ww).advertised.map(d => d.priceContext.retailerId), ['woolworths']);
 });
 
 test('filter and limit still apply to cached results', async () => {
@@ -143,10 +138,7 @@ test('filter and limit still apply to cached results', async () => {
 });
 
 test('tiered requests do not mutate cached deal objects', async () => {
-  const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
-  const tiers = {
-    getSessionUser: () => ({ id: 'u1' }),
-  };
+  const tiers = { getSessionUser: () => ({ id: 'u1' }) };
   const appDb = {
     getWatchList: () => [{ target_kind: 'product', target_id: 'ps:milk-1' }],
     getStorePreferences: () => [],
@@ -159,11 +151,11 @@ test('tiered requests do not mutate cached deal objects', async () => {
     appDb,
     auth: tiers,
     clock: () => NOW,
-    queryDbObservations: () => fixtures(),
+    queryDealSignals: () => signalRows(),
     dealsCacheTtlMs: 60_000,
   });
 
-  const tiered = await handlers.listDeals(authedCtx);
+  const tiered = bodyOf(await handlers.listDeals(authedCtx));
   const milk = tiered.historyBacked.find(d => d.product.id === 'ps:milk-1');
   assert.ok(milk, 'watched product present');
   assert.equal(milk.tier, 'watch-other', 'watched product at non-preferred store tiers as watch-other');
@@ -173,8 +165,28 @@ test('tiered requests do not mutate cached deal objects', async () => {
     assert.equal(deal.tier, undefined, 'cached objects must not leak tier into other requests');
   }
 
-  const tieredAgain = await handlers.listDeals(authedCtx);
+  const tieredAgain = bodyOf(await handlers.listDeals(authedCtx));
   assert.equal(tieredAgain.historyBacked.find(d => d.product.id === 'ps:milk-1')?.tier, 'watch-other');
+});
+
+test('mapped deals expose the signal contract the SPA expects', async () => {
+  const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
+  const body = bodyOf(await h.handlers.listDeals({ query: {}, clock: h.now }));
+  const milk = body.historyBacked[0];
+  assert.deepEqual(
+    Object.keys(milk).sort(),
+    ['calculatedAt', 'cents', 'priceContext', 'product', 'signal'],
+  );
+  assert.equal(milk.signal.kind, 'history_drop');
+  assert.equal(milk.signal.policy, 'public');
+  assert.equal(milk.signal.dropPercent, 33.33);
+  assert.equal(milk.signal.referenceCents, 300);
+  assert.equal(milk.signal.currentCents, 200);
+  assert.equal(milk.signal.savingsText, '33% off');
+  assert.equal(milk.cents.regular, 300);
+  assert.equal(milk.cents.current, 200);
+  assert.equal(milk.priceContext.retailerName, "PAK'nSAVE");
+  assert.equal(new Date(milk.calculatedAt).getTime(), NOW - 1 * HOUR);
 });
 
 test('anonymous responses are CachedResponse; tiered responses stay plain', async () => {
@@ -186,16 +198,15 @@ test('anonymous responses are CachedResponse; tiered responses stay plain', asyn
   assert.match(plain.token, /^\*\|undefined\|/);
   assert.equal(plain.body.total, 2);
 
-  const appDb = {
-    getWatchList: () => [{ target_kind: 'product', target_id: 'ps:milk-1' }],
-    getStorePreferences: () => [],
-  };
   const handlers = createPublicHandlers({
     getDb: fakeDb,
-    appDb,
+    appDb: {
+      getWatchList: () => [{ target_kind: 'product', target_id: 'ps:milk-1' }],
+      getStorePreferences: () => [],
+    },
     auth: { getSessionUser: () => ({ id: 'u1' }) },
     clock: () => NOW,
-    queryDbObservations: () => fixtures(),
+    queryDealSignals: () => signalRows(),
     dealsCacheTtlMs: 60_000,
   });
   const tiered = await handlers.listDeals({ query: {}, clock: () => NOW, cookies: { sid: 's1' } });
@@ -203,7 +214,7 @@ test('anonymous responses are CachedResponse; tiered responses stay plain', asyn
   assert.ok(tiered.tiers, 'tiered response carries tier summary');
 });
 
-// Single-flight harness: queryDbObservations returns promises the test
+// Single-flight harness: queryDealSignals returns promises the test
 // resolves manually, so concurrent cold requests overlap for real.
 function deferredHandlers() {
   let startCount = 0;
@@ -211,9 +222,9 @@ function deferredHandlers() {
   const handlers = createPublicHandlers({
     getDb: fakeDb,
     clock: () => NOW,
-    queryDbObservations: () => new Promise(resolve => {
+    queryDealSignals: () => new Promise(resolve => {
       startCount += 1;
-      resolvers.push(() => resolve(fixtures()));
+      resolvers.push(() => resolve(signalRows()));
     }),
     dealsCacheTtlMs: 60_000,
   });
@@ -243,17 +254,17 @@ test('a failed computation does not stick; the next request recomputes', async (
   const handlers = createPublicHandlers({
     getDb: fakeDb,
     clock: () => NOW,
-    queryDbObservations: () => {
+    queryDealSignals: () => {
       startCount += 1;
       return fail
-        ? Promise.reject(new Error('observation query failed'))
-        : Promise.resolve(fixtures());
+        ? Promise.reject(new Error('signal query failed'))
+        : Promise.resolve(signalRows());
     },
     dealsCacheTtlMs: 60_000,
   });
   await assert.rejects(
     handlers.listDeals({ query: {}, clock: () => NOW }),
-    /observation query failed/,
+    /signal query failed/,
   );
   fail = false;
   const body = bodyOf(await handlers.listDeals({ query: {}, clock: () => NOW }));

@@ -7,7 +7,7 @@ import { ProjectionRepository } from '../sqlite/projection-repository.js';
 import { AppDatabase } from '../sqlite/app-db.js';
 import { Auth } from './auth.js';
 import { Server, parseAcceptEncoding } from '../server/server.js';
-import { createPublicHandlers, defaultQueryDbObservations } from '../server/handlers/public.js';
+import { createPublicHandlers } from '../server/handlers/public.js';
 import { createPrivateHandlers } from '../server/handlers/private.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -231,7 +231,7 @@ function createAppServer() {
   const dbSignature = () => {
     try { return statSync(pricesDbPath).mtimeMs; } catch { return null; }
   };
-  const publicHandlers = createPublicHandlers({ getDb, appDb, auth, clock: Date.now, startedAt: now, queryDbObservations: defaultQueryDbObservations, dbSignature });
+  const publicHandlers = createPublicHandlers({ getDb, appDb, auth, clock: Date.now, startedAt: now, dbSignature });
   const privateHandlers = createPrivateHandlers({ auth, appDb, clock: Date.now });
 
   server.get('/api/health', publicHandlers.health);

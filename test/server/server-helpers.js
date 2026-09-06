@@ -6,7 +6,7 @@ import { ProjectionRepository } from '../../src/sqlite/projection-repository.js'
 import { AppDatabase } from '../../src/sqlite/app-db.js';
 import { Auth } from '../../src/app/auth.js';
 import { Server } from '../../src/server/server.js';
-import { createPublicHandlers, defaultQueryDbObservations } from '../../src/server/handlers/public.js';
+import { createPublicHandlers } from '../../src/server/handlers/public.js';
 import { createPrivateHandlers } from '../../src/server/handlers/private.js';
 
 let _counter = 0;
@@ -143,7 +143,7 @@ export async function createTestServer({
 
     const server = new Server({ projDb, appDb, auth, clock });
     const now = clock();
-    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, queryDbObservations: defaultQueryDbObservations, dealsCacheTtlMs });
+    const handlers = createPublicHandlers({ getDb, appDb, auth, clock, startedAt: now, dealsCacheTtlMs });
     const privateHandlers = createPrivateHandlers({ auth, appDb, clock });
 
     server.get('/api/health', handlers.health);

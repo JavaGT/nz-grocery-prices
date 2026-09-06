@@ -2,9 +2,9 @@
   "title": "Performance Campaign \u2014 perf-trial-20260906-0303",
   "repo": "nz-grocery-prices",
   "started": "2026-09-06 03:03 NZST",
-  "updated": "2026-09-06 11:45 NZST",
-  "status": "complete - deal-signal pre-materialization increment 1 shipped",
-  "summary": "Post-campaign follow-up (owner-approved): deal_signals is back in the projection schema and the rebuild now populates it with analytics output using the exact runtime parameter set (parity-tested). /api/deals still computes at runtime - flipping the handler to read signals is a small, well-scoped increment 2. Rebuild 0.25s -> 0.29s; DB +~100KB; full suite 944 pass / 0 fail.",
+  "updated": "2026-09-06 12:10 NZST",
+  "status": "complete - pre-materialization fully shipped (increments 1 + 2)",
+  "summary": "Deal-signal pre-materialization is fully landed. The rebuild populates deal_signals with analytics output (parity-tested), and /api/deals now reads those signals: the cold compute dropped from ~96ms on a 35k-offer archive to a 0.01ms indexed signal read - independent of archive size or age. Warm-path behavior (TTL cache, dbSignature invalidation, single-flight, CachedResponse bytes, tiering) is unchanged. Also fixed a pre-existing flaky test in the cached-response suite.",
   "axes": [
     "speed",
     "CPU",
@@ -172,6 +172,15 @@
       "tradeoffs": "Signals age until the next nightly rebuild (bounded, same as collection staleness). calc_version lets a future parameter change force re-interpretation. Increment 2 (handler reads signals) is required before any latency benefit appears.",
       "verified": "944 pass / 0 fail; dedicated parity + zero-signal tests; real-data cross-check on two archives.",
       "commit": "df17718 + docs commit"
+    },
+    {
+      "title": "Increment 2: /api/deals reads materialized signals",
+      "area": "server hot path (speed, CPU)",
+      "what": "dealUniverse now loads rebuild-materialized signal rows via defaultQueryDealSignals (exported, injectable as queryDealSignals) - one indexed SELECT with the retailer filter pushed into SQL, mapped 1:1 to the previous response contract. The runtime analytics pass and its observation-materialization seam are gone from the request path; the observation query lives once in deal-materialization.js, shared by the rebuild and its parity test.",
+      "beforeAfter": "Cold deals compute on the 35k-offer archive: ~96ms (recompute) -> 0.01ms (signal read). Scales with the NUMBER of deals, not archive size/age. Warm behavior unchanged (cache, bytes, headers).",
+      "tradeoffs": "Signals are as fresh as the last nightly rebuild (bounded by collection cadence, same as prices themselves). New signals for newly collected prices appear on the next rebuild. calc_version guards future parameter changes. Also fixed: lane F3s cached-response test flaked on strict gzip length equality (random-uuid compression size wobbles) - now asserts the cached tail member is byte-identical instead.",
+      "verified": "Parity oracle (public-api deals tests) passes unmodified; deals-cache suite reworked to the signal seam (13 tests); full suite 945 pass / 0 fail x3 consecutive runs; npm run check clean.",
+      "commit": "e58303b (+ flake fix)"
     }
   ],
   "agents": [

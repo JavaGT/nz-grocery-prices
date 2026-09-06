@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 367 | Design Concepts | `design-concepts` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 368 | TSB Living | `tsb-living` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 364 | Eco Treats | `eco-treats` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 365 | The NZ Natural Pet Food Co | `nz-natural-pet-food` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 366 | Pet Supply NZ | `pet-supply-nz` | general retail | Shopify products.json | implemented 2026-09-06 |

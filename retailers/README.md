@@ -199,6 +199,7 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 344 | Alcohol Delivery NZ | `alcohol-delivery-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 340 | Green With Envy | `green-with-envy` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 341 | Indie Home Collective | `indie-home-collective` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 342 | Little & Fox | `little-and-fox` | general retail | Shopify products.json | implemented 2026-09-06 |

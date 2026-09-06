@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * My Ride collector CLI. Writes validated PriceObservation JSONL to an
+ * My Ride NZ collector CLI. Writes validated PriceObservation JSONL to an
  * explicit --out file (never the live archive) or --stdout.
  *
  *   node retailers/my-ride/collect.js --stdout --max-pages 1

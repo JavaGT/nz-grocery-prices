@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 380 | Bulk Barn | `bulk-barn` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 381 | Nourish and Thrive | `nourish-and-thrive` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 376 | Crate Clothing | `crate-clothing` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 377 | FallenFront | `fallen-front` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 378 | LOWER | `lower-clothing` | general retail | Shopify products.json | implemented 2026-09-06 |

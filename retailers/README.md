@@ -199,6 +199,10 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 292 | Foxtrot Home | `foxtrot-home` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 293 | Linen King | `linen-king` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 294 | M.M Linen | `mm-linen` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 295 | The Foxes Den | `the-foxes-den` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 289 | The Bond Store | `bond-store` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 290 | Kiwi Spirit Distillery | `kiwi-spirit-distillery` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 291 | SIP Distilling Co. | `sip-distilling` | general retail | Shopify products.json | implemented 2026-09-06 |

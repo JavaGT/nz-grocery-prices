@@ -1,8 +1,7 @@
 /**
- * Beer Hug — NZ craft beer retailer.
+ * Beer Hug — NZ retailer.
  *
- * Platform: Shopify public storefront JSON. Verified live 2026-09-06
- * (see README.md).
+ * Platform: Shopify public storefront JSON. Verified live (see README.md).
  */
 
 import { ShopifyCatalogClient } from "../_lib/shopify.js";

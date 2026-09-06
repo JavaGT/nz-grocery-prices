@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Beer Jerk collector CLI. Writes validated PriceObservation JSONL to an
+ * Beer Jerk NZ collector CLI. Writes validated PriceObservation JSONL to an
  * explicit --out file (never the live archive) or --stdout.
  *
  *   node retailers/beer-jerk/collect.js --stdout --max-pages 1

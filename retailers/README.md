@@ -199,6 +199,10 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 331 | Art Collective NZ | `art-collective` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 332 | Earth Sea Sky | `earth-sea-sky` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 333 | Nevalea Alpacas | `nevalea-alpacas` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 334 | Zealong Tea Estate | `zealong-tea` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 326 | The Coffee Collective | `coffee-collective` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 327 | Havana Coffee Works | `havana-coffee` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 328 | Rabbit Island Coffee Co | `rabbit-island-coffee` | general retail | Shopify products.json | implemented 2026-09-06 |

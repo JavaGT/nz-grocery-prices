@@ -199,6 +199,9 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 282 | Electric Bike Team | `ebike-team` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 283 | Electrify NZ | `electrify-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 284 | Sinch Bikes | `sinch-bikes` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 278 | Noble & Sunday Tea Merchants | `noble-and-sunday` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 279 | Tea Store Aotearoa | `tea-store-aotearoa` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 280 | Ti Ani | `ti-ani` | general retail | Shopify products.json | implemented 2026-09-06 |

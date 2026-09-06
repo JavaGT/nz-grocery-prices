@@ -199,6 +199,10 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 250 | Amberjack Candle Company | `amberjack` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 251 | Living Light Candles | `living-light-candles` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 252 | LucyKing | `lucy-king` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 253 | NOLA Candles | `nola-candles` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 244 | Love Knot War | `love-knot-war` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 245 | Penny Sage | `penny-sage` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 246 | Sophie Divett Jewellery | `sophie-divett` | general retail | Shopify products.json | implemented 2026-09-06 |

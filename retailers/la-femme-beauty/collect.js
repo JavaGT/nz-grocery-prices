@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Misola Hair collector CLI. Writes validated PriceObservation JSONL to an
+ * La Femme Beauty collector CLI. Writes validated PriceObservation JSONL to an
  * explicit --out file (never the live archive) or --stdout.
  *
- *   node retailers/misola/collect.js --stdout --max-pages 1
+ *   node retailers/la-femme-beauty/collect.js --stdout --max-pages 1
  */
 
 import { runCollect } from "../_lib/runner.js";

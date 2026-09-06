@@ -9,7 +9,7 @@ import { ShopifyCatalogClient } from "../_lib/shopify.js";
 export const RETAILER = {
   slug: "living-nature",
   name: "Living Nature",
-  origin: "https://www.livingnature.com",
+  origin: "https://livingnature.com",
   platform: "shopify",
 };
 

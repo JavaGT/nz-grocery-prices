@@ -1,0 +1,23 @@
+/**
+ * 7hada — NZ retailer.
+ *
+ * Platform: Shopify public storefront JSON. Verified live (see README.md).
+ */
+
+import { ShopifyCatalogClient } from "../_lib/shopify.js";
+
+export const RETAILER = {
+  slug: "sevenhada",
+  name: "7hada",
+  origin: "https://7hada.co.nz",
+  platform: "shopify",
+};
+
+export function createClient(options = {}) {
+  return new ShopifyCatalogClient({
+    slug: RETAILER.slug,
+    origin: RETAILER.origin,
+    scopeName: "7hada Online",
+    ...options,
+  });
+}

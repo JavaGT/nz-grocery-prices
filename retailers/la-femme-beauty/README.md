@@ -1,12 +1,12 @@
-# Misola Hair — campaign adapter
+# La Femme Beauty — campaign adapter
 
-- **retailer id:** `misola` · **platform:** shopify
+- **retailer id:** `la-femme-beauty` · **platform:** shopify
 - **status:** implemented, live-verified 2026-09-06
-- **store scope:** `misola:online` (NZ online pricing)
+- **store scope:** `la-femme-beauty:online` (NZ online pricing)
 
 ## API
 
-`GET https://misola.co.nz/products.json?limit=250&page=N` — standard Shopify
+`GET https://lafemmebeauty.co.nz/products.json?limit=250&page=N` — standard Shopify
 public catalog endpoint (250 products/page, per-variant NZD prices, no
 auth). Shared client + mapping: `retailers/_lib/shopify.js`.
 
@@ -20,12 +20,12 @@ auth). Shared client + mapping: `retailers/_lib/shopify.js`.
 | `variants[].barcode` (8–14 digits) | `product.gtin` |
 | `product.product_type` + first tags | `product.categories` |
 | `product.images[0].src` | `product.images.primary` |
-| `variant.id` | `product.id = misola:<variantId>` |
+| `variant.id` | `product.id = la-femme-beauty:<variantId>` |
 
 ## Verification
 
 ```sh
-node retailers/misola/collect.js --stdout --max-pages 1 --limit 1
+node retailers/la-femme-beauty/collect.js --stdout --max-pages 1 --limit 1
 ```
 
 Live-verified 2026-09-06 — returned a valid PriceObservation from the

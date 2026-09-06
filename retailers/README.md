@@ -199,6 +199,8 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 390 | Egmont Honey | `egmont-honey` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 391 | Happy Valley Honey | `happy-valley-honey` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 386 | LoveMy Makeup | `love-my-makeup` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 387 | Max & Louie | `max-and-louie` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 388 | The Glow Club | `the-glow-club` | general retail | Shopify products.json | implemented 2026-09-06 |

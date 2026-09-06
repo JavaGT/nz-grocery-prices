@@ -10,9 +10,18 @@
 import { getJson } from "./http.js";
 import { buildObservation, minorUnitsToCents } from "./observation.js";
 
-/** Pure: extract the products array from a Store API response. */
-export function parseWooProducts(json) {
-  return Array.isArray(json) ? json : [];
+/**
+ * Pure: extract the products array from a Store API response. WP REST error
+ * bodies arrive as JSON objects with HTTP 200 (e.g. {code:"rest_no_route"}),
+ * so a non-array body is a named error, never an "items is not iterable"
+ * crash deep in the page walk.
+ */
+export function parseWooProducts(json, { operation = "woo products" } = {}) {
+  if (Array.isArray(json)) return json;
+  const code = typeof json?.code === "string" ? ` (${json.code})` : "";
+  throw new TypeError(
+    `${operation}: expected a products array, got ${typeof json}${code}`,
+  );
 }
 
 /**
@@ -94,7 +103,9 @@ export class WooStoreClient {
     for (let page = 1; page <= maxPages; page += 1) {
       let items;
       try {
-        items = await this.listProducts({ page });
+        items = parseWooProducts(await this.listProducts({ page }), {
+          operation: `woo ${this.slug} p${page}`,
+        });
       } catch (error) {
         if (page === 1) {
           console.error(`woo ${this.slug}: list failed: ${error.message}`);

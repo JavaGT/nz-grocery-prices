@@ -249,7 +249,7 @@ None (public read-only API). `accept: application/json`
 `retailers/winebox/index.js`).
 
 ### Response fields consumed
-A JSON **array** of products (`parseWooProducts`, `woocommerce.js:14-16`):
+A JSON **array** of products (`parseWooProducts`, `woocommerce.js:13-25`):
 `id:number`, `name:string`, `permalink:string`,
 `prices { price, regular_price, sale_price, currency_minor_unit? }` —
 minor-unit strings (`"2499"` = $24.99, scaled by `currency_minor_unit`),
@@ -268,12 +268,12 @@ items without id/name/positive price are dropped (26).
   failures rethrow (104).
 - Non-JSON 200 bodies fail with a context error naming `woo <slug> p<n>`
   (`http.js:38`, `fetch-with-retry.js:55-86`).
-- **Known gap (documented, not fixed):** a 200 JSON *object* — WP REST
-  error bodies are objects, e.g. `{"code":"rest_no_route",...}` — would
-  crash `collectProducts` with "items is not iterable" (107) because the
-  client never applies its own `parseWooProducts` tolerance (unlike
-  `listProducts` in the Shopify family). Fix when a `woocommerce` test
-  file exists to own the test.
+- A 200 JSON *object* — WP REST error bodies are objects, e.g.
+  `{"code":"rest_no_route",...}` — fails with a named TypeError from
+  `parseWooProducts` (`woocommerce.js:13-25`) instead of an "items is not
+  iterable" crash. Page-walk semantics match network failures: page 1 logs
+  and returns empty (retailer unreachable); later pages rethrow so the
+  walk stops loudly. Tests: `test/retailers/woocommerce.test.js`.
 
 ---
 

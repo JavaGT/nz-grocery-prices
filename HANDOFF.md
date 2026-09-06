@@ -109,20 +109,22 @@ run (its offset manifest stalled the lane at 0 products while reporting
 healthy — `--resume` opts back in for crashed manual crawls). Gate state:
 `node scripts/breadth-pilot-gate.js` (3 consecutive healthy nights).
 
-## Retailers campaign — 197 NZ retailer scrapers (2026-09-06)
+## Retailers campaign — 502 NZ retailer scrapers (2026-09-06)
 
-`retailers/` holds a 50-retailer price·product scraper roster (goal: 50
-major NZ retailers, one subfolder each, all emitting canonical
-PriceObservation records). Status: **GOAL RAISED TO 100, THEN +80 — 197 adapters live-verified** (192 campaign + 5 existing);
-manifest + per-retailer evidence: `retailers/README.md`.
+`retailers/` holds a price·product scraper roster grown from 50 → 100 → 500
+goals (one subfolder per retailer, all emitting canonical PriceObservation
+records). Status: **500-GOAL MET — 502 adapters live-verified** (497 campaign
+folders + 5 existing); manifest + per-retailer evidence: `retailers/README.md`.
 
 - Pre-existing adapters (woolworths, paknsave, newworld, freshchoice,
-  warehouse) count as 5; 192 campaign adapters live in (197 total with the 5 existing — 100-goal met, then +80-more round exceeded) `retailers/<slug>/`
+  warehouse) count as 5; 497 campaign adapters live in `retailers/<slug>/`
   (index.js + collect.js + README.md).
-- Shared families in `retailers/_lib/`: shopify (15 + 3 later Shopify
-  stores), magento-graphql (rebel/briscoes shared backend, `Store` header),
+- Shared families in `retailers/_lib/`: shopify (the dominant family — the
+  bulk of the roster, including ~120+ stores mined from StoreCensus
+  directory listings), magento-graphql (rebel/briscoes shared backend, `Store` header),
   html-grid (profile-driven SSR tile parser: hunting-fishing, animates,
-  macpac, supercheap, paper-plus, harvey-norman, the-bottle-o, pet-direct),
+  macpac, supercheap, paper-plus, harvey-norman, the-bottle-o, pet-direct,
+  pbtech),
   sfcc-updategrid + curl-transport (noel-leeming; Node fetch 403s — TLS
   fingerprinting), next-data (bunnings __NEXT_DATA__/Coveo), algolia
   (super-liquor; paginationLimitedTo workaround = Id-sliced numericFilters
@@ -130,7 +132,7 @@ manifest + per-retailer evidence: `retailers/README.md`.
   per-PDP), estar-category (liquorland, baby-factory, whitcoulls, glassons, postie, number-one-shoes; spread
   -payload window.category parser).
 - New families: constructor-io (Kmart NZ product discovery), next-data (Bunnings Coveo results), ikea letter-sweep search.
-- Blocked this round: HyperDrive (client-rendered ERP), Oderings/Bin Inn (no online pricing), Trade Me (SPA), Lewis Road Creamery ($0.00 products.json).
+- Blocked this round: HyperDrive (client-rendered ERP), Oderings/Bin Inn (no online pricing), Trade Me (SPA), Lewis Road Creamery + misola ($0.00 products.json — POS/subscription pricing), thursday-plantation (zero priced variants on page 1).
 - Runner contract: `collect.js --out F|--stdout [--max-pages] [--page-size]
   [--max-observations]`; validates every record with `parseObservation`;
   refuses the live archive. Cost-per-request adapters (mitre-10,
@@ -142,7 +144,7 @@ manifest + per-retailer evidence: `retailers/README.md`.
   recorded in the manifest.
 - Gates: `npm run check` includes `retailers/*`; `test/retailers/`
   holds family + registry tests (registry asserts every folder's
-  RETAILER/createClient contract and the 50-total gate).
+  RETAILER/createClient contract and the ≥500-total gate).
 
 ## Broader product/app state
 

@@ -29,7 +29,7 @@ are refused by all hot paths and handled only by
 | **SPA frontend** | browser UI | `public/` | no framework, no build step. Served by `src/app/server.js`. |
 | **public surface** | root exports + type contract | `src/index.js`, `src/index.d.ts` | exactly 8 exports (PriceArchive, 2 repositories, parseObservation, 4 analytics). No adapters or internals at root; adapter `.d.ts` files are self-contained. Drift gate: `test/types-surface.test.js`. |
 | **collectors / scripts** | CLI entry points | `scripts/` | collection, `build-db`, `matching-cli`, `compact`, `migrate-v1-archive`, HAR capture. |
-| **retailers campaign** | 50-retailer scraper roster | `retailers/` | one subfolder per retailer (`index.js` + `collect.js` + `README.md`). Shared platform families in `retailers/_lib/` (shopify, magento/html-grid, sfcc-updategrid, estar-category, next-data, algolia, jsonld-pdp, http, observation, curl-transport, runner). Emits canonical PriceObservation; never touches `data/prices.jsonl` (runner enforces via `assertNotLiveArchive`). Roster + status: `retailers/README.md`. |
+| **retailers campaign** | 500-retailer scraper roster | `retailers/` | one subfolder per retailer (`index.js` + `collect.js` + `README.md`). Shared platform families in `retailers/_lib/` (shopify, magento/html-grid, sfcc-updategrid, estar-category, next-data, algolia, jsonld-pdp, http, observation, curl-transport, runner). Emits canonical PriceObservation; never touches `data/prices.jsonl` (runner enforces via `assertNotLiveArchive`). Roster + status: `retailers/README.md`. |
 
 ## Key directories
 
@@ -48,7 +48,7 @@ src/server/            Server class + public/private handlers
 src/app/               auth (async scrypt) + server startup
 public/                SPA (index.html, app.js, api.js, views/, components/, utils/)
 scripts/               collectors + build-db + matching-cli + migrate-v1-archive + archive runner
-retailers/             50-retailer scraper campaign (README.md = manifest; _lib/ = shared families)
+retailers/             500-retailer scraper campaign (README.md = manifest; _lib/ = shared families)
 test/                  mirrors src/ structure (see verification.md)
 data/                  gitignored: prices.jsonl, prices.db, app.db, collection-health.jsonl
 ```

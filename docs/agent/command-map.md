@@ -21,7 +21,7 @@ suffices for collectors.
 | One test directory | `node --test test/sqlite/` |
 | Publishable file set | `npm run pack:check` |
 
-## Retailers campaign (50-retailer roster in `retailers/`)
+## Retailers campaign (500-retailer roster in `retailers/`)
 
 | Task | Command | Notes |
 |---|---|---|

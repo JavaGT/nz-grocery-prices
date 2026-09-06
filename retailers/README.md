@@ -1,6 +1,6 @@
-# NZ retailer scraper campaign — 100 retailers
+# NZ retailer scraper campaign — 500 retailers
 
-Goal: price & product scrapers for 50 major New Zealand retailers, each in
+Goal: price & product scrapers for New Zealand retailers, each in
 its own subfolder (`retailers/<slug>/`), built on the retailer's own
 web/mobile APIs, emitting the repo's canonical `PriceObservation` records.
 
@@ -199,6 +199,119 @@ into the nightly breadth pipeline).
 | 179 | Ziwi Peak | `ziwi-peak` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 180 | Zoe & Morgan | `zoe-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 181 | HyperDrive | `hyperdrive` | tyres & wheels | N2 ERP SSR grids | implemented 2026-09-06 |
+| 392 | Acourt Ltd Brands | `a-court-brands` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 393 | About Face NZ | `about-face` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 394 | Aka Aka Brewing | `akaaka-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 395 | Allan Scott Wines | `allan-scott-wines` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 396 | Askum | `askum` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 397 | Barberco | `barberco` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 398 | Barbershop Company | `barbershop-company` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 399 | Bearded | `bearded-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 400 | Beauti | `beauti` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 401 | Beauty Monster | `beauty-monster` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 402 | Bini Beauty NZ | `bini-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 403 | Black Collar Distillery | `black-collar-distillery` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 404 | Bodyfx NZ | `bodyfx` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 405 | Buoy Salon | `buoy-salon` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 406 | By Nature Skincare | `by-nature-skincare` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 407 | Caci | `caci` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 408 | Cardrona Distillery | `cardrona-distillery` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 409 | Carine Beauty Therapy | `carine-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 410 | Charm Ltd | `charm` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 411 | Cloud Nine Hair NZ | `cloud-nine-hair` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 412 | Comvita NZ | `comvita-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 413 | Dancing Sands Distillery | `dancing-sands` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 414 | Davroe NZ | `davroe-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 415 | Deiji | `deiji` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 416 | Dermalogica NZ | `dermalogica-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 417 | Dr Pen New Zealand | `dr-pen-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 418 | Earth Candles Co | `earth-candles` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 419 | ECC | `ecc` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 420 | Eco Tan New Zealand | `eco-tan-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 421 | Electric Bike Rotorua | `electric-bike-rotorua` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 422 | Embrace Skin | `embrace-skin` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 423 | essano | `essano` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 424 | Ethique | `ethique` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 425 | Exquisite Beauty | `exquisite-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 426 | Facetime Skin Clinic | `facetime-clinic` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 427 | Father Rabbit | `father-rabbit` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 428 | Fineshave | `fineshave` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 429 | Fresh Beauty Co NZ | `fresh-beauty-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 430 | Game Kings | `game-kings` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 431 | Glow Lab | `glow-lab` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 432 | Goodbye New Zealand | `goodbye-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 433 | Good George Brewing | `goodgeorge-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 434 | Grin Natural | `grinnatural` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 435 | Haircare Market | `haircare-market` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 436 | Hairquip NZ | `hairquip` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 437 | Halo Haircare Society | `halo-haircare` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 438 | Health 2000 | `health-2000` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 439 | Highness | `highness` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 440 | Hikoco | `hikoco` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 441 | Hive K-Beauty by Reina | `hive-k-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 442 | Humdinger | `humdinger` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 443 | Its Neat NZ | `its-neat` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 444 | Its Organic Darling | `its-organic-darling` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 445 | Keen on Piercing | `keen-on-piercing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 446 | Keune NZ | `keune-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 447 | Kings Seeds | `kings-seeds` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 448 | La Femme Beauty | `la-femme-beauty` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 449 | Lash Noir | `lash-noir` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 450 | Lash Pro NZ | `lash-pro-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 451 | Lens Fx | `lens-fx` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 452 | Liberty Brewing | `liberty-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 453 | Life Pharmacy St Lukes | `life-pharmacy-st-lukes` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 454 | LucyKing Candles | `lucyking` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 455 | Lyttelton Lights | `lyttelton-lights` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 456 | ManCave NZ | `mancave-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 457 | Mcinnes and Co | `mcinnes-and-co` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 458 | Microneedling NZ | `microneedling-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 459 | Miller Road Fragrances | `miller-road` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 460 | Mochi Mochi NZ | `mochi-mochi` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 461 | MooGoo NZ | `moogoo-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 462 | Moona | `moona` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 463 | Morgan and Morgan | `morgan-and-morgan` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 464 | Nail Art NZ | `nail-art-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 465 | Surmanti Nail Tech Training | `nailtechtraining` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 466 | Natural Care NZ | `natural-care-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 467 | Noody Skincare | `noody` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 468 | NZ Candle Supplies | `nz-candle-supplies` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 469 | NZ Fragrance | `nz-fragrance` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 470 | Parrotdog Brewing | `parrotdog-brewing` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 471 | Professional Salon Brands NZ | `professional-salon-brands` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 472 | Rodney Wayne | `rodney-wayne` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 473 | Sable NZ | `sable` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 474 | Sans Ceuticals | `sans-ceuticals` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 475 | Scapegrace Distillery | `scapegrace-distillery` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 476 | 7hada | `sevenhada` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 477 | Sinister Boutique | `sinister-boutique` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 478 | Sistaco Nails NZ | `sistaco` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 479 | Skin Institute Shop | `skin-institute` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 480 | Skinbay | `skinbay` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 481 | Slo Naturals | `slo-naturals` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 482 | Smileie NZ | `smileie` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 483 | Southern Salon Supplies | `southern-salon-supplies` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 484 | Specialized Retail NZ | `specialized-retail-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 485 | Splash Happy | `splash-happy` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 486 | NZ Superior Hair | `superior-hair` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 487 | Svens Island NZ | `svens-island` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 488 | Synergie Skin NZ | `synergie-skin` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 489 | t leaf T | `t-leaf-t` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 490 | Thats It NZ | `thatsit` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 491 | The Beauty Chambers | `the-beauty-chambers` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 492 | The Cosmetic Store NZ | `the-cosmetic-store` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 493 | The Facialist | `the-facialist` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 494 | The Herb Farm | `the-herb-farm` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 495 | Thin Lizzy NZ | `thin-lizzy-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 496 | Tommy Guns New Zealand | `tommy-guns-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 497 | Tronque | `tronque` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 498 | Velaraa | `velaraa` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 499 | Verite Spa | `verite-spa` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 500 | Waiheke Distilling | `waiheke-distilling` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 501 | Wedderspoon | `wedderspoon` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 502 | Wellington Apothecary | `wellington-apothecary` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 503 | Wine Direct NZ | `wine-direct-nz` | general retail | Shopify products.json | implemented 2026-09-06 |
+| 504 | Your Sanctum | `your-sanctum` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 390 | Egmont Honey | `egmont-honey` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 391 | Happy Valley Honey | `happy-valley-honey` | general retail | Shopify products.json | implemented 2026-09-06 |
 | 386 | LoveMy Makeup | `love-my-makeup` | general retail | Shopify products.json | implemented 2026-09-06 |
@@ -441,6 +554,17 @@ into the nightly breadth pipeline).
 
 ## Blocked during the campaign (probe evidence)
 
+- **misola** (misola.co.nz) — Shopify products.json serves a full catalog
+  whose every variant is `"price":"0.00"` (POS/subscription-managed pricing,
+  same failure mode as Lewis Road Creamery); adapter generated then removed
+  after zero valid observations (2026-09-06).
+- **thursday-plantation-nz** (thursdayplantation.co.nz) — Shopify
+  products.json reachable but the page-1 product walk yielded zero priced
+  variants; removed after failed live verification (2026-09-06).
+- **The Spirits Workshop** (thespiritsworkshop.co.nz) — Webflow site, no
+  products.json. **Akaroa Craft Distillery** (akaroacraftdistillery.com) and
+  **The Heke** (theheke.co.nz) — custom storefronts without JSON product
+  endpoints (2026-09-06 probes).
 - **Oderings** (oderings.co.nz) — Konstruk CMS brochure site; category
   pages (`/plants/…-__I.710716__C.<id>`) are subcategory hubs with no
   product tiles or prices. No online pricing to collect.
@@ -489,4 +613,4 @@ into the nightly breadth pipeline).
 6. `test/retailers/retailer-registry.test.js` gates every folder's shape
    and, once 50 adapters exist, the campaign total.
 
-Progress: **GOAL EXCEEDED 2026-09-06 (raised to 100, then +80)** — **197 working adapters** (5 existing + 192 campaign) across 193 tracked retailers (1 tracked target, Lewis Road Creamery, is blocked with evidence). Registry gate enforces the 181 minimum from the +80 round. Registry gate: `test/retailers/retailer-registry.test.js` enforces ≥181.
+Progress: **GOAL MET 2026-09-06 (500-retailer goal)** — **502 working adapters** (5 existing + 497 campaign folders), each live-verified against its platform API. Additional discoveries blocked with probe evidence below. Registry gate: `test/retailers/retailer-registry.test.js` enforces ≥500.

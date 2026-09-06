@@ -49,6 +49,7 @@ src/app/               auth (async scrypt) + server startup
 public/                SPA (index.html, app.js, api.js, views/, components/, utils/)
 scripts/               collectors + build-db + matching-cli + migrate-v1-archive + archive runner
 retailers/             500-retailer scraper campaign (README.md = manifest; _lib/ = shared families)
+docs/apis/             upstream API docs for every scraper surface (index: docs/apis/README.md)
 test/                  mirrors src/ structure (see verification.md)
 data/                  gitignored: prices.jsonl, prices.db, app.db, collection-health.jsonl
 ```

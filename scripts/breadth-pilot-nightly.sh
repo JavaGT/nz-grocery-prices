@@ -19,9 +19,9 @@
 # inside its lane with the inter-banner cooldown.
 #
 # Logs: data/logs/nz-grocery-breadth.log (run log), .error.log (collector
-# stderr), nz-grocery-breadth.health.jsonl (machine-parsed health lines).
-# The daemon plist's own stdout/stderr stay in /tmp until its next reinstall
-# (see ops/nz.grocery-prices.breadth.daemon.plist.template). Lanes interleave
+# stderr), nz-grocery-breadth.health.jsonl (machine-parsed health lines),
+# plus the LaunchAgent's own stdout/stderr (nz-grocery-breadth.agent.*.log,
+# installed by ops/install-breadth-agent.sh). Lanes interleave
 # in the human-readable run log; the machine-parsed health log stays one
 # JSON object per line (small single appends). An unhealthy lane also gets
 # its full summary JSON appended to the run log for forensics — the health

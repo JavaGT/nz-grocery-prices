@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>nz.grocery-prices.breadth</string>
+  <string>nz.grocery-prices.breadth-pilot</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
@@ -11,8 +11,6 @@
   </array>
   <key>WorkingDirectory</key>
   <string>/REPLACE/WITH/ABSOLUTE/PATH</string>
-  <key>UserName</key>
-  <string>REPLACE_WITH_COLLECTOR_USERNAME</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -28,8 +26,8 @@
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.daemon.out.log</string>
+  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.agent.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.daemon.err.log</string>
+  <string>/REPLACE/WITH/ABSOLUTE/PATH/data/logs/nz-grocery-breadth.agent.err.log</string>
 </dict>
 </plist>

@@ -131,11 +131,18 @@ were not enough). Root causes fixed the same morning:
   `data/logs/` (`nz-grocery-breadth.{log,error.log,health.jsonl}`); the
   health line now carries error/warnings/discovery counts; an unhealthy
   lane's full summary JSON is appended to the run log. Existing /tmp
-  health history was copied across. The daemon plist template now points
-  stdout/stderr at `data/logs/` too — **reinstalling the daemon
-  (`sudo sh ops/install-breadth-daemon.sh`) is still pending** (needs an
-  interactive admin password; until then the plist's own stderr — the
-  one-line "lane exited N" notes — still lands in /tmp).
+  health history was copied across.
+- **Scheduling reconciled with reality (2026-09-07)**: the nightly is a
+  user **LaunchAgent** (`~/Library/LaunchAgents/nz.grocery-prices.breadth-pilot.plist`),
+  not a LaunchDaemon — it fires while the user is logged in. Its
+  stdout/stderr now also land in `data/logs/` (agent.{out,err}.log; the
+  old plist is backed up beside it as `*.pre-durable-logs.bak`).
+  `ops/install-breadth-daemon.sh` + the daemon template (never used,
+  second-schedule hazard) were replaced by `ops/install-breadth-agent.sh`
+  + `ops/nz.grocery-prices.breadth.agent.plist.template`, which render
+  byte-identically to the deployed agent and need no sudo. A spent
+  one-shot `nz.grocery-prices.breadth-report-20260904` LaunchAgent
+  (fired once, failed on a missing agent binary) was removed.
 
 No material data hole: the Sep 6 full walks superseded the Sep 5 loss, and
 the Sep 7 cheap night only missed a straggler refresh. Watch the first

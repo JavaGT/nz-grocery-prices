@@ -62,8 +62,9 @@ critical bug. Matching writes to `app.db.product_match_pairs`; the projection
 DB's `product_matches` table is a **dead artifact** — do not read or write
 it. `deal_signals` is a rebuild-populated cache of analytics output
 (DECISIONLOG 2026-09-06, owner-approved; see
-`src/sqlite/deal-materialization.js`); `/api/deals` still computes at
-runtime — flipping the handler to read signals is the pending follow-up. See `DECISIONLOG.md`.
+`src/sqlite/deal-materialization.js`); `/api/deals` serves those rows
+directly via `defaultQueryDealSignals` (handler switch landed `e58303b`) —
+no runtime analytics on the request path. See `DECISIONLOG.md`.
 
 ## Domain terms
 

@@ -149,6 +149,20 @@ the Sep 7 cheap night only missed a straggler refresh. Watch the first
 post-fix nightly (2026-09-08 03:30 NZST) — an unhealthy lane now leaves a
 full forensic summary in `data/logs/nz-grocery-breadth.log`.
 
+### 2026-09-09 incident check — hardening verified, #31 closed
+
+The Sep 8 03:30 post-fix nightly had both FS lanes healthy (paknsave
+straggler refresh; newworld skip night, 780 nodes TTL-fresh). The Sep 9
+nightly lost newworld to another transient tree-endpoint 500 stretch: all
+5×30s bootstrap rounds exhausted, crawl aborted before seeding, other 4
+lanes healthy, streak 0/3. The forensic branch worked as designed — full
+summary JSON in `data/logs/nz-grocery-breadth.log` naming the cause. A
+bounded probe at ~10:15 NZST returned 200/15 nodes for the same Albany
+call, so transient, no fix warranted. BREADTH-16 (#31) closed on this
+evidence; the recurring-stretch question is BREADTH-17 (#33). Sep 10 is
+necessarily a newworld discovery night (all nodes past the 3d TTL since
+the Sep 6 full walk) — expect a full walk in the next health line.
+
 ## Retailers campaign — 502 NZ retailer scrapers (2026-09-06)
 
 `retailers/` holds a price·product scraper roster grown from 50 → 100 → 500

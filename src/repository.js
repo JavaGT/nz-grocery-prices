@@ -72,6 +72,34 @@ async function readArchiveLines(filePath) {
 }
 
 /**
+ * Streaming twin of readArchiveLines: yields `{ line, terminated }` entries
+ * one at a time (same manual "\n" split across chunk boundaries, same
+ * `terminated` semantics) so the repository loader can decode and apply each
+ * line WITHOUT holding the whole file's lines in memory at once. Blank lines
+ * are yielded like any other; numbering and filtering stay with the caller.
+ */
+async function* iterateArchiveLines(filePath) {
+  const handle = await open(filePath, "r");
+  try {
+    const stream = handle.createReadStream({ encoding: "utf8" });
+    let pending = "";
+    for await (const chunk of stream) {
+      const pieces = chunk.split("\n");
+      pending += pieces[0];
+      for (let index = 1; index < pieces.length; index += 1) {
+        yield { line: pending, terminated: true };
+        pending = pieces[index];
+      }
+    }
+    // After a trailing newline `pending` is ""; otherwise it holds the
+    // unterminated final fragment.
+    if (pending !== "") yield { line: pending, terminated: false };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Decodes and classifies one archive line — the single tolerance policy
  * shared by the repository loader, scripts/repair-archive.js, and the v1
  * migrator.
@@ -413,10 +441,16 @@ export class JsonlObservationRepository {
       return;
     }
 
-    const lines = await readArchiveLines(this.filePath);
+    // Streamed decode: each line is classified and applied as the reader
+    // yields it, so the loader never holds the whole file's lines in memory
+    // (the accumulate-then-apply variant peaked at file size + wrappers).
     let lineNumber = 0;
-    for (const entry of lines) {
+    let lastTerminated = true;
+    let sawLine = false;
+    for await (const entry of iterateArchiveLines(this.filePath)) {
       lineNumber += 1;
+      sawLine = true;
+      lastTerminated = entry.terminated;
       if (entry.line.trim() === "") continue; // stray blank lines are not corruption
       const outcome = decodeArchiveLine(entry.line, this.filePath, lineNumber, entry.terminated);
       if (outcome.status === "torn") {
@@ -433,9 +467,12 @@ export class JsonlObservationRepository {
         );
       }
       if (outcome.defect) this.#loadDefects.push(outcome.defect);
-      this.#index.apply(outcome.record);
+      // Loader fast path: the decoded record is exclusively owned here
+      // (fresh from JSON.parse, nobody else holds it), so it is indexed
+      // without a per-record deep clone.
+      this.#index.applyParsed(outcome.record);
     }
-    if (!this.#tornTail && lines.length > 0 && !lines[lines.length - 1].terminated) {
+    if (!this.#tornTail && sawLine && !lastTerminated) {
       // A valid record recovered from an unterminated tail still means the
       // file lacks its closing newline; the next append must prepend one.
       this.#endsWithNewline = false;
@@ -575,9 +612,11 @@ export class JsonlObservationRepository {
       throw error;
     }
 
-    // Rebuild in-memory state from the compacted record set.
+    // Rebuild in-memory state from the compacted record set. The records are
+    // exclusively owned here (resetState dropped the old index; nothing else
+    // references them), so re-indexing needs no per-record clone.
     this.#resetState();
-    this.#index.applyAdditions(compacted);
+    for (const record of compacted) this.#index.applyParsed(record);
     this.#fileSignature = await this.#currentSignature();
     this.#loaded = true;
     return { records: this.#index.getRecords().length, file: this.filePath };

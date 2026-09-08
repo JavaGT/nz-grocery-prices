@@ -49,8 +49,19 @@ function listingId(scope, storeId) {
   return `${scope}\u0000${storeId}`;
 }
 
+// Records are immutable after creation (the index never mutates an applied
+// record), so each observedAt parses exactly once per record object. WeakMap
+// so entries follow their records to the GC — no leak when drafts/discarded
+// indexes die.
+const eventTimeCache = new WeakMap();
+
 function eventTime(record) {
-  return Date.parse(record.observedAt);
+  let time = eventTimeCache.get(record);
+  if (time === undefined) {
+    time = Date.parse(record.observedAt);
+    eventTimeCache.set(record, time);
+  }
+  return time;
 }
 
 function insertChronologically(records, record) {
@@ -206,6 +217,18 @@ export class ArchiveIndex {
   apply(record) {
     this.#validateRecord(record);
     this.#applyRecord(this.#index, structuredClone(record));
+  }
+
+  /**
+   * Indexes one record into live state WITHOUT copying it — the loader's
+   * fast path for records fresh from JSON.parse that the caller exclusively
+   * owns and never mutates afterwards. Any caller that keeps a reference to
+   * `record` MUST use apply() instead: applied records become shared index
+   * state, and getRecordReferences() hands them straight back.
+   */
+  applyParsed(record) {
+    this.#validateRecord(record);
+    this.#applyRecord(this.#index, record);
   }
 
   /** Bulk-apply decoded records (e.g. the additions of one append batch). */
@@ -441,6 +464,11 @@ export class ArchiveIndex {
       for (const offer of revisions) {
         const timestamp = eventTime(offer);
         if (timestamp < from || timestamp > to) continue;
+        // Envelope-level filters run on RAW records before any listing or
+        // revision work, so filtered-out candidates never pay for
+        // materialization.
+        if (query.productId && offer.productId !== query.productId) continue;
+        if (query.storeId && offer.storeId !== query.storeId) continue;
         const listing = listingFor(offer.storeId);
         const displayAt = listing.active.has(offer.offerId) && listing.lastSeenAt
           ? Date.parse(listing.lastSeenAt)
@@ -448,9 +476,12 @@ export class ArchiveIndex {
         const product = revisionAt(this.#index.productRevisions.get(offer.productId) ?? [], displayAt);
         const store = revisionAt(this.#index.storeRevisions.get(offer.storeId) ?? [], displayAt);
         if (!product || !store) continue;
-        if (query.productId && offer.productId !== query.productId) continue;
-        if (query.storeId && offer.storeId !== query.storeId) continue;
+        // Retailer filter reads the HISTORICAL store revision at displayAt
+        // (GROK-7), never the latest one.
         if (query.retailer && store.data.retailer !== query.retailer) continue;
+        // Materialize exactly once: the pushed object is built from fresh
+        // clones, so index state is never shared with callers (this path
+        // previously cloned per piece AND filterObservations cloned again).
         observations.push({
           product: structuredClone(product.data),
           store: structuredClone(store.data),
@@ -466,7 +497,13 @@ export class ArchiveIndex {
         });
       }
     }
-    return filterObservations(observations, query);
+    // Stable sort by observedAt ascending (decorate-sort-undecorate so each
+    // timestamp parses once) — the same ordering filterObservations gave.
+    const stamps = observations.map((observation) => Date.parse(observation.observedAt));
+    return observations
+      .map((observation, index) => [stamps[index], observation])
+      .sort((left, right) => left[0] - right[0])
+      .map((pair) => pair[1]);
   }
 
   /**

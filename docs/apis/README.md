@@ -47,3 +47,22 @@ Start here, then open the doc for the surface you're touching.
 - `14c8a93` freshchoice/warehouse — `execFile` timeout backstop behind
   curl `--max-time`, bounded curl-failure errors, entity-decoder range
   guard, 20 MiB body cap on HTML reads.
+
+## Full-claim audit pass (2026-09-08)
+
+Every doc re-verified claim-by-claim against current code (~60 stale
+citations refreshed across the four bespoke docs; all 153 platform-doc
+citations re-checked in bounds and semantically). Hardening landed with
+focused tests:
+
+- Bespoke adapters — woolworths deals envelope validated (`assertDealsEnvelope`)
+  + non-array `departments` tolerated; foodstuffs `productId`/promotions/
+  `listStores` payload guards; foodstuffs-mobile cancels unread error bodies
+  on all three error paths; freshchoice parser/`pageCount` non-string guards;
+  freshchoice-breadth cancels error bodies; warehouse stops on a zero-tile
+  page (lying grid header paged forever under `--pages all`).
+- Platform families — estar skips null/junk embedded items; html-grid
+  validates its profile at construction (not mid-walk) and tolerates a
+  missing `name` pattern list; magento drops null/junk category-tree entries;
+  woocommerce threads its `retry` option through to `fetchWithRetry`
+  (previously silently dropped).

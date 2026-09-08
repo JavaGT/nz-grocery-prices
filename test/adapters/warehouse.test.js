@@ -146,3 +146,34 @@ describe("WarehouseClient curl transport", () => {
   });
 
 });
+
+describe("WarehouseClient.collectDeals paging guard", () => {
+  function gridResponse(tiles, total) {
+    const tilesHtml = tiles
+      .map((id) =>
+        `<div class="product-tile" data-gtm-product="{&quot;id&quot;:&quot;${id}&quot;,&quot;name&quot;:&quot;Item ${id}&quot;,&quot;price&quot;:2.5}"></div>`)
+      .join("");
+    return {
+      ok: true,
+      status: 200,
+      statusText: "",
+      headers: new Map(),
+      text: async () => `<div class="grid-header">1 – 2 of ${total} products</div>${tilesHtml}`,
+    };
+  }
+
+  it("stops paging when a page parses zero tiles, even with an inflated grid header", async () => {
+    // Pre-hardening the "of M products" header alone drove the page count,
+    // so a lying header paged empty results forever under --pages all.
+    const pages = [gridResponse(["1", "2"], 500), gridResponse([], 500)];
+    let calls = 0;
+    const fetch = async () => {
+      calls += 1;
+      return pages[calls - 1];
+    };
+    const client = new WarehouseClient({ transport: "fetch", fetch, retry: false });
+    const observations = await client.collectDeals();
+    assert.equal(calls, 2, "must not request pages beyond the empty one");
+    assert.equal(observations.length, 2);
+  });
+});

@@ -15,7 +15,7 @@ Two layers exist:
 | Full-catalogue breadth client | `src/adapters/freshchoice-breadth.js` (`FreshChoiceBreadthClient`) | `node scripts/freshchoice-breadth.js` |
 
 Both reuse the same parsers and observation mapper (`parseFreshChoiceProducts`,
-`pageCount`, `toFreshChoiceObservation` from `src/adapters/freshchoice.js:133,50,164`).
+`pageCount`, `toFreshChoiceObservation` from `src/adapters/freshchoice.js:137,50,172`).
 The public type contract is `src/adapters/freshchoice.d.ts`.
 
 ## 1. Overview + entry commands
@@ -38,7 +38,7 @@ Env overrides (values are user secrets/config, never committed —
   (`scripts/freshchoice.js:37`, default `src/adapters/freshchoice.js:3`).
   It flows into `FreshChoiceClient({ origin })`, where `new URL(...)` validates
   it and the store slug/store name are derived from the hostname
-  (`src/adapters/freshchoice.js:223-227`). A malformed value throws a
+  (`src/adapters/freshchoice.js:231-236`). A malformed value throws a
   `TypeError: Invalid URL` at startup — fail fast, no silent fallback.
 - `FRESHCHOICE_STORE_NAME` — display-only store name override
   (`scripts/freshchoice.js:38`). It is only echoed into observation payloads;
@@ -53,11 +53,11 @@ Env overrides (values are user secrets/config, never committed —
 
 | Purpose | Method | URL | Params |
 |---|---|---|---|
-| National store chooser page | GET | `https://store.freshchoice.co.nz/` (override `options.storeListUrl`) | none (`listStores`, `src/adapters/freshchoice.js:252-263`) |
-| Deals / specials listing | GET | `{origin}/specials` | `page` (1-based, default 1), `q[]=special:1` (`listDeals`, `src/adapters/freshchoice.js:295-300`) |
-| Product search | GET | `{origin}/search` | `q` (required, trimmed), `page` (1-based) (`searchProducts`, `src/adapters/freshchoice.js:302-307`) |
-| Sitemap (breadth discovery) | GET | `{origin}/sitemap.xml` | none (`fetchSitemap`, `src/adapters/freshchoice-breadth.js:120-140`) |
-| Category listing page (breadth) | GET | `{origin}{categoryPath}` + `?page={n}` when `page > 0` | zero-based `page`; page 0 is the bare URL (`fetchCategoryPage`, `src/adapters/freshchoice-breadth.js:149-160`) |
+| National store chooser page | GET | `https://store.freshchoice.co.nz/` (override `options.storeListUrl`) | none (`listStores`, `src/adapters/freshchoice.js:260-279`) |
+| Deals / specials listing | GET | `{origin}/specials` | `page` (1-based, default 1), `q[]=special:1` (`listDeals`, `src/adapters/freshchoice.js:303-308`) |
+| Product search | GET | `{origin}/search` | `q` (required, trimmed), `page` (1-based) (`searchProducts`, `src/adapters/freshchoice.js:310-316`) |
+| Sitemap (breadth discovery) | GET | `{origin}/sitemap.xml` | none (`fetchSitemap`, `src/adapters/freshchoice-breadth.js:120-144`) |
+| Category listing page (breadth) | GET | `{origin}{categoryPath}` + `?page={n}` when `page > 0` | zero-based `page`; page 0 is the bare URL (`fetchCategoryPage`, `src/adapters/freshchoice-breadth.js:152-178`) |
 
 Breadth origins are pinned to `*.freshchoice.co.nz`: `assertFreshChoiceOrigin`
 rejects non-https and off-apex hosts before any fetch, because store origins
@@ -68,22 +68,25 @@ come from the (untrusted) chooser-page scrape (`src/adapters/freshchoice-breadth
 - No auth. No cookies, no tokens — the storefront is public HTML.
 - Every client request sends `accept: text/html,application/xhtml+xml` and
   `user-agent: nz-grocery-prices/0.1` (default, `src/adapters/freshchoice.js:5`),
-  plus any caller-injected headers last (`src/adapters/freshchoice.js:281-284`).
+  plus any caller-injected headers last (`src/adapters/freshchoice.js:289-293`).
   The sitemap request sends `accept: application/xml,text/xml`
   (`src/adapters/freshchoice-breadth.js:125-128`).
-- No secrets are placed in headers, URLs, or error messages.
+- No secrets are placed in headers, URLs, or error messages. Error responses
+  have their unread bodies cancelled before the error throws
+  (`src/adapters/freshchoice-breadth.js:133-135,162-164`), matching the
+  shared transport's contract.
 
 ## 4. Request params
 
 - `page` (deals/search): 1-based; appended only when defined
-  (`src/adapters/freshchoice.js:274-276`). Values are stringified into the
+  (`src/adapters/freshchoice.js:283-285`). Values are stringified into the
   query string via `URLSearchParams`, so no manual escaping is needed.
 - `q` (search): free-text query; blank/whitespace queries throw `TypeError`
-  (`src/adapters/freshchoice.js:303`).
+  (`src/adapters/freshchoice.js:311`).
 - `q[]=special:1` (deals): platform query flag selecting the specials facet.
 - `categoryPath` (breadth): `/category/...` path taken verbatim from the
   sitemap's `<loc>` entries; breadth pages are 0-based with `?page=N` for
-  N ≥ 1 (`src/adapters/freshchoice-breadth.js:152`).
+  N ≥ 1 (`src/adapters/freshchoice-breadth.js:156`).
 - `maxPages` (client options): local cap on pagination; default unlimited.
 - `delayMs` (breadth client): minimum gap between completed requests, applied
   inside the client (`#pace`, `src/adapters/freshchoice-breadth.js:95-101`).
@@ -91,11 +94,11 @@ come from the (untrusted) chooser-page scrape (`src/adapters/freshchoice-breadth
 ## 5. Response shape (consumed fields only)
 
 All bodies are HTML/XML text; the client reads them through `readBodyText`
-with a 20 MiB cap (`src/adapters/freshchoice.js:292`; cap:
+with a 20 MiB cap (`src/adapters/freshchoice.js:300`; cap:
 `src/adapters/fetch-with-retry.js:10`).
 
 Store chooser page → `parseFreshChoiceStoreList`
-(`src/adapters/freshchoice.js:70-131`) produces per store:
+(`src/adapters/freshchoice.js:74-135`) produces per store:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -108,10 +111,10 @@ Store chooser page → `parseFreshChoiceStoreList`
 
 When the card markup changes, a fallback scrapes bare origin links and
 synthesizes `FreshChoice {Title Cased Slug}` names
-(`src/adapters/freshchoice.js:112-128`).
+(`src/adapters/freshchoice.js:116-132`).
 
 Deals/search pages → `parseFreshChoiceProducts`
-(`src/adapters/freshchoice.js:133-162`) walks `<div class="talker …" … id="line_{id}">`
+(`src/adapters/freshchoice.js:137-170`) walks `<div class="talker …" … id="line_{id}">`
 blocks and consumes, per product:
 
 | Field | Type | Source in markup |
@@ -129,21 +132,24 @@ blocks and consumes, per product:
 
 Sitemap XML → `parseSitemapCategoryUrls`
 (`src/adapters/freshchoice-breadth.js:24-37`): every `<loc>` containing
-`/category/`, deduplicated, sorted. `/lines/` PDPs are ignored.
+`/category/`, deduplicated, sorted. `/lines/` PDPs are ignored. Both the
+products parser and `pageCount` treat a non-string body as "no products" /
+"single page" rather than crashing (`src/adapters/freshchoice.js:140-141`,
+`:50-57`).
 
-`toFreshChoiceObservation` (`src/adapters/freshchoice.js:164-214`) maps a
+`toFreshChoiceObservation` (`src/adapters/freshchoice.js:172-222`) maps a
 product + store to a `PriceObservation`: `product.id` = `freshchoice:{id}`,
 `price.regularCents` = was ?? sell, `promoCents` when special,
 `comparative.display` from the comparison or unit text, promotion
 `saveCents`/`savePercent` when was > sell, `source.url` =
-`new URL(path || /lines/{id}, origin)` (`src/adapters/freshchoice.js:211`).
+`new URL(path || /lines/{id}, origin)` (`src/adapters/freshchoice.js:219`).
 
 ## 6. Pagination / enumeration
 
 - Deals/search client: do/while loop, page 1..n; the total page count is read
   once from page 1's `aria-label="Page N"` markers (`pageCount`,
-  `src/adapters/freshchoice.js:50-53`), then iterated until exhausted or
-  `maxPages` (`#collect`, `src/adapters/freshchoice.js:318-323`). Products are
+  `src/adapters/freshchoice.js:50-57`), then iterated until exhausted or
+  `maxPages` (`#collect`, `src/adapters/freshchoice.js:326-330`). Products are
   deduped by product id across pages.
 - `--all-stores`: one client per storefront origin, each doing its own deals
   pagination (`scripts/freshchoice.js:105-118`).
@@ -162,14 +168,14 @@ product + store to a `PriceObservation`: `product.id` = `freshchoice:{id}`,
 
 - Client (`FreshChoiceClient`): every request goes through `fetchWithRetry`
   from `src/adapters/fetch-with-retry.js` with per-attempt `timeout` (default
-  15 000 ms, `src/adapters/freshchoice.js:232`) and an optional caller
+  15 000 ms, `src/adapters/freshchoice.js:241`) and an optional caller
   `signal`. Retry policy lives in that shared module (not owned by this
   adapter): GET only, retries on 429/502/503/504
   (`src/adapters/fetch-with-retry.js:88-90`) and retryable network errors
   (`:92-100`), exponential backoff + 20% jitter (`:116-120`) honoring
   `Retry-After` (`:102-114`), default 3 attempts (`:171`).
 - Breadth client: bare injected `fetch` with `AbortSignal.timeout` (default
-  15 000 ms, `src/adapters/freshchoice-breadth.js:16,129,158`); bodies read
+  15 000 ms, `src/adapters/freshchoice-breadth.js:17,129,162`); bodies read
   through `readBodyText` (20 MiB cap). Pacing: `delayMs` minimum gap between
   completed requests (client default 0; breadth script default 3000 ms,
   `scripts/freshchoice-breadth.js:49`). Circuit breaker opens after 5
@@ -183,7 +189,7 @@ product + store to a `PriceObservation`: `product.id` = `freshchoice:{id}`,
 - Non-2xx: `assertOk` throws `FreshChoice {operation} failed: {status} {statusText}`
   (`src/adapters/freshchoice.js:7-13`). The breadth client raises
   `FreshChoice sitemap fetch failed (…)` / `FreshChoice category page fetch
-  failed (…)` with the URL (`src/adapters/freshchoice-breadth.js:131-136,160-165`).
+  failed (…)` with the URL (`src/adapters/freshchoice-breadth.js:131-139,160-168`).
 - Oversized body: declared `Content-Length` over 20 MiB (or a stream that
   passes the cap mid-read) throws before/while reading
   (`src/adapters/fetch-with-retry.js:42-53`).
@@ -191,7 +197,7 @@ product + store to a `PriceObservation`: `product.id` = `freshchoice:{id}`,
   code points are preserved verbatim instead of throwing `RangeError` from
   `String.fromCodePoint` (`decodeCodePoint`, `src/adapters/freshchoice.js:17-22`).
 - Unpriced/garbled products: `parseFreshChoiceProducts` drops tiles lacking id,
-  name, or an integer sell price (`src/adapters/freshchoice.js:161`);
+  name, or an integer sell price (`src/adapters/freshchoice.js:169`);
   `toFreshChoiceObservation` returns `undefined` for the same conditions and
   the collect loop filters them out — a missing price is not an error.
 - Empty store list: `archive --all-stores` throws when the chooser page yields

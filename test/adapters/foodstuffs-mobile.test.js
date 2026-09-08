@@ -255,6 +255,56 @@ describe("MobileFoodstuffsClient", () => {
 
   // ---- listStores ----
 
+  // ---- error body teardown ----
+
+  it("cancels the error body before the backoff sleep on a retryable 5xx", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("exploded"));
+        controller.close();
+      },
+      cancel() { cancelled = true; },
+    });
+    let attempts = 0;
+    const fetch = async (url) => {
+      if (String(url).includes("/mobile/store/physical")) {
+        attempts += 1;
+        if (attempts === 1) {
+          return { ok: false, status: 503, statusText: "Service Unavailable", body: stream };
+        }
+        return { ok: true, status: 200, json: async () => ({ stores: [{ id: "s1", name: "Store 1" }] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+    };
+    const client = new MobileFoodstuffsClient({ fetch, retryBackoffMs: 1 });
+    const stores = await client.listStores();
+    assert.equal(attempts, 2, "503 must be retried once");
+    assert.equal(cancelled, true, "the 5xx body must be cancelled before the backoff sleep");
+    assert.deepEqual(stores.map((s) => s.id), ["s1"]);
+  });
+
+  it("cancels the error body before throwing on a non-retryable status", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      // Keep a chunk queued so the stream stays readable; cancel() on an
+      // already-closed stream never reaches the underlying source.
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("gone"));
+      },
+      cancel() { cancelled = true; },
+    });
+    const fetch = async (url) => {
+      if (String(url).includes("/mobile/store/physical")) {
+        return { ok: false, status: 404, statusText: "Not Found", body: stream };
+      }
+      return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+    };
+    const client = new MobileFoodstuffsClient({ fetch, retryBackoffMs: 1 });
+    await assert.rejects(() => client.listStores(), /failed: 404 Not Found/);
+    assert.equal(cancelled, true, "the error body must be cancelled to release the connection");
+  });
+
   it("retries transient network failures before succeeding", async () => {
     let attempts = 0;
     const fetch = async (url) => {

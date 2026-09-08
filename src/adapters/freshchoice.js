@@ -48,7 +48,11 @@ function capture(block, pattern) {
 }
 
 function pageCount(html) {
-  const pages = [...html.matchAll(/aria-label="Page (\d+)"/g)].map((match) => Number(match[1]));
+  // Non-string input (crawled body of an unexpected type) counts as a
+  // single-page listing rather than crashing .matchAll.
+  const pages = typeof html === "string"
+    ? [...html.matchAll(/aria-label="Page (\d+)"/g)].map((match) => Number(match[1]))
+    : [];
   return Math.max(1, ...pages);
 }
 
@@ -131,6 +135,10 @@ export function parseFreshChoiceStoreList(html) {
 }
 
 export function parseFreshChoiceProducts(html) {
+  // Guard the exported parser like parseSitemapCategoryUrls: breadth feeds
+  // it crawled bodies, and a non-string must return no products rather
+  // than crash .matchAll.
+  if (typeof html !== "string" || !html) return [];
   const starts = [...html.matchAll(/<div class="talker ([^"]*)"[^>]*data-talker[^>]*id="line_([^"]+)"[^>]*>/g)];
   return starts.map((match, index) => {
     const block = html.slice(match.index, starts[index + 1]?.index ?? html.length);

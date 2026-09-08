@@ -269,6 +269,51 @@ describe("FreshChoiceBreadthClient", () => {
     const gap = timestamps[1] - timestamps[0];
     assert.ok(gap >= 40, `expected gap >= 40ms, got ${gap}ms`);
   });
+
+  // ---- error body teardown ----
+
+  function errorResponse(status) {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("denied"));
+        controller.close();
+      },
+    });
+    stream.cancel = async () => { cancelled = true; };
+    return {
+      response: { ok: false, status, statusText: "Forbidden", body: stream },
+      wasCancelled: () => cancelled,
+    };
+  }
+
+  it("cancels the error body before throwing on a failed sitemap fetch", async () => {
+    const { response, wasCancelled } = errorResponse(403);
+    const client = new FreshChoiceBreadthClient({
+      fetch: async () => response,
+      delayMs: 0,
+    });
+    await assert.rejects(
+      () => client.fetchSitemap("https://testville.store.freshchoice.co.nz"),
+      /sitemap fetch failed/,
+    );
+    assert.equal(wasCancelled(), true, "error body must be cancelled to release the connection");
+    assert.equal(client.consecutiveFailures, 1);
+  });
+
+  it("cancels the error body before throwing on a failed category page fetch", async () => {
+    const { response, wasCancelled } = errorResponse(503);
+    const client = new FreshChoiceBreadthClient({
+      fetch: async () => response,
+      delayMs: 0,
+    });
+    await assert.rejects(
+      () => client.fetchCategoryPage("https://testville.store.freshchoice.co.nz", "/category/bakery", 0),
+      /category page fetch failed/,
+    );
+    assert.equal(wasCancelled(), true, "error body must be cancelled to release the connection");
+    assert.equal(client.consecutiveFailures, 1);
+  });
 });
 // ---- origin pinning --------------------------------------------------------
 

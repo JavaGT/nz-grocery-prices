@@ -10,7 +10,7 @@ calls were made to write it.
 | Public type contract | `src/adapters/woolworths.d.ts` (re-exported as `nz-grocery-prices/woolworths`, `package.json:25-28`) |
 | Shared retry/timeout/JSON helper | `src/adapters/fetch-with-retry.js` (`fetchWithRetry`, `parseJsonResponse`) |
 | Deals/archive CLI | `scripts/woolworths.js` — entry command `npm run woolworths` (`package.json:54`) |
-| Full-catalogue breadth collector | `scripts/woolworths-breadth.js` (run directly, or via `npm run breadth:nightly` → `scripts/breadth-pilot-nightly.sh:119-120`) |
+| Full-catalogue breadth collector | `scripts/woolworths-breadth.js` (run directly, or via `npm run breadth:nightly` → `scripts/breadth-pilot-nightly.sh:159`) |
 
 ## 1. Overview
 
@@ -23,7 +23,7 @@ query params. The anonymous site answers with its default (Glenfield)
 fulfilment store; a cookie captured from a logged-in browser session
 re-targets the store (see §3).
 
-`toWoolworthsObservation` (`src/adapters/woolworths.js:32-106`) maps one API
+`toWoolworthsObservation` (`src/adapters/woolworths.js:48-123`) maps one API
 product into the shared `PriceObservation` domain shape
 (`src/domain/observation.d.ts`), and is the single place wire fields are
 interpreted.
@@ -32,23 +32,23 @@ interpreted.
 
 Base `{origin}` = `https://www.woolworths.co.nz` by default; every method is
 GET; all calls go through `#request` → `fetchWithRetry` +
-`parseJsonResponse` (`src/adapters/woolworths.js:126-150`).
+`parseJsonResponse` (`src/adapters/woolworths.js:145-167`).
 
 | Purpose | Method | URL | Notable query params |
 |---|---|---|---|
-| Specials listing (deals) | GET | `{origin}/api/v1/products` | `target=specials`, `useRankedSpecials=true`, `page` (1-based), `size` (default 100) (`listDeals`, `src/adapters/woolworths.js:151-159`) |
-| Browse/search listing (breadth) | GET | `{origin}/api/v1/products` | `target=browse` (default), `page`, `size`, optional `dasFilter`, `sort`, `search`, `useRankedSpecials` — set only when provided (`listProducts`, `src/adapters/woolworths.js:161-171`) |
-| Department taxonomy | GET | `{origin}/api/v1/products/departments` | none (`listDepartments`, `src/adapters/woolworths.js:173-175`) |
+| Specials listing (deals) | GET | `{origin}/api/v1/products` | `target=specials`, `useRankedSpecials=true`, `page` (1-based), `size` (default 100) (`listDeals`, `src/adapters/woolworths.js:170-178`) |
+| Browse/search listing (breadth) | GET | `{origin}/api/v1/products` | `target=browse` (default), `page`, `size`, optional `dasFilter`, `sort`, `search`, `useRankedSpecials` — set only when provided (`listProducts`, `src/adapters/woolworths.js:180-190`) |
+| Department taxonomy | GET | `{origin}/api/v1/products/departments` | none (`listDepartments`, `src/adapters/woolworths.js:192-194`) |
 
 There is also a non-API product URL built for the archive's `source.url`
 (never fetched by the collector):
 `{origin}/shop/productdetails?stockcode={sku}&name={slug|name|"product"}`
-(`src/adapters/woolworths.js:103`).
+(`src/adapters/woolworths.js:122`).
 
 ## 3. Auth & headers
 
 No tokens or login flow. Every request carries this fixed header set
-(`src/adapters/woolworths.js:129-136`):
+(`src/adapters/woolworths.js:147-154`):
 
 - `accept: application/json`, `content-type: application/json`
 - `referer: {origin}/shop/specials`
@@ -61,7 +61,7 @@ Optional session cookie: the CLI scripts construct the client with
 `cookie: process.env.WOOLWORTHS_COOKIE`
 (`scripts/woolworths.js:7`, `scripts/woolworths-breadth.js:123`). The
 constructor merges it as the request `cookie` header
-(`src/adapters/woolworths.js:123`). Its only documented effect is to reuse
+(`src/adapters/woolworths.js:141`). Its only documented effect is to reuse
 another fulfilment store selected in your browser; without it the anonymous
 session defaults to its own store (help text, `scripts/woolworths.js:42-43`).
 
@@ -72,12 +72,12 @@ status, content-type, and a body prefix only — a regression test pins that
 the cookie value never appears in an error message
 (`test/adapters/woolworths.test.js`, "never leaks it into error messages").
 Extra headers can be injected via the `headers` client option; an explicit
-`cookie` option wins over them (`src/adapters/woolworths.js:122-123`).
+`cookie` option wins over them (`src/adapters/woolworths.js:140-141`).
 
 ## 4. Request params
 
 `listDeals` / `listProducts` options → query params
-(`src/adapters/woolworths.js:151-171`):
+(`src/adapters/woolworths.js:170-190`):
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
@@ -89,7 +89,7 @@ Extra headers can be injected via the `headers` client option; an explicit
 | `sort` | string | — | breadth uses `PriceAsc` for deterministic coverage (`scripts/woolworths-breadth.js:157`) |
 | `search` | string | — | free-text search |
 
-Client-level transport options (`src/adapters/woolworths.js:115-124`):
+Client-level transport options (`src/adapters/woolworths.js:134-143`):
 `origin`, `userAgent`, `cookie`, `headers`, `fetch` (injectable test seam),
 `signal` (caller abort), `timeout` (ms, default 15000), `retry` (policy
 object or `false` — see §7).
@@ -104,48 +104,52 @@ requests), `--force-live` (`parseArgs`, `scripts/woolworths-breadth.js:36-78`).
 
 ## 5. Response shape (fields the adapter consumes)
 
-Envelope (`#request`, `src/adapters/woolworths.js:144-147`):
+Envelope (`#request`, `src/adapters/woolworths.js:162-166`):
 
 | Field | Type | Use |
 |---|---|---|
 | `isSuccessful` | boolean | `false` → throw (see §8) |
-| `context.fulfilment.fulfilmentStoreId` | string \| number | store identity (`getStore` `src/adapters/woolworths.js:177-191`; `collectDeals` `:202-214`) |
+| `context.fulfilment.fulfilmentStoreId` | string \| number | store identity (`getStore` `src/adapters/woolworths.js:196-208`; `collectDeals` `:221-232`) |
 | `context.fulfilment.address` | string (optional) | store display name/address |
-| `products.items` | array | page of products (`:215`) |
-| `products.totalItems` | number (optional) | drives page-count math (`:223`; breadth `scripts/woolworths-breadth.js:179`) |
+| `products.items` | array | page of products (`:234`) |
+| `products.totalItems` | number (optional) | drives page-count math (`:244`; breadth `scripts/woolworths-breadth.js:179`) |
 | departments payload | array, or `{departments[]\|items[]}` | breadth accepts all three shapes (`scripts/woolworths-breadth.js:81-85`) |
 
 Per product in `products.items` — only these are read by
-`toWoolworthsObservation` (`src/adapters/woolworths.js:32-106`):
+`toWoolworthsObservation` (`src/adapters/woolworths.js:48-123`):
 
 | Field | Type | Maps to |
 |---|---|---|
 | `sku` | string \| number | required; product/store ids, dedupe key |
-| `name` | string (optional) | `product.name` (size appended when not already contained, `:20-30`); missing/blank stays absent |
+| `name` | string (optional) | `product.name` (size appended when not already contained, `:36-46`); missing/blank stays absent |
 | `brand`, `barcode`, `slug` | string (optional) | `brand`, `gtin` (from barcode), source URL slug |
 | `price.originalPrice` / `price.salePrice` | number | `regularCents` / `promoCents` or `memberCents` (dollars → cents) |
-| `price.isSpecial`, `price.isClubPrice` | boolean | promo vs member-price classification (club wins, `:40-41`) |
-| `productTag.tagType` | `"IsSpecial"` | alternate specials signal (`:41`) |
+| `price.isSpecial`, `price.isClubPrice` | boolean | promo vs member-price classification (club wins, `:56-57`) |
+| `productTag.tagType` | `"IsSpecial"` | alternate specials signal (`:57`) |
 | `price.savePrice`, `price.savePercentage` | number | `promotion.saveCents` / `savePercent` |
 | `price.promotionStartDate` / `promotionEndDate` | string (date) | `promotion.startsAt` / `endsAt`, promotion id parts |
 | `size.volumeSize` | string | name suffix; `size.cupPrice` (number) + `size.cupMeasure` (string) → `price.comparative` |
-| `departments[]` | `{name: string}[]` | `product.categories` (absent when `departments` is missing) |
-| `images` | object | deep-cloned into `product.images` (`:54`) |
+| `departments[]` | `{name: string}[]` | `product.categories` (absent when `departments` is missing or not an array) |
+| `images` | object | deep-cloned into `product.images` (`:73`) |
 
 Products lacking `sku` or any usable price are skipped
-(`toWoolworthsObservation` returns `undefined`, `src/adapters/woolworths.js:36-37`).
+(`toWoolworthsObservation` returns `undefined`, `src/adapters/woolworths.js:52-54`).
 
 ## 6. Pagination / enumeration strategy
 
-- Deals (`collectDeals`, `src/adapters/woolworths.js:192-236`): offset
-  paging, `page` from 1, `size` fixed. Loop continues while
+- Deals (`collectDeals`, `src/adapters/woolworths.js:211-254`): offset
+  paging, `page` from 1, `size` fixed. Every page's envelope is validated
+  first (`assertDealsEnvelope`, `src/adapters/woolworths.js:25-38`, applied
+  at `:221`): a non-array `products.items` or non-numeric
+  `products.totalItems` throws a named error instead of crashing the loop
+  or silently truncating to one page. The loop continues while
   `page <= totalPages && page <= maxPages`, where
-  `totalPages = ceil(totalItems / size)` (`:223`); `maxPages` defaults to
+  `totalPages = ceil(totalItems / size)` (`:244`); `maxPages` defaults to
   unbounded. Two safety stops: an empty page ends collection even if
-  `totalItems` claims more (`:222`, guards against an inflated total
+  `totalItems` claims more (`:241`, guards against an inflated total
   spinning forever), and every product is deduped by `String(sku)` in a
-  Map (`:216-217`). The fulfilment store must be present on every page and
-  must not change mid-run (`:205-211`).
+  Map (`:235-236`). The fulfilment store must be present on every page and
+  must not change mid-run (`:226-230`).
 - Breadth (`runCollection`, `scripts/woolworths-breadth.js:113-210`):
   enumerates departments from the taxonomy endpoint, then pages each
   department with `target=browse` + `dasFilter` + `sort=PriceAsc`
@@ -200,11 +204,12 @@ every grocery adapter:
 | Non-OK status after retries (4xx, or 5xx past the last attempt) | `assertOk` cancels the unread error body, then throws `Woolworths {path} failed: {status} {statusText}` (`src/adapters/woolworths.js:6-14`) |
 | 200 with non-JSON body (e.g. WAF challenge) | `parseJsonResponse` throws naming operation, status, content-type, and a 120-char body prefix (`src/adapters/fetch-with-retry.js:55-62`, `:72-86`) |
 | Body over 20 MiB (declared or streamed) | `readBodyText` refuses/caps mid-read with a labelled error (`src/adapters/fetch-with-retry.js:21-23`, `:43-47`) |
-| `isSuccessful: false` in an otherwise OK payload | `Woolworths {path} returned an unsuccessful response` (`src/adapters/woolworths.js:145-147`) |
-| Missing `context.fulfilment.fulfilmentStoreId` | `Woolworths response did not identify its fulfilment store` (`getStore` `:181`; `collectDeals` `:205`) |
-| Fulfilment store changes between pages | `Woolworths fulfilment store changed during collection` (`:208-211`); breadth variant `scripts/woolworths-breadth.js:103-111` |
+| `isSuccessful: false` in an otherwise OK payload | `Woolworths {path} returned an unsuccessful response` (`src/adapters/woolworths.js:164-166`) |
+| Malformed listing envelope (non-array `products.items`, non-numeric `totalItems`) | named error from `assertDealsEnvelope` (`src/adapters/woolworths.js:25-38`) instead of an "items is not iterable" crash or NaN page math silently truncating to one page |
+| Missing `context.fulfilment.fulfilmentStoreId` | `Woolworths response did not identify its fulfilment store` (`getStore` `:200`; `collectDeals` `:224`) |
+| Fulfilment store changes between pages | `Woolworths fulfilment store changed during collection` (`:227-230`); breadth variant `scripts/woolworths-breadth.js:103-111` |
 | Departments payload empty/malformed | `Woolworths departments response was empty or malformed` (`scripts/woolworths-breadth.js:80-93`) |
-| Products missing `sku` or price | silently skipped — mapper returns `undefined` (`src/adapters/woolworths.js:36-37`) |
+| Products missing `sku` or price | silently skipped — mapper returns `undefined` (`src/adapters/woolworths.js:52-54`) |
 | Breadth budget exhausted / untrusted totals | no throw; summary `healthy: false` with `budgetExhausted` / `incompleteCoverage` flags, exit code 1 (`scripts/woolworths-breadth.js:160-165`, `:178-186`, `:232`) |
 | Bad CLI args | `TypeError` from arg validation (`scripts/woolworths.js:51-56`; `scripts/woolworths-breadth.js:65-77`); breadth main catches everything and prints `{healthy: false, error}` JSON (`:234-237`) |
 

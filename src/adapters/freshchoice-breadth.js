@@ -130,6 +130,9 @@ export class FreshChoiceBreadthClient {
     });
     if (!response.ok) {
       this.#recordFailure();
+      // Cancel the unread error body so the connection is released instead
+      // of staying pinned until garbage collection.
+      try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
       throw new Error(
         `FreshChoice sitemap fetch failed (${response.status}): ${url}`,
       );
@@ -159,6 +162,9 @@ export class FreshChoiceBreadthClient {
     });
     if (!response.ok) {
       this.#recordFailure();
+      // Cancel the unread error body so the connection is released instead
+      // of staying pinned until garbage collection.
+      try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
       throw new Error(
         `FreshChoice category page fetch failed (${response.status}): ${url}`,
       );

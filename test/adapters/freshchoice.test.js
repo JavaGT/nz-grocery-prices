@@ -4,6 +4,7 @@ import {
   FreshChoiceClient,
   parseFreshChoiceProducts,
   parseFreshChoiceStoreList,
+  pageCount,
   toFreshChoiceObservation,
 } from "../../src/adapters/freshchoice.js";
 
@@ -41,6 +42,27 @@ describe("parseFreshChoiceProducts", () => {
     assert.deepEqual(result, []);
   });
 
+  it("returns empty array for non-string input instead of crashing", () => {
+    // Breadth feeds this parser crawled bodies; a non-string must yield no
+    // products, not a .matchAll TypeError.
+    assert.deepEqual(parseFreshChoiceProducts(undefined), []);
+    assert.deepEqual(parseFreshChoiceProducts(null), []);
+    assert.deepEqual(parseFreshChoiceProducts(""), []);
+  });
+
+});
+
+describe("pageCount", () => {
+  it("reads the highest aria-label page marker", () => {
+    const html = `<span aria-label="Page 1"></span><span aria-label="Page 4"></span>`;
+    assert.equal(pageCount(html), 4);
+  });
+
+  it("counts a non-string body as a single-page listing instead of crashing", () => {
+    assert.equal(pageCount(undefined), 1);
+    assert.equal(pageCount(null), 1);
+    assert.equal(pageCount(""), 1);
+  });
 });
 
 describe("decodeHtml entity hardening", () => {

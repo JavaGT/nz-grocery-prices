@@ -149,6 +149,18 @@ describe("toWoolworthsObservation", () => {
     assert.equal(result.product.id, "woolworths:5251234");
   });
 
+  it("tolerates a non-array departments payload (no categories, no crash)", () => {
+    const product = {
+      sku: "5251234",
+      name: "Anchor Blue Milk 2L",
+      price: { originalPrice: 5.49 },
+      departments: "Dairy", // malformed: pre-hardening this crashed .map
+    };
+    const result = toWoolworthsObservation(product, fulfilment);
+    assert.equal(result.product.categories, undefined);
+    assert.equal(result.product.id, "woolworths:5251234");
+  });
+
   it("keeps name optional when the product has no name but has a size", () => {
     const product = {
       sku: "5251234",
@@ -216,6 +228,55 @@ describe("WoolworthsClient", () => {
     const observations = await client.collectDeals({ size: 100 });
     assert.equal(calls, 2, "must not request pages beyond the empty one");
     assert.equal(observations.length, 1);
+  });
+
+  it("names the malformed envelope when products.items is not an array", async () => {
+    const fetch = async () => jsonResponse({
+      isSuccessful: true,
+      context: { fulfilment: { fulfilmentStoreId: "1234", address: "Royal Oak" } },
+      products: { items: { sku: "1" }, totalItems: 5 }, // malformed: object
+    });
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test" });
+    await assert.rejects(
+      () => client.collectDeals(),
+      /response envelope has a non-array products\.items/,
+    );
+  });
+
+  it("names the malformed envelope when totalItems is non-numeric instead of silently truncating", async () => {
+    // Pre-hardening, a non-numeric totalItems made the page math NaN, which
+    // silently ended collection after page 1.
+    const fetch = async () => jsonResponse({
+      isSuccessful: true,
+      context: { fulfilment: { fulfilmentStoreId: "1234", address: "Royal Oak" } },
+      products: { items: [{ sku: "1", price: { originalPrice: 1.0 } }], totalItems: "many" },
+    });
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test" });
+    await assert.rejects(
+      () => client.collectDeals(),
+      /response envelope has a non-numeric products\.totalItems/,
+    );
+  });
+
+  it("still pages when totalItems arrives as a numeric string", async () => {
+    const page = (skus) => jsonResponse({
+      isSuccessful: true,
+      context: { fulfilment: { fulfilmentStoreId: "1234", address: "Royal Oak" } },
+      products: {
+        items: skus.map((sku) => ({ sku, price: { originalPrice: 1.0 } })),
+        totalItems: "4",
+      },
+    });
+    const pages = [page(["1", "2"]), page(["3", "4"])];
+    let calls = 0;
+    const fetch = async () => {
+      calls += 1;
+      return pages[calls - 1];
+    };
+    const client = new WoolworthsClient({ fetch, origin: "https://example.test" });
+    const observations = await client.collectDeals({ size: 2 });
+    assert.equal(calls, 2);
+    assert.equal(observations.length, 4);
   });
 
   it("cancels the response body before throwing on a non-retryable error status", async () => {

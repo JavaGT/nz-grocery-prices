@@ -133,6 +133,9 @@ export class MobileFoodstuffsClient {
       this.#lastCompletedAt = Date.now();
 
       if (!response.ok) {
+        // Cancel the unread error body so the connection is released instead
+        // of staying pinned until garbage collection.
+        try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
         throw new Error(
           `Mobile guest auth failed: ${response.status} ${response.statusText}`,
         );
@@ -202,6 +205,9 @@ export class MobileFoodstuffsClient {
           response.status <= 599 &&
           attempt < maxAttempts - 1
         ) {
+          // Cancel the unread error body before the backoff sleep so the
+          // connection is released (same contract as fetchWithRetry).
+          try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
           lastError = new Error(`Mobile request ${path} failed: 5xx`);
           await new Promise((resolve) =>
             setTimeout(resolve, this.#retryBackoffMs * (attempt + 1)),
@@ -209,6 +215,7 @@ export class MobileFoodstuffsClient {
           continue;
         }
         if (!response.ok) {
+          try { await response.body?.cancel?.(); } catch { /* teardown is best-effort */ }
           throw new Error(
             `Mobile request ${path} failed: ${response.status} ${response.statusText}`,
           );

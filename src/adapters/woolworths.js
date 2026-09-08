@@ -17,6 +17,22 @@ function cents(value) {
   return Number.isFinite(value) ? Math.round(value * 100) : undefined;
 }
 
+// Guard for the collectDeals paging loop: it iterates products.items and
+// derives the page count from products.totalItems, so a malformed envelope
+// must fail naming the field instead of crashing with "items is not
+// iterable" or silently truncating to one page (NaN page math always
+// compares false).
+function assertDealsEnvelope(result, path) {
+  const { items, totalItems } = result?.products ?? {};
+  if (items !== undefined && !Array.isArray(items)) {
+    throw new Error(`Woolworths ${path}: response envelope has a non-array products.items`);
+  }
+  if (totalItems !== undefined && !Number.isFinite(Number(totalItems))) {
+    throw new Error(`Woolworths ${path}: response envelope has a non-numeric products.totalItems`);
+  }
+  return result;
+}
+
 function productName(product) {
   const name = product.name?.trim();
   // A missing or blank name must stay optional (domain Product.name?);
@@ -42,7 +58,10 @@ export function toWoolworthsObservation(product, fulfilment, options = {}) {
   const observedAt = options.observedAt ?? new Date().toISOString();
   const promotionStart = product.price?.promotionStartDate;
   const promotionEnd = product.price?.promotionEndDate;
-  const categories = product.departments?.map((department) => department.name).filter(Boolean);
+  // A non-array departments payload must yield no categories, not a
+  // "departments.map is not a function" crash.
+  const departments = Array.isArray(product.departments) ? product.departments : [];
+  const categories = departments.map((department) => department.name).filter(Boolean);
 
   return {
     product: {
@@ -50,7 +69,7 @@ export function toWoolworthsObservation(product, fulfilment, options = {}) {
       name: productName(product),
       ...(product.brand ? { brand: product.brand } : {}),
       ...(product.barcode ? { gtin: product.barcode } : {}),
-      ...(categories?.length ? { categories } : {}),
+      ...(categories.length ? { categories } : {}),
       ...(product.images ? { images: structuredClone(product.images) } : {}),
     },
     store: {
@@ -199,7 +218,7 @@ export class WoolworthsClient {
     let fulfilment;
 
     do {
-      const result = await this.listDeals({ page, size });
+      const result = assertDealsEnvelope(await this.listDeals({ page, size }), "/api/v1/products");
       const pageFulfilment = result.context?.fulfilment;
       if (!pageFulfilment?.fulfilmentStoreId) {
         throw new Error("Woolworths response did not identify its fulfilment store");
@@ -220,7 +239,9 @@ export class WoolworthsClient {
       // inflated products.totalItems would page empty results forever when
       // maxPages is unbounded (the scripts' "--pages all" default).
       if (items.length === 0) break;
-      totalPages = Math.max(1, Math.ceil((result.products?.totalItems ?? products.size) / size));
+      // Validated by assertDealsEnvelope: totalItems, when present, is
+      // numeric (Number() coercion tolerates numeric strings).
+      totalPages = Math.max(1, Math.ceil((Number(result.products?.totalItems) || products.size) / size));
       page += 1;
     } while (page <= totalPages && page <= maxPages);
 

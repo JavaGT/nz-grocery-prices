@@ -36,9 +36,12 @@ function centsFromProduct(product) {
 }
 
 function bestPromotion(product) {
+  // A malformed promotions payload (non-array) must fall through to the
+  // decal fallback, not crash on .find.
+  const promotions = Array.isArray(product.promotions) ? product.promotions : [];
   return (
-    product.promotions?.find((promotion) => promotion.bestPromotion) ??
-    product.promotions?.[0] ??
+    promotions.find((promotion) => promotion.bestPromotion) ??
+    promotions[0] ??
     (product.decalCode
       ? {
           promoId: `decal:${product.decalCode}`,
@@ -82,7 +85,16 @@ function assertPagedEnvelope(envelope, pagesField, label) {
 
 export function toPriceObservation(product, store, options = {}) {
   const currentCents = centsFromProduct(product);
-  if (currentCents === undefined) return undefined;
+  // No usable price or no string productId → not an observation. The id
+  // guard must hold before .toLowerCase(), which would otherwise crash on
+  // a priced-but-unidentified payload.
+  if (
+    currentCents === undefined ||
+    typeof product.productId !== "string" ||
+    product.productId === ""
+  ) {
+    return undefined;
+  }
 
   const promotion = bestPromotion(product);
   const retailer = options.retailer ?? "paknsave";
@@ -239,7 +251,13 @@ export class FoodstuffsClient {
 
   async listStores(options = {}) {
     const result = await this.#request("/v1/edge/store");
-    const stores = result.stores ?? [];
+    // A malformed envelope (WAF page parsed as JSON, schema change) must
+    // name the field instead of crashing with "stores.filter is not a
+    // function" inside getStore / all-stores loops.
+    if (!Array.isArray(result?.stores)) {
+      throw new Error("Foodstuffs store list: response envelope has no stores array");
+    }
+    const stores = result.stores;
     const query = options.query?.trim().toLocaleLowerCase("en-NZ");
     return stores
       .filter(

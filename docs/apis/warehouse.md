@@ -28,7 +28,7 @@ contract is `src/adapters/warehouse.d.ts`.
   is constructed with no overrides (`scripts/warehouse.js:26`) — there are no
   env/origin overrides for this retailer; the catalogue is scoped nationally
   ("The Warehouse Online"), and the site's North/South selector does not
-  identify store-specific prices (`scripts/warehouse.js:49-52`).
+  identify store-specific prices (`scripts/warehouse.js:51-52`).
 - `node scripts/warehouse-breadth.js` — walks one `cgid` by offset stepping.
   Flags: `--cgid`, `--file`, `--delay-ms` (default 3000), `--budget`
   (default 400), `--min-expected-products` (default 500), `--resume`,
@@ -112,9 +112,11 @@ or a finite price is missing — unpriced tiles are not errors.
 
 - Deals/search client: do/while over page 1..n; pages derived from
   `ceil(totalItems / size)` read per page (`#collect`,
-  `src/adapters/warehouse.js:298-316`), capped by `maxPages`; products dedupe
-  by id.
-- Breadth walker (`crawlCgid`, `src/adapters/warehouse-breadth.js:167-500`):
+  `src/adapters/warehouse.js:298-323`), capped by `maxPages`; products dedupe
+  by id. A page that parses zero tiles ends collection immediately
+  (`:314-318`) — without that stop a lying "of M products" header would page
+  empty results forever under `--pages all` (same guard as Woolworths §6).
+- Breadth walker (`crawlCgid`, `src/adapters/warehouse-breadth.js:167-493`):
   steps `start` by 32 until a 0-tile page, with:
   - resume via a checkpoint manifest keyed `{cgid}:off{start}`
     (`taskId`, `:221-223`);
@@ -149,9 +151,9 @@ or a finite price is missing — unpriced tiles are not errors.
   pages `:377-382`).
 - Rate limiting: `crawlCgid` enforces a 3 000 ms pacing floor unless
   `unsafeFastPacing` is set, because The Warehouse aggressively blocks faster
-  clients (`MIN_DELAY_MS`, `src/adapters/warehouse-breadth.js:35,194-201`);
+  clients (`MIN_DELAY_MS`, `src/adapters/warehouse-breadth.js:35,199-206`);
   the request budget is decremented before every transport call, including
-  failures (`:240-248,276-277`). Script default `--delay-ms` is 3000
+  failures (`:245-247,284-286`). Script default `--delay-ms` is 3000
   (`scripts/warehouse-breadth.js:26`).
 
 ### curl/execFile transport (why and how)
@@ -190,8 +192,8 @@ or a finite price is missing — unpriced tiles are not errors.
   the bounded `summarizeCurlError` message (§7).
 - Challenge/error pages served with HTTP 200: the breadth walker refuses to
   accept them — Cloudflare markers (`NON_GRID_PATTERNS`, `:44-49`) or non-HTML
-  bodies count as failures (`looksLikeGridBody`, `:119-127`), and a 0-tile
-  first page is treated as a suspected block, not a catalogue end (`:365-382`).
+  bodies count as failures (`looksLikeGridBody`, `:119-126`), and a 0-tile
+  first page is treated as a suspected block, not a catalogue end (`:365-393`).
 - 403 is fatal immediately: the IP/client is blocked, so the walk aborts
   (`:312-318`).
 - Malformed tile JSON: only that tile is skipped

@@ -307,9 +307,15 @@ export class WarehouseClient {
 
     do {
       const html = await loadPage(page, size);
-      for (const product of parseWarehouseProducts(html)) {
+      const pageProducts = parseWarehouseProducts(html);
+      for (const product of pageProducts) {
         if (includeMarketplace || !product.marketplaceProduct) products.set(product.id, product);
       }
+      // A page with zero parsed tiles means the grid has nothing further.
+      // Without this guard a lying "of M products" header would page empty
+      // results forever when maxPages is unbounded (the scripts' "--pages
+      // all" default) — the same failure mode the Woolworths guard covers.
+      if (pageProducts.length === 0) break;
       pages = Math.max(1, Math.ceil((totalItems(html) ?? products.size) / size));
       page += 1;
     } while (page <= pages && page <= maxPages);

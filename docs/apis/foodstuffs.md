@@ -10,7 +10,7 @@ calls were made to write it. Two separate backends are in use:
 | Mobile-app API (`api-prod.prod.fsniwaikato.kiwi/prod`) | `src/adapters/foodstuffs-mobile.js` (`MobileFoodstuffsClient`) | `node scripts/foodstuffs-mobile-breadth.js` |
 
 Both adapters share the domain mapper `toPriceObservation`
-(`src/adapters/foodstuffs.js:83`), re-exported by the mobile adapter
+(`src/adapters/foodstuffs.js:86`), re-exported by the mobile adapter
 (`src/adapters/foodstuffs-mobile.js:33`). The public type contract is
 `src/adapters/foodstuffs.d.ts`.
 
@@ -39,7 +39,7 @@ Entry commands:
   collector on the mobile backend. Flags: `--retailer paknsave|newworld`,
   `--store` (repeatable), `--file`, `--delay-ms` (default 5000), `--budget`
   (hard cap on HTTP calls), `--min-expected-products`, `--force-discovery`,
-  `--force-live` (`parseArgs`, `scripts/foodstuffs-mobile-breadth.js:655-727`).
+  `--force-live` (`parseArgs`, `scripts/foodstuffs-mobile-breadth.js:695-767`).
 
 ## 2. Endpoints
 
@@ -47,14 +47,14 @@ Entry commands:
 
 | Purpose | Method | URL | Notable params |
 |---|---|---|---|
-| Anonymous auth (token mint) | POST | `{webOrigin}/api/user/get-current-user` | Body `{fingerprintUser, fingerprintGuest}` (`src/adapters/foodstuffs.js:177-187`) |
-| Store list | GET | `{apiOrigin}/v1/edge/store` | none (`src/adapters/foodstuffs.js:241`) |
-| Product search / deals / full listing | POST | `{apiOrigin}/v1/edge/search/paginated/products` | Body carries an Algolia query (below) (`src/adapters/foodstuffs.js:294`) |
-| Mobile-style specials listing | POST | `{apiOrigin}/mobile/ecomm-products/{PNS\|NW}/{storeId}/specials?page={n}` | Body `{}` (`listMobileDeals`, `src/adapters/foodstuffs.js:336-347`) |
+| Anonymous auth (token mint) | POST | `{webOrigin}/api/user/get-current-user` | Body `{fingerprintUser, fingerprintGuest}` (`src/adapters/foodstuffs.js:188-202`) |
+| Store list | GET | `{apiOrigin}/v1/edge/store` | none (`src/adapters/foodstuffs.js:252-274`) |
+| Product search / deals / full listing | POST | `{apiOrigin}/v1/edge/search/paginated/products` | Body carries an Algolia query (below) (`src/adapters/foodstuffs.js:312`) |
+| Mobile-style specials listing | POST | `{apiOrigin}/mobile/ecomm-products/{PNS\|NW}/{storeId}/specials?page={n}` | Body `{}` (`listMobileDeals`, `src/adapters/foodstuffs.js:354-365`) |
 
-Search body highlights (`src/adapters/foodstuffs.js:297-329`): `algoliaQuery`
+Search body highlights (`src/adapters/foodstuffs.js:315-347`): `algoliaQuery`
 with `filters` conjunction `stores:{storeId}[ AND onPromotion:{storeId}][ AND
-{extraFilters…}]` (`src/adapters/foodstuffs.js:288-293`), `hitsPerPage`
+{extraFilters…}]` (`src/adapters/foodstuffs.js:306-311`), `hitsPerPage`
 (default 50, server max 50), `page` (zero-based), `maxValuesPerFacet: 100`,
 `facets: [brand, category0NI, category1NI, productFacets, tobacco]`,
 `analyticsTags: ["nz-grocery-prices"]`, optional `query`; top-level
@@ -65,10 +65,10 @@ with `filters` conjunction `stores:{storeId}[ AND onPromotion:{storeId}][ AND
 
 | Purpose | Method | URL | Notable params |
 |---|---|---|---|
-| Guest login | POST | `/mobile/user/login/guest` | Body `{banner: "PNS"\|"MNW"}` (`src/adapters/foodstuffs-mobile.js:122-131`) |
-| Physical store list | GET | `/mobile/store/physical?banner={PNS\|MNW}` | POST answers 405; GET is live-verified (`src/adapters/foodstuffs-mobile.js:231-238`) |
-| Category tree | GET | `/mobile/v1/products/category?storeId={id}&banner={paknsave\|newworld}&region={NI\|SI}` | `storeId` URL-encoded (`src/adapters/foodstuffs-mobile.js:244-258`) |
-| Category products (one page) | POST | `/mobile/ecomm-products/{PNS\|MNW}/{storeId}/category?cat0={name}[&cat1=][&cat2=]&sortOrder=Popularity&page={n}` | Body `[]`; names URL-encoded (`src/adapters/foodstuffs-mobile.js:264-289`) |
+| Guest login | POST | `/mobile/user/login/guest` | Body `{banner: "PNS"\|"MNW"}` (`src/adapters/foodstuffs-mobile.js:121-132`) |
+| Physical store list | GET | `/mobile/store/physical?banner={PNS\|MNW}` | POST answers 405; GET is live-verified (`src/adapters/foodstuffs-mobile.js:238-247`) |
+| Category tree | GET | `/mobile/v1/products/category?storeId={id}&banner={paknsave\|newworld}&region={NI\|SI}` | `storeId` URL-encoded (`src/adapters/foodstuffs-mobile.js:249-270`) |
+| Category products (one page) | POST | `/mobile/ecomm-products/{PNS\|MNW}/{storeId}/category?cat0={name}[&cat1=][&cat2=]&sortOrder=Popularity&page={n}` | Body `[]`; names URL-encoded (`src/adapters/foodstuffs-mobile.js:269-297`) |
 
 ## 3. Auth & headers
 
@@ -76,15 +76,18 @@ Web adapter:
 
 - Token = anonymous JWT from the auth endpoint. The request body carries a
   random per-client `fingerprintUser` (UUID with dashes stripped,
-  `src/adapters/foodstuffs.js:157,184`); no credentials or secrets involved.
+  `src/adapters/foodstuffs.js:177,184`); no credentials or secrets involved.
 - Cached in `#accessToken` until `expires_time` minus a 60 s margin
-  (`src/adapters/foodstuffs.js:173-176`); `expires_time` must parse to a
-  finite date or a clear error is thrown (`src/adapters/foodstuffs.js:202-211`).
+  (`src/adapters/foodstuffs.js:184-187`); `expires_time` must parse to a
+  finite date or a clear error is thrown (`src/adapters/foodstuffs.js:213-222`).
 - Data requests send `authorization: Bearer {token}`, `accept:
   application/json`, `origin`, `referer`, `user-agent`
-  (`src/adapters/foodstuffs.js:222-229`). Default UA is the honest
+  (`src/adapters/foodstuffs.js:235-242`). Default UA is the honest
   `Mozilla/5.0 (compatible; nz-grocery-prices/0.1; …)`
   (`src/adapters/foodstuffs.js:4-5`).
+- The web store-list envelope must carry a `stores` array; a malformed
+  payload (e.g. a WAF page parsed as JSON) throws a named error
+  (`src/adapters/foodstuffs.js:252-259`) instead of crashing the filter.
 
 Mobile adapter:
 
@@ -92,11 +95,15 @@ Mobile adapter:
   `{banner}`. Cached until `expires_in` seconds minus a 60 s margin
   (`TOKEN_EXPIRY_MARGIN_MS`, `src/adapters/foodstuffs-mobile.js:21,111`);
   `expires_in` must be a positive finite number
-  (`src/adapters/foodstuffs-mobile.js:151-160`). Concurrent first calls share
+  (`src/adapters/foodstuffs-mobile.js:153-163`). Concurrent first calls share
   one in-flight auth promise (`src/adapters/foodstuffs-mobile.js:117-166`).
+- Error responses (guest auth and data requests) have their unread bodies
+  cancelled before the error throws or the retry backoff sleeps
+  (`src/adapters/foodstuffs-mobile.js:136-139,210-211,218`), matching the
+  shared `fetchWithRetry` contract.
 - Authenticated requests send `accept: application/json`,
   `authorization: Bearer {token}`, `user-agent` (default
-  `PAKnSAVEApp/4.32.0 (App Version)`, `src/adapters/foodstuffs-mobile.js:20,190-197`).
+  `PAKnSAVEApp/4.32.0 (App Version)`, `src/adapters/foodstuffs-mobile.js:20,195-200`).
 - Neither adapter logs tokens or puts them in error messages; errors quote
   status lines and JSON field names only.
 
@@ -110,10 +117,10 @@ Mobile adapter:
 - `region`: `"NI"` (default) or `"SI"`; web builds `sortOrder` prefix, mobile
   passes `region=` on the tree call.
 - `onPromotion` (web): adds `onPromotion:{storeId}` to the filter conjunction
-  (`src/adapters/foodstuffs.js:289`).
+  (`src/adapters/foodstuffs.js:308`).
 - `extraFilters` (web): raw Algolia filter strings (e.g.
   `category0NI:"Chilled & Dairy"`) appended verbatim with AND; non-string or
-  blank entries throw `TypeError` (`src/adapters/foodstuffs.js:56-71`).
+  blank entries throw `TypeError` (`src/adapters/foodstuffs.js:59-70`).
 - `query` (web): free-text Algolia `query`.
 - Mobile `categoryPage`: `cat0` required, `cat1`/`cat2` optional category
   names — the API cannot express deeper levels.
@@ -138,21 +145,21 @@ Mobile specials envelope (`/mobile/ecomm-products/.../specials`):
 
 Mobile store list: bare array, `{stores:[...]}`, or `{items:[...]}` — all
 normalized to an array (`normalizeStoreList`,
-`src/adapters/foodstuffs-mobile.js:39-44`). Web store list: `{stores:[...]}`,
-filtered server-side response to the client's banner
-(`src/adapters/foodstuffs.js:241-256`).
+`src/adapters/foodstuffs-mobile.js:39-44`). Web store list: `{stores:[...]}`
+(a non-array envelope throws, §3), filtered server-side response to the
+client's banner (`src/adapters/foodstuffs.js:252-274`).
 
 Product objects consumed by `toPriceObservation`
-(`src/adapters/foodstuffs.js:83-140`):
+(`src/adapters/foodstuffs.js:86-149`):
 
 | Field | Type | Notes |
 |---|---|---|
-| `productId` | string | e.g. `5004821-EA-000`; identity for dedupe |
+| `productId` | string | e.g. `5004821-EA-000`; identity for dedupe; products without a string id are skipped, not crashed on |
 | `name`, `displayName`, `units`, `brand` | string | display name is `[name, displayName ?? units].join(" ")` |
 | `price` / `singlePrice.price` / `multiPrice.price` | integer (cents) | first integer wins (`centsFromProduct`); otherwise the product is skipped |
 | `singlePrice.comparativePrice` | object | unit-price comparison, cloned into `price.comparative` |
 | `unitPrice` | string | fallback comparative `{display}` |
-| `promotions[]` | array | `promoId`, `rewardType`, `threshold?`, `limit?`, `cardDependencyFlag`, `decalImageUrl?`; `bestPromotion: true` preferred, else first |
+| `promotions[]` | array | `promoId`, `rewardType`, `threshold?`, `limit?`, `cardDependencyFlag`, `decalImageUrl?`; `bestPromotion: true` preferred, else first; a non-array `promotions` falls through to the decal fallback (`src/adapters/foodstuffs.js:38-41`) |
 | `decalCode`, `decalImageUrl` | string | fallback promotion `decal:{code}` when no promotions array |
 | `categoryTrees[0]` / `categories` | object values / array | category names |
 | `productImageUrls` | object | cloned into `product.images` |
@@ -160,7 +167,7 @@ Product objects consumed by `toPriceObservation`
 Store objects: `id`, `name`, `address?`, `region?`, `banner?` (web filters by
 `banner === PNS|MNW`), `onlineActive?` (mobile breadth skips
 `onlineActive: false` stores — their tree 500s;
-`scripts/foodstuffs-mobile-breadth.js:798`).
+`scripts/foodstuffs-mobile-breadth.js:838`).
 
 Mobile category tree: array of nodes `{name, code, children[]}` of arbitrary
 depth.
@@ -172,7 +179,7 @@ Auth payloads: web `{access_token: string, expires_time: string}`; mobile
 
 - Web `collectProducts`/`collectDeals`: do/while loop, `page` 0..n, stops at
   `totalPages`/`numberOfPages` or `maxPages`
-  (`src/adapters/foodstuffs.js:357-404`). The search API clamps `totalHits`
+  (`src/adapters/foodstuffs.js:366-422`). The search API clamps `totalHits`
   at 1,000 / `totalPages` at 20, so blind web pagination reaches only ~1 k of
   ~9-14 k products per store (measured,
   `docs/research/foodstuffs-full-catalogue.md`) — that is why breadth moved
@@ -180,12 +187,12 @@ Auth payloads: web `{access_token: string, expires_time: string}`; mobile
 - Mobile breadth (`scripts/foodstuffs-mobile-breadth.js`): fetch the category
   tree once per store, walk every node at depth 0..2 (`cat0/cat1/cat2`);
   a page with `totalHits >= 1000` (`HIT_CLAMP`,
-  `scripts/foodstuffs-mobile-breadth.js:70,185-187`) drills into tree
+  `scripts/foodstuffs-mobile-breadth.js:77,192-194`) drills into tree
   children; saturated nodes with no drillable children are recorded as
   `incompleteCoverage` instead of silently truncated
-  (`scripts/foodstuffs-mobile-breadth.js:441-484`). Non-saturated nodes
+  (`scripts/foodstuffs-mobile-breadth.js:475-489`). Non-saturated nodes
   paginate fully via `continuationPages`
-  (`scripts/foodstuffs-mobile-breadth.js:193-203`). Products dedupe by
+  (`scripts/foodstuffs-mobile-breadth.js:200-210`). Products dedupe by
   `productId` across overlapping categories. Continuation pages checkpoint in
   `<file>.breadth-manifest.json` for resume.
 - `--all-stores` (web CLI): enumerates stores from `/v1/edge/store` and
@@ -193,53 +200,56 @@ Auth payloads: web `{access_token: string, expires_time: string}`; mobile
   between stores (`scripts/paknsave.js:105-149`). Mobile breadth resolves
   stores from `/mobile/store/physical`, defaulting to the alphabetically
   first online-active store when no `--store` is given
-  (`scripts/foodstuffs-mobile-breadth.js:802-809`).
+  (`scripts/foodstuffs-mobile-breadth.js:845-849`).
 
 ## 7. Timeouts / retries / rate limiting
 
 - Web adapter: every HTTP call (auth included) goes through
   `fetchWithRetry` from `src/adapters/fetch-with-retry.js` with
   `timeout` (default 15 000 ms, per attempt) and `signal` passed through
-  (`src/adapters/foodstuffs.js:177-198,216-236`). Retry policy lives in that
+  (`src/adapters/foodstuffs.js:188-204,229-252`). Retry policy lives in that
   shared module: GET only, retries on 429/502/503/504 and retryable network
   errors with exponential backoff + jitter and `Retry-After` support; POSTs
   (search/specials) are single-attempt.
 - Mobile adapter: bare injected `fetch` with `AbortSignal.timeout`
   (default 20 000 ms per attempt,
-  `src/adapters/foodstuffs-mobile.js:125,191`). Retries live in the client:
+  `src/adapters/foodstuffs-mobile.js:125,193`). Retries live in the client:
   up to 2 extra attempts (`RETRYABLE_ATTEMPTS`) on 5xx or any thrown network
   error, linear backoff `retryBackoffMs * attempt` (default 3 000 ms,
-  `src/adapters/foodstuffs-mobile.js:23-25,184-229`).
+  `src/adapters/foodstuffs-mobile.js:23-25,187-244`).
 - Politeness: mobile client enforces a minimum gap between completed requests
   (`delayMs`, default 0 in the class, 5 000 ms in the breadth script,
   `src/adapters/foodstuffs-mobile.js:85-91`). Web `--all-stores` spaces
   stores by `--delay-ms` (default 1000). The breadth script adds walker-level
-  retry rounds (3 rounds, 10 s gap) for bootstrap calls (store list, tree)
-  (`scripts/foodstuffs-mobile-breadth.js:66-67`).
+  retry rounds (5 rounds, 30 s gap) for bootstrap calls (store list, tree)
+  (`scripts/foodstuffs-mobile-breadth.js:73-74`).
 
 ## 8. Failure modes
 
 - Non-2xx: web throws `Foodstuffs {operation} failed: {status} {statusText}`
   (`assertOk`, `src/adapters/foodstuffs.js:24-29`); mobile throws
   `Mobile request {path} failed: …` / `Mobile guest auth failed: …` after
-  retryable attempts are exhausted.
+  retryable attempts are exhausted, with the unread error body cancelled
+  first (§3).
 - 200-with-non-JSON (WAF challenge): both adapters parse via
   `parseJsonResponse` from `src/adapters/fetch-with-retry.js`, which raises a
   contextual error (operation, status, content-type, body prefix, 20 MiB body
   cap) instead of a bare `Unexpected token`.
 - Malformed auth payload: missing token, non-object payload, or (web)
   unparseable `expires_time` each throw a clear error naming the operation
-  (`src/adapters/foodstuffs.js:196-211`,
-  `src/adapters/foodstuffs-mobile.js:142-160`); NaN `expires_time` would
+  (`src/adapters/foodstuffs.js:205-222`,
+  `src/adapters/foodstuffs-mobile.js:143-163`); NaN `expires_time` would
   otherwise silently disable the token cache.
 - Malformed listing envelope: the collect loops validate `products` is an
   array and `totalPages`/`numberOfPages` is numeric, throwing a clear error
   instead of `undefined is not iterable` or a silent one-page truncation
-  (`assertPagedEnvelope`, `src/adapters/foodstuffs.js:73-81`).
-- Unpriced products: `toPriceObservation` returns `undefined` and the collect
+  (`assertPagedEnvelope`, `src/adapters/foodstuffs.js:76-84`); the web store
+  list likewise requires a `stores` array (`src/adapters/foodstuffs.js:257-259`).
+- Unpriced products (or products without a string `productId`):
+  `toPriceObservation` returns `undefined` and the collect
   loops filter them out — a missing price is not an error.
 - Unknown store: `getStore` throws `Unknown {retailer} store: {id}`
-  (`src/adapters/foodstuffs.js:262`); the CLI distinguishes no-match vs
+  (`src/adapters/foodstuffs.js:279`); the CLI distinguishes no-match vs
   ambiguous names (`scripts/paknsave.js:50-55`).
 - Breadth-specific: circuit breaker opens after 5 consecutive failed requests
   and aborts the run (`BREAKER_THRESHOLD`,

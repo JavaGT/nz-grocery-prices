@@ -76,6 +76,30 @@ describe("toPriceObservation (foodstuffs)", () => {
     assert.equal(result, undefined);
   });
 
+  it("returns undefined for a priced product with a missing productId instead of crashing", () => {
+    const result = toPriceObservation({ name: "Mystery Milk", price: 860 }, store);
+    assert.equal(result, undefined);
+  });
+
+  it("returns undefined for a non-string productId instead of crashing on toLowerCase", () => {
+    const result = toPriceObservation(
+      { productId: 5004821, name: "Mystery Milk", price: 860 },
+      store,
+    );
+    assert.equal(result, undefined);
+  });
+
+  it("falls back to the decal promotion when promotions is not an array", () => {
+    const result = toPriceObservation({
+      productId: "5004821-EA-000",
+      name: "Anchor Blue Milk",
+      price: 860,
+      promotions: { promoId: "bogus" }, // malformed: pre-hardening this crashed .find
+      decalCode: "DECAL9",
+    }, store);
+    assert.equal(result.promotion.id, "decal:DECAL9");
+  });
+
   it("picks best promotion", () => {
     const product = {
       productId: "5004821-EA-000",
@@ -288,6 +312,18 @@ describe("FoodstuffsClient hardening (malformed auth/payloads)", () => {
     await assert.rejects(
       () => client.collectProducts({ storeId: "royaloak", store }),
       /product search \(page 0\): response envelope has no numeric totalPages/,
+    );
+  });
+
+  it("names the malformed store-list envelope instead of crashing on .filter", async () => {
+    const fetch = stubFetchWithAuthPayload(
+      { access_token: "t", expires_time: new Date(Date.now() + 3_600_000).toISOString() },
+      { stores: "royaloak" }, // malformed: non-array stores
+    );
+    const client = new FoodstuffsClient({ fetch });
+    await assert.rejects(
+      () => client.listStores(),
+      /store list: response envelope has no stores array/,
     );
   });
 

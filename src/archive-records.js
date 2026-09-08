@@ -1,6 +1,35 @@
 import { createHash } from "node:crypto";
 
 /**
+ * Sorted-key-order memo for stable(): archive payloads come from a handful
+ * of fixed producer shapes, so the same key sequences recur on nearly every
+ * object instance. The locale-pinned sort (ICU collation — the expensive
+ * part) then runs once per distinct sequence instead of once per instance.
+ * The signature is `JSON.stringify(keys)`, which is injective, so even a
+ * key containing "\u0000"-like content can never alias another sequence.
+ *
+ * Equivalence with filter-then-sort (the previous shape): keys of one object
+ * are unique; a stable sort of the full sequence assigns tied keys ranks in
+ * the sequence's own order, and filtering preserves relative order — so
+ * walking the full sorted order and skipping undefined values yields exactly
+ * the previous filtered-then-sorted order, including localeCompare ties.
+ * Bounded so adversarial dynamic-key payloads cannot grow it without limit;
+ * past the limit sorting falls back to per-call (still correct, just slow).
+ */
+const KEY_ORDER_CACHE_LIMIT = 8192;
+const keyOrderCache = new Map();
+
+function sortedKeyOrder(keys) {
+  const signature = JSON.stringify(keys);
+  let sorted = keyOrderCache.get(signature);
+  if (sorted === undefined) {
+    sorted = [...keys].sort((left, right) => left.localeCompare(right, "en"));
+    if (keyOrderCache.size < KEY_ORDER_CACHE_LIMIT) keyOrderCache.set(signature, sorted);
+  }
+  return sorted;
+}
+
+/**
  * Canonical form of `value` for hashing: arrays map in order, plain objects
  * get keys sorted lexicographically with `undefined`-valued keys omitted,
  * everything else passes through untouched.
@@ -15,14 +44,94 @@ import { createHash } from "node:crypto";
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, child]) => child !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right, "en"))
-        .map(([key, child]) => [key, stable(child)]),
-    );
+    const entries = [];
+    for (const key of sortedKeyOrder(Object.keys(value))) {
+      const child = value[key];
+      if (child !== undefined) entries.push([key, stable(child)]);
+    }
+    return Object.fromEntries(entries);
   }
   return value;
+}
+
+/**
+ * Quote `string` like JSON.stringify would. Fast path: strings with no
+ * escapable characters (controls, quote, backslash) need no ICU/escape
+ * machinery — wrap them in quotes directly.
+ */
+const NEEDS_ESCAPE = /[\u0000-\u001f"\\]/;
+
+function quoteJsonString(value) {
+  return NEEDS_ESCAPE.test(value) ? JSON.stringify(value) : `"${value}"`;
+}
+
+/**
+ * True for JS "array index" keys: canonical numeric strings 0..2^32-2.
+ * Objects built via Object.fromEntries order these numerically BEFORE all
+ * string keys, so the canonical JSON they stringify to does too — the
+ * serializer below must reproduce that, not a pure locale order.
+ */
+function isArrayIndexKey(key) {
+  if (!/^(0|[1-9][0-9]*)$/.test(key)) return false;
+  return Number(key) < 4294967295; // indices run 0..2^32-2 inclusive
+}
+
+/**
+ * Serializes `value` to EXACTLY the bytes of JSON.stringify(stable(value))
+ * without building the intermediate canonical object:
+ * objects emit integer-like keys in ascending numeric order first (the
+ * order Object.fromEntries produces — see isArrayIndexKey), then the
+ * memoized locale-pinned string-key order, skipping undefined values;
+ * arrays keep order with undefined elements as `null`; finite numbers
+ * serialize as ToString (identical to JSON's number form, with
+ * NaN/Infinity as `null`); strings fast-path quoting; anything exotic
+ * (bigint/symbol/function/undefined-at-top-level) is delegated to
+ * JSON.stringify so errors and return values match it exactly.
+ */
+function canonicalJson(value) {
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "string":
+      return quoteJsonString(value);
+    case "number":
+      return Number.isFinite(value) ? String(value) : "null";
+    case "boolean":
+      return value ? "true" : "false";
+    case "object": {
+      if (Array.isArray(value)) {
+        let out = "[";
+        for (let index = 0; index < value.length; index += 1) {
+          if (index > 0) out += ",";
+          const item = value[index];
+          out += item === undefined ? "null" : canonicalJson(item);
+        }
+        return `${out}]`;
+      }
+      const indexKeys = [];
+      const stringKeys = [];
+      for (const key of Object.keys(value)) {
+        if (isArrayIndexKey(key)) indexKeys.push(key);
+        else stringKeys.push(key);
+      }
+      let out = "{";
+      let first = true;
+      const emit = (key) => {
+        const child = value[key];
+        if (child === undefined) return;
+        if (!first) out += ",";
+        first = false;
+        out += `${quoteJsonString(key)}:${canonicalJson(child)}`;
+      };
+      for (const key of indexKeys) emit(key); // Object.keys order = numeric ascending
+      for (const key of sortedKeyOrder(stringKeys)) emit(key);
+      return `${out}}`;
+    }
+    default:
+      // undefined → JSON.stringify returns undefined (hash.update then
+      // throws, as before); bigint/symbol/function → the identical
+      // "not serializable" TypeError.
+      return JSON.stringify(value);
+  }
 }
 
 /**
@@ -31,7 +140,7 @@ function stable(value) {
  * regardless of key insertion order.
  */
 function fingerprint(value) {
-  return createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
 /** Content hash of a product revision payload (archive dedup identity). */

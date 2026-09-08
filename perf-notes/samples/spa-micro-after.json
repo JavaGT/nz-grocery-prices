@@ -1,0 +1,20 @@
+{
+  "sql: count LIKE scan (search)": 0.5168,
+  "sql: page LIKE scan + order (search)": 0.6606,
+  "sql: combined window-count page scan": 0.7675,
+  "sql: same count with cached statement": 0.5127,
+  "sql: prepare() alone (no execute)": 0.0021,
+  "sql: _meta freshness read": 0.0049,
+  "sql: session join lookup": 0.0027,
+  "sql: session lookup, cached statement": 0.0024,
+  "auth: getSessionUser full (hash+lookup+expiry)": 0.0025,
+  "crypto: sha256 token hash": 0.0006,
+  "url: new URL per request": 0.0004,
+  "aenc: parseAcceptEncoding": 0.0004,
+  "json: Object.fromEntries meta rows": 0.0003,
+  "json: stringify 42-product payload": 0.0053,
+  "routes: current double-pass (allowed set + match)": 0.0005,
+  "routes: single-pass match": 0.0002,
+  "tiers: loadUserTiers reads (watch+prefs+IN query)": 0.0212,
+  "tiers: same reads, cached statements": 0.0115
+}

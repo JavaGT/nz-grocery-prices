@@ -19,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const argOf = (name, def) => {
   const i = args.indexOf(name);
-  return i >= 0 ? args[++i] : def;
+  return i >= 0 ? args[i + 1] : def;
 };
 const JSONL = resolve(argOf('--jsonl', '/Users/server/Development/nz-grocery-prices/data/prices.jsonl'));
 const OUT = resolve(argOf('--out', '/tmp/perf-spa'));

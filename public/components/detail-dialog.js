@@ -2,8 +2,14 @@ import { el, clear } from '../utils/dom.js';
 import { formatCents, formatDate, formatShortDate, formatDropPercent, retailerLabel, retailerColor as rc } from '../utils/format.js';
 
 export function openDetailDialog(offer, api) {
+  // Retire any dialog still in the DOM. close() (not bare remove()) so the
+  // close handler below tears down that dialog's document keydown listener —
+  // remove() alone would fire no close event and leak it.
   const existing = document.getElementById('detail-dialog');
-  if (existing) existing.remove();
+  if (existing) {
+    if (existing.open) existing.close();
+    existing.remove();
+  }
 
   const dialog = el('dialog', { id: 'detail-dialog', className: 'detail-dialog' });
   const overlay = el('div', { className: 'dialog-overlay', onClick: () => dialog.close() });
@@ -106,6 +112,16 @@ async function loadHistory(productId, api) {
   outer.showModal();
   historyDialog = outer;
 
+  // Remove the closed dialog from the DOM; a <dialog> only hides on close,
+  // so without this every history view left its whole subtree (sparkline SVG
+  // + up-to-200-row table) attached to <body> for the rest of the session.
+  // The guard keeps an older dialog's late close event from dropping the
+  // dialog that replaced it.
+  outer.addEventListener('close', () => {
+    outer.remove();
+    if (historyDialog === outer) historyDialog = null;
+  });
+
   try {
     const data = await api.productHistory(productId);
     clear(panel);
@@ -201,8 +217,4 @@ function formatRelativeTime(observedAt) {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   return `${d}d ago`;
-}
-
-export function closeHistoryDialog() {
-  if (historyDialog) { historyDialog.close(); historyDialog = null; }
 }

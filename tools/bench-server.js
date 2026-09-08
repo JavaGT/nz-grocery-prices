@@ -15,7 +15,7 @@
 // uncompressed wire.
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -142,12 +142,23 @@ try {
   const bootMs = await waitForServer(120000);
   await new Promise(r => setTimeout(r, 300)); // let startup settle
 
+  // In dist mode (public-dist/ present) the server serves content-hashed
+  // URLs, so the static benches must request the hashed names the browser
+  // actually loads (resolved via the build manifest).
+  const staticPaths = { '/': '/', '/style.css': '/style.css', '/app.js': '/app.js' };
+  try {
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'public-dist', 'manifest.json'), 'utf8'));
+    if (manifest['style.css']) staticPaths['/style.css'] = '/' + manifest['style.css'];
+    if (manifest['app.js']) staticPaths['/app.js'] = '/' + manifest['app.js'];
+  } catch {}
+
   // discover a real product id + query term from the first products page
   const first = await (await fetch(`${BASE}/api/products?limit=1`)).json();
   const productId = first?.products?.[0]?.productId ?? first?.products?.[0]?.id ?? '';
 
   const results = {
     acceptEncoding: ACCEPT || 'identity',
+    staticMode: existsSync(join(ROOT, 'public-dist')) ? 'public-dist (immutable)' : 'public (dev)',
     bootMs: +bootMs.toFixed(1),
     endpoints: {
       'health': await bench('/api/health'),
@@ -156,9 +167,9 @@ try {
       'suggestions query=mil': await bench('/api/search/suggestions?query=mil'),
       'stores': await bench('/api/stores'),
       ...(productId ? { 'product history': await bench(`/api/products/${encodeURIComponent(productId)}/history`) } : {}),
-      'SPA index.html': await bench('/'),
-      'style.css': await bench('/style.css'),
-      'app.js': await bench('/app.js'),
+      'SPA index.html': await bench(staticPaths['/']),
+      'style.css': await bench(staticPaths['/style.css']),
+      'app.js': await bench(staticPaths['/app.js']),
     },
     bursts: {
       'deals 8x5': await burst('/api/deals'),

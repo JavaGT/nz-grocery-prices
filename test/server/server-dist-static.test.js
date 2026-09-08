@@ -1,12 +1,32 @@
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { brotliCompressSync, constants } from 'node:zlib';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { request } from 'node:http';
 import { createStaticFallback } from '../../src/app/server.js';
 import { Server } from '../../src/server/server.js';
 import { AppDatabase } from '../../src/sqlite/app-db.js';
 import { Auth } from '../../src/app/auth.js';
+
+// Raw wire request: unlike fetch, no transparent body decompression, so
+// encoded (compressed) responses can be asserted byte-for-byte.
+function rawGet(port, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path, headers }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 // Dist mode: when publicDir holds CONTENT-HASHED assets (tools/build-assets.js
 // output), every non-HTML file is served cache-control: immutable and only
@@ -34,7 +54,16 @@ describe('static serving in dist mode (content-hashed assets)', () => {
   writeFileSync(join(dir, 'index.html'), '<html><body>dist SPA</body></html>');
   writeFileSync(join(dir, 'style.0c07360bb2.css'), 'body { color: red; }');
   writeFileSync(join(dir, 'app.ccc68ec70d.js'), 'console.log("dist");');
-  writeFileSync(join(dir, 'unhashed-legacy.css'), 'body {}');
+  writeFileSync(join(dir, 'unhashed-legacy.css'), 'body { color: red; }\n'.repeat(60));
+
+  // A build-shaped asset: > compression threshold, shipping a precomputed
+  // .br sidecar exactly like tools/build-assets.js emits.
+  const bigAsset = '// padded so the asset clears MIN_COMPRESS_BYTES\n' + 'export const n = 1;\n'.repeat(30);
+  const bigSidecar = brotliCompressSync(Buffer.from(bigAsset), {
+    params: { [constants.BROTLI_PARAM_QUALITY]: 9 },
+  });
+  writeFileSync(join(dir, 'big.1234567890.js'), bigAsset);
+  writeFileSync(join(dir, 'big.1234567890.js.br'), bigSidecar);
 
   const harness = createDistStaticServer(dir);
   let port;
@@ -73,6 +102,22 @@ describe('static serving in dist mode (content-hashed assets)', () => {
     });
     assert.equal(second.status, 304);
     assert.equal(second.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  });
+
+  it('serves the precomputed .br sidecar when one ships with the asset', async () => {
+    // The sidecar uses brotli quality 9, not the lazy path's default q11:
+    // byte-equality proves the shipped bytes are served as-is. node:http is
+    // used directly because fetch transparently decompresses br bodies.
+    const res = await rawGet(port, '/big.1234567890.js', { 'accept-encoding': 'br' });
+    assert.equal(res.headers['content-encoding'], 'br');
+    assert.deepEqual(res.body, bigSidecar, 'served bytes are the shipped sidecar');
+  });
+
+  it('falls back to lazy compression when no sidecar exists', async () => {
+    const res = await rawGet(port, '/unhashed-legacy.css', { 'accept-encoding': 'br' });
+    assert.equal(res.headers['content-encoding'], 'br');
+    assert.ok(res.body.byteLength > 0 && res.body.byteLength < 7 * 60,
+      'lazy-compressed body is smaller than the raw asset');
   });
 
   after(async () => {

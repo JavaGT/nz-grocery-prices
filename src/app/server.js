@@ -69,6 +69,18 @@ function createStaticFallback(publicDir, logger, { immutableAssets = false } = {
       compressible: COMPRESSIBLE_EXTS.has(ext),
       encodings: new Map(),
     };
+    // Dist builds (tools/build-assets.js) ship precompressed .br/.gz siblings
+    // computed at max quality; prefer them so the first request for an asset
+    // pays no compression latency. Absent sidecars (dev public/, or files
+    // placed in dist by hand) fall back to lazy compression below.
+    if (immutableAssets && entry.compressible && entry.size >= MIN_COMPRESS_BYTES) {
+      for (const [encoding, suffix] of [['br', '.br'], ['gzip', '.gz']]) {
+        try {
+          const sidecar = readFileSync(filePath + suffix);
+          if (sidecar.length > 0) entry.encodings.set(encoding, sidecar);
+        } catch {}
+      }
+    }
     fileCache.set(filePath, entry);
     return entry;
   }

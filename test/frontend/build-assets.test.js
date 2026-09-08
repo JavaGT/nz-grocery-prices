@@ -7,6 +7,7 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -80,5 +81,18 @@ describe('build-assets (content-hashed dist)', () => {
     run(src, out);
     assert.equal(readdirSync(out).includes('app.deadbeef00.js'), false,
       'stale hashed file must be cleaned');
+  });
+
+  it('emits precompressed .br/.gz siblings that decode to the original', () => {
+    run(src, out);
+    const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
+    for (const rel of ['style.css', 'app.js', 'index.html']) {
+      const hashed = manifest[rel];
+      const raw = readFileSync(join(out, hashed));
+      const br = readFileSync(join(out, hashed + '.br'));
+      const gz = readFileSync(join(out, hashed + '.gz'));
+      assert.deepEqual(brotliDecompressSync(br), raw, `${rel}.br decodes to ${rel}`);
+      assert.deepEqual(gunzipSync(gz), raw, `${rel}.gz decodes to ${rel}`);
+    }
   });
 });

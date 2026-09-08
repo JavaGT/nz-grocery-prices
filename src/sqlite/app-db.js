@@ -3,6 +3,9 @@ import { applyAppMigrations, ensureMigrationTable } from './schema.js';
 
 export class AppDatabase {
   #matchPairStatements = new Map();
+  // Hottest per-request read (every authenticated request resolves its
+  // session); node:sqlite re-prepares per call otherwise.
+  #sessionStatement = null;
 
   constructor(dbPath) {
     this.db = new DatabaseSync(dbPath);
@@ -62,12 +65,13 @@ export class AppDatabase {
   }
 
   getSession(tokenHash) {
-    return this.db.prepare(`
+    this.#sessionStatement ??= this.db.prepare(`
       SELECT s.id, s.user_id, s.expires_at, s.created_at, u.username
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.id = ?
-    `).get(tokenHash) || null;
+    `);
+    return this.#sessionStatement.get(tokenHash) || null;
   }
 
   createSession(userId, tokenHash, expiresAt) {

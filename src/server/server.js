@@ -95,6 +95,10 @@ export class Server {
   // token -> { createdAt, tail, gzipTail, plainSize } for CachedResponse
   // bodies (see #respondCached).
   #bodyCache = new Map();
+  // The _meta read runs at most once per JSON response; one prepared
+  // statement for the process instead of a re-prepare per request (the
+  // projection connection is read-only and its schema never changes).
+  #metaStatement = null;
 
   constructor({ projDb, appDb, auth, logger = console, clock = Date.now } = {}) {
     this.#projDb = projDb;
@@ -150,7 +154,8 @@ export class Server {
   #projMeta() {
     if (!this.#projDb) return { exists: false };
     try {
-      const rows = this.#projDb.prepare('SELECT key, value FROM _meta').all();
+      this.#metaStatement ??= this.#projDb.prepare('SELECT key, value FROM _meta');
+      const rows = this.#metaStatement.all();
       const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
       return {
         exists: true,

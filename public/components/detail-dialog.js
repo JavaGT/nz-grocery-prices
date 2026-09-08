@@ -69,15 +69,22 @@ export function openDetailDialog(offer, api) {
   document.body.appendChild(dialog);
 
   dialog.showModal();
-  dialog.addEventListener('close', () => dialog.remove());
-  dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
-
-  document.addEventListener('keydown', function handler(e) {
+  // Escape-to-close belt-and-braces on top of <dialog>'s native Esc handling.
+  // The listener MUST be torn down when the dialog closes by any path —
+  // previously it removed itself only when it fired, so closing via the
+  // close button or the overlay leaked one document keydown listener (and
+  // the removed dialog's DOM) per open.
+  const onKeydown = e => {
     if (e.key === 'Escape' && document.getElementById('detail-dialog')) {
       dialog.close();
-      document.removeEventListener('keydown', handler);
     }
+  };
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    document.removeEventListener('keydown', onKeydown);
   });
+  document.addEventListener('keydown', onKeydown);
+  dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
 }
 
 let historyDialog = null;

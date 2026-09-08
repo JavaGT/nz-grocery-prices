@@ -170,17 +170,42 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
       ? `ORDER BY CASE WHEN name = ? THEN 0 WHEN name LIKE ? THEN 1 ELSE 2 END, updated_at DESC`
       : 'ORDER BY updated_at DESC';
 
-    const countRow = db().prepare(`SELECT COUNT(*) AS c FROM products ${whereClause}`).get(...params);
-    const total = countRow ? countRow.c : 0;
-
     const orderParams = q ? [q, `%${q}%`] : [];
     // Explicit columns, not SELECT *: formatProduct never reads latest_hash,
     // and at archive scale dragging it across every listing row is pure waste.
-    const rows = db().prepare(`
-      SELECT id, retailer_id, name, brand, category, image_url, size,
-             source_id, gtin, first_seen_at, updated_at
-      FROM products ${whereClause} ${orderClause} LIMIT ? OFFSET ?
-    `).all(...params, ...orderParams, limit, offset);
+    const columns = `
+      id, retailer_id, name, brand, category, image_url, size,
+      source_id, gtin, first_seen_at, updated_at
+    `;
+
+    let total;
+    let rows;
+    if (whereClause) {
+      // Filtered search runs the LIKE scan ONCE: the page query carries the
+      // total as a COUNT(*) OVER () window value instead of paying a second
+      // full COUNT scan (measured ~0.4 ms of the ~1.2 ms SQL per search at
+      // archive scale; identical rows, order, and total — see
+      // perf-notes/REPORT-spa.md).
+      rows = db().prepare(`
+        SELECT ${columns}, COUNT(*) OVER () AS _total
+        FROM products ${whereClause} ${orderClause} LIMIT ? OFFSET ?
+      `).all(...params, ...orderParams, limit, offset);
+      // A page past the end returns no rows and no window value, so that
+      // case falls back to the standalone count to keep `total` exact.
+      total = rows.length > 0
+        ? rows[0]._total
+        : (db().prepare(`SELECT COUNT(*) AS c FROM products ${whereClause}`).get(...params)?.c ?? 0);
+    } else {
+      // Unfiltered listing keeps the separate COUNT(*): the window version
+      // would force SQLite to materialize every row before LIMIT, while a
+      // plain COUNT(*) rides the covering name index.
+      const countRow = db().prepare('SELECT COUNT(*) AS c FROM products').get();
+      total = countRow ? countRow.c : 0;
+      rows = db().prepare(`
+        SELECT ${columns}
+        FROM products ${orderClause} LIMIT ? OFFSET ?
+      `).all(...params, ...orderParams, limit, offset);
+    }
 
     return { products: rows.map(formatProduct), total, limit, offset };
   }

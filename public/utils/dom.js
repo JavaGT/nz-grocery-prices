@@ -24,24 +24,9 @@ export function el(tag, attrs = {}, ...children) {
 export function qs(sel, ctx = document) { return ctx.querySelector(sel); }
 export function qsa(sel, ctx = document) { return Array.from(ctx.querySelectorAll(sel)); }
 
-export function delegate(parent, selector, event, handler) {
-  parent.addEventListener(event, e => {
-    const target = e.target.closest(selector);
-    if (target && parent.contains(target)) handler(e, target);
-  });
-}
-
 export function show(el) { if (el) el.classList.remove('hide'); }
 export function hide(el) { if (el) el.classList.add('hide'); }
 
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
-}
-
-export function frag(...children) {
-  const f = document.createDocumentFragment();
-  for (const child of children) {
-    if (child instanceof Node) f.appendChild(child);
-  }
-  return f;
 }

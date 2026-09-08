@@ -1,5 +1,5 @@
 import { el, clear } from '../utils/dom.js';
-import { formatCents, formatRelativeTime, retailerLabel } from '../utils/format.js';
+import { formatCents } from '../utils/format.js';
 import { createProductCard, createSkeletonCard, createEmptyState, createErrorState } from '../components/card.js';
 import { openDetailDialog } from '../components/detail-dialog.js';
 

@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import { dirname, join, resolve } from "node:path";
 import {
   classifyParsedRecord,
+  cloneJson,
   encodeRecord,
   fingerprint,
   offerRevisionHash,
@@ -195,7 +196,7 @@ export class MemoryObservationRepository {
       if (this.#keys.has(key)) continue;
 
       this.#keys.add(key);
-      this.#observations.push(structuredClone(observation));
+      this.#observations.push(cloneJson(observation));
       added += 1;
     }
 
@@ -215,7 +216,7 @@ export class MemoryObservationRepository {
         revisions.set(hash, {
           hash,
           observedAt: observation.observedAt,
-          product: structuredClone(observation.product),
+          product: cloneJson(observation.product),
         });
       }
     }

@@ -259,7 +259,38 @@ function isV1Record(record) {
   );
 }
 
+/**
+ * Deep copy of a plain-JSON value (observations, record payloads): faster
+ * than structuredClone for the small nested objects that dominate append
+ * planning. Exactly equivalent for every input — anything that is not an
+ * array or a plain object (class instances, Dates, Maps, null-prototype
+ * objects, cross-realm objects) falls back to structuredClone itself, and
+ * holes, undefined values, and integer-like key order are all preserved by
+ * the recursive copy. Only cycles differ: structuredClone rejects them with
+ * DataCloneError, this walks until the stack overflows — callers that can
+ * receive cyclic input must keep using structuredClone.
+ */
+function cloneJson(value) {
+  if (Array.isArray(value)) {
+    const copy = new Array(value.length);
+    for (let index = 0; index < value.length; index += 1) {
+      copy[index] = cloneJson(value[index]);
+    }
+    return copy;
+  }
+  if (value !== null && typeof value === "object") {
+    if (value.constructor !== Object) return structuredClone(value);
+    const copy = {};
+    for (const key of Object.keys(value)) {
+      copy[key] = cloneJson(value[key]);
+    }
+    return copy;
+  }
+  return value;
+}
+
 export {
+  cloneJson,
   encodeRecord,
   decodeRecord,
   fingerprint,

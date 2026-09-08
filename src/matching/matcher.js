@@ -111,23 +111,32 @@ export function findSourceIdMatches(products) {
   return matches;
 }
 
+// Precomputes tokenization/brand normalization once per product so pair
+// scoring never redoes it. Returns a copy enriched with _tokens and
+// _normalizedBrand.
+export function prepareProductForFuzzy(product) {
+  return {
+    ...product,
+    _tokens: tokenizeName(product.name),
+    _normalizedBrand: normalizeBrand(product.brand),
+  };
+}
+
 export function prepareProductsForFuzzy(products) {
-  return products.map(p => ({
-    ...p,
-    _tokens: tokenizeName(p.name),
-    _normalizedBrand: normalizeBrand(p.brand),
-  }));
+  return products.map(prepareProductForFuzzy);
 }
 
 export function findFuzzyCandidates(products, options = {}) {
-  const prepared = prepareProductsForFuzzy(products);
   const threshold = options.threshold ?? DEFAULT_FUZZY_THRESHOLD;
   const brandMaxSize = options.brandGroupMaxSize ?? FUZZY_BRAND_GROUP_MAX_SIZE;
   const batchCap = options.batchCap ?? FUZZY_BATCH_CAP;
 
+  // Group the raw products first; preparation (tokenize + spread) is deferred
+  // per group because the batch cap usually stops the scan after a handful of
+  // brand groups — eagerly preparing every product wasted most of the work.
   const byBrand = new Map();
-  for (const p of prepared) {
-    const brand = p._normalizedBrand || '__no_brand__';
+  for (const p of products) {
+    const brand = normalizeBrand(p.brand) || '__no_brand__';
     if (!byBrand.has(brand)) byBrand.set(brand, []);
     byBrand.get(brand).push(p);
   }
@@ -137,7 +146,8 @@ export function findFuzzyCandidates(products, options = {}) {
   for (const [, group] of byBrand) {
     if (group.length > brandMaxSize) continue;
 
-    const scorable = group.filter(p => p._tokens.length > 0);
+    const scorable = prepareProductsForFuzzy(group)
+      .filter(p => p._tokens.length > 0);
 
     for (let i = 0; i < scorable.length && candidates.length < batchCap; i++) {
       for (let j = i + 1; j < scorable.length && candidates.length < batchCap; j++) {

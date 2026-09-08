@@ -32,6 +32,17 @@ export class MatchingOrchestrator {
   }
 
   #persistMatches(pairs) {
+    // One transaction for the whole batch: thousands of individual WAL commits
+    // dominated matching runtime. Per-pair error handling is unchanged — a
+    // failed statement aborts only itself, so the loop below keeps counting
+    // errors and successes exactly as before.
+    if (pairs.length > 0 && typeof this.#appDb.runInTransaction === 'function') {
+      return this.#appDb.runInTransaction(() => this.#applyMatches(pairs));
+    }
+    return this.#applyMatches(pairs);
+  }
+
+  #applyMatches(pairs) {
     const result = { inserted: 0, skipped: 0, errors: [] };
 
     for (const pair of pairs) {

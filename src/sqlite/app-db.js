@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { applyAppMigrations, ensureMigrationTable } from './schema.js';
 
 export class AppDatabase {
+  #matchPairStatements = new Map();
+
   constructor(dbPath) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode=WAL');
@@ -9,6 +11,37 @@ export class AppDatabase {
     this.db.exec('PRAGMA busy_timeout=5000');
     ensureMigrationTable(this.db);
     applyAppMigrations(this.db);
+  }
+
+  // node:sqlite recompiles SQL on every prepare() call; the matching batch
+  // paths call the pair statements thousands of times per run, so those three
+  // cache their statements. One-shot methods keep plain prepare().
+  #prepareMatchPairStatement(sql) {
+    let stmt = this.#matchPairStatements.get(sql);
+    if (!stmt) {
+      stmt = this.db.prepare(sql);
+      this.#matchPairStatements.set(sql, stmt);
+    }
+    return stmt;
+  }
+
+  // Runs fn inside a single transaction. Statement-level failures still abort
+  // only their own statement (SQLite ABORT resolution), so callers that catch
+  // per-item errors keep working; only the batch commit is deferred to the end.
+  runInTransaction(fn) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // connection already unwound; nothing to roll back
+      }
+      throw err;
+    }
   }
 
   getUserById(id) {
@@ -163,7 +196,7 @@ export class AppDatabase {
     const aId = String(productAId);
     const bId = String(productBId);
     const [pa, pb] = aId < bId ? [aId, bId] : [bId, aId];
-    return this.db.prepare(
+    return this.#prepareMatchPairStatement(
       'SELECT * FROM product_match_pairs WHERE product_a_id = ? AND product_b_id = ?'
     ).get(pa, pb) || null;
   }
@@ -184,7 +217,7 @@ export class AppDatabase {
 
   createMatchPair({ productAId, productBId, matchMethod, algorithmVersion, confidence, reviewState, provenance, inputEvidenceHash }) {
     const [pa, pb] = productAId < productBId ? [productAId, productBId] : [productBId, productAId];
-    const result = this.db.prepare(`
+    const result = this.#prepareMatchPairStatement(`
       INSERT INTO product_match_pairs
         (product_a_id, product_b_id, match_method, algorithm_version, confidence, review_state, provenance, input_evidence_hash)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -193,7 +226,7 @@ export class AppDatabase {
   }
 
   updateMatchPair(id, { matchMethod, confidence, reviewState, provenance, inputEvidenceHash }) {
-    this.db.prepare(`
+    this.#prepareMatchPairStatement(`
       UPDATE product_match_pairs
       SET match_method = ?, confidence = ?, review_state = ?,
           provenance = ?, input_evidence_hash = ?

@@ -148,17 +148,15 @@ function decodeArchiveLine(line, filePath, lineNumber, terminated) {
 }
 
 /**
- * Write EVERY byte of `payload` to `handle`, then fh.sync() it.
+ * Write EVERY byte of `payload` to `handle`.
  *
  * FileHandle.write() is allowed to resolve with bytesWritten < payload
- * length (short write), so a single write followed by sync can silently
- * drop a record tail. This loops from the returned offset until the whole
- * payload has landed — only then is sync meaningful. Takes a string and
- * encodes to a Buffer itself so partial-write offsets are BYTE offsets,
- * not UTF-8 code-unit offsets. Shared by the repository writer paths and
- * scripts/repair-archive.js.
+ * length (short write), so a single write can silently drop a record
+ * tail. This loops from the returned offset until the whole payload has
+ * landed. Takes a string or Buffer; strings are encoded here so
+ * partial-write offsets are BYTE offsets, not UTF-8 code-unit offsets.
  */
-async function writeAllAndSync(handle, payload) {
+async function writeAll(handle, payload) {
   const buffer = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
   let offset = 0;
   while (offset < buffer.length) {
@@ -170,6 +168,15 @@ async function writeAllAndSync(handle, payload) {
     }
     offset += bytesWritten;
   }
+}
+
+/**
+ * writeAll, then fh.sync() it — only a fully-landed payload makes the
+ * sync meaningful. Shared by the repository writer paths and
+ * scripts/repair-archive.js.
+ */
+async function writeAllAndSync(handle, payload) {
+  await writeAll(handle, payload);
   await handle.sync();
 }
 
@@ -590,15 +597,27 @@ export class JsonlObservationRepository {
       return true;
     });
 
-    const content =
-      compacted.map((record) => encodeRecord(record)).join("\n") +
-      (compacted.length ? "\n" : "");
     await mkdir(dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.compact-${process.pid}-${Date.now()}.tmp`;
     try {
       const handle = await open(tempPath, "w");
       try {
-        await writeAllAndSync(handle, content);
+        // Stream in ~1 MB chunks instead of materializing one archive-sized
+        // string plus its Buffer copy: same bytes on disk (records joined
+        // by "\n", trailing "\n" when non-empty), one fh.sync() at the end,
+        // peak transient memory bounded at ~2x the chunk size.
+        let chunk = "";
+        for (const [position, record] of compacted.entries()) {
+          if (position > 0) chunk += "\n";
+          chunk += encodeRecord(record);
+          if (chunk.length >= 1048576) {
+            await writeAll(handle, chunk);
+            chunk = "";
+          }
+        }
+        if (compacted.length > 0) chunk += "\n";
+        if (chunk.length > 0) await writeAll(handle, chunk);
+        await handle.sync();
       } finally {
         await handle.close();
       }

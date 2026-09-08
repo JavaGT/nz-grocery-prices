@@ -215,6 +215,13 @@ export class Server {
     const requestId = randomUUID();
     const startTime = this.#clock();
 
+    // The projection metadata (`_meta` read) is identical for every response
+    // this request produces, so it is computed at most once per request and
+    // only when something actually needs it (JSON handlers and payloads do;
+    // static-file fallbacks never touch it).
+    let freshnessMemo;
+    const freshness = () => freshnessMemo ?? (freshnessMemo = this.#projMeta());
+
     try {
       this.#checkCSRF(req);
 
@@ -228,7 +235,7 @@ export class Server {
       if (allowed.size > 0 && !allowed.has(req.method)) {
         return this.#respond(res, 405, {
           error: { code: 'METHOD_NOT_ALLOWED', message: `${req.method} not allowed for ${pathname}` }
-        }, requestId, null, req.headers['accept-encoding']);
+        }, requestId, null, req.headers['accept-encoding'], freshness);
       }
 
       let matched = null;
@@ -249,7 +256,7 @@ export class Server {
         }
         return this.#respond(res, 404, {
           error: { code: 'NOT_FOUND', message: `${pathname} not found` }
-        }, requestId, null, req.headers['accept-encoding']);
+        }, requestId, null, req.headers['accept-encoding'], freshness);
       }
 
       let body = null;
@@ -269,7 +276,7 @@ export class Server {
         appDb: this.#appDb,
         auth: this.#auth,
         clock: this.#clock,
-        freshness: this.#projMeta(),
+        freshness: freshness(),
         cookies,
         headers: req.headers,
         req,
@@ -284,7 +291,7 @@ export class Server {
 
       const result = await matched.handler(ctx);
       if (result !== undefined) {
-        this.#respond(res, 200, result, requestId, cookieHeaderSet, req.headers['accept-encoding']);
+        this.#respond(res, 200, result, requestId, cookieHeaderSet, req.headers['accept-encoding'], freshness);
       } else if (cookieHeaderSet) {
         this.#finalizeResponse(res, 200, requestId, cookieHeaderSet);
       }
@@ -296,12 +303,12 @@ export class Server {
         if (err.retryAfter) {
           errBody.retryAfter = err.retryAfter;
         }
-        this.#respond(res, err.status, errBody, requestId, null, req.headers['accept-encoding']);
+        this.#respond(res, err.status, errBody, requestId, null, req.headers['accept-encoding'], freshness);
       } else {
         this.#log.error('Unhandled error:', err);
         this.#respond(res, 500, {
           error: { code: 'INTERNAL_ERROR', message: 'Internal server error' }
-        }, requestId, null, req.headers['accept-encoding']);
+        }, requestId, null, req.headers['accept-encoding'], freshness);
       }
     }
 
@@ -309,16 +316,19 @@ export class Server {
     this.#log.info(`${req.method} ${req.url} ${res.statusCode} ${elapsed}ms`);
   }
 
-  #respond(res, status, body, requestId, cookieHeader, acceptEncoding) {
+  // `freshness` is the per-request memoized #projMeta thunk from #handle so a
+  // request that touches projection metadata pays for the `_meta` read once,
+  // no matter how many payload snapshots it needs.
+  #respond(res, status, body, requestId, cookieHeader, acceptEncoding, freshness) {
     if (body instanceof CachedResponse) {
-      return this.#respondCached(res, status, body, requestId, cookieHeader, acceptEncoding);
+      return this.#respondCached(res, status, body, requestId, cookieHeader, acceptEncoding, freshness);
     }
-    return this.#respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding);
+    return this.#respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding, freshness);
   }
 
-  #respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding) {
+  #respondPlain(res, status, body, requestId, cookieHeader, acceptEncoding, freshness) {
     const payload = { _requestId: requestId };
-    const meta = this.#projMeta();
+    const meta = freshness ? freshness() : this.#projMeta();
     payload._freshness = {
       exists: meta.exists,
       fingerprint: meta.fingerprint,
@@ -385,13 +395,13 @@ export class Server {
   // - br: brotli frames must NOT be concatenated (decoders disagree on
   //   trailing frames), so br requests get a full q5 recompress of the
   //   reused tail string — still skipping stringify and the _meta query.
-  #respondCached(res, status, cached, requestId, cookieHeader, acceptEncoding) {
+  #respondCached(res, status, cached, requestId, cookieHeader, acceptEncoding, freshness) {
     const b = cached.body;
     const cacheable = b && b.constructor === Object && !Array.isArray(b) &&
       !('_requestId' in b) && !('_freshness' in b) && !('retryAfter' in b) &&
       Number.isFinite(cached.maxAgeMs) && cached.maxAgeMs > 0;
     if (!cacheable) {
-      return this.#respondPlain(res, status, b, requestId, cookieHeader, acceptEncoding);
+      return this.#respondPlain(res, status, b, requestId, cookieHeader, acceptEncoding, freshness);
     }
 
     const headers = {
@@ -411,7 +421,7 @@ export class Server {
       entry = undefined;
     }
     if (!entry) {
-      const meta = this.#projMeta();
+      const meta = freshness ? freshness() : this.#projMeta();
       const freshnessJson = JSON.stringify({
         exists: meta.exists,
         fingerprint: meta.fingerprint,

@@ -20,6 +20,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
 import { join, dirname, extname, relative, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -104,6 +105,18 @@ function hashedRel(rel, content) {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
+// Emits `content` at `absPath` plus precompressed .br/.gz siblings. The dist
+// static server (src/app/server.js) prefers these sidecars over compressing
+// on demand, so the first request for an asset pays no compression latency;
+// brotli's max quality is affordable here because it runs at build time, not
+// per request.
+function emit(absPath, content) {
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  writeFileSync(absPath, buf);
+  writeFileSync(absPath + '.br', brotliCompressSync(buf));
+  writeFileSync(absPath + '.gz', gzipSync(buf, { level: 9 }));
+}
+
 const manifest = {};
 for (const rel of order) {
   if (rel === 'index.html') continue;
@@ -119,7 +132,7 @@ for (const rel of order) {
   hashName.set(rel, outRel);
   manifest[rel] = outRel;
   mkdirSync(dirname(join(OUT, outRel)), { recursive: true });
-  writeFileSync(join(OUT, outRel), content);
+  emit(join(OUT, outRel), content);
 }
 
 // index.html: swap every asset URL for its hashed URL. Longest first so a
@@ -131,6 +144,7 @@ for (const [rel, outRel] of [...Object.entries(manifest)]
 }
 writeFileSync(join(OUT, 'index.html'), html);
 manifest['index.html'] = 'index.html';
+emit(join(OUT, 'index.html'), html);
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
 console.log(`build-assets: ${Object.keys(manifest).length - 1} assets -> ${OUT}`);

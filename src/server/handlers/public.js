@@ -123,30 +123,21 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
   }
 
   async function health(ctx) {
-    let meta;
-    try {
-      const d = getDb ? getDb() : null;
-      if (d) {
-        const rows = d.prepare('SELECT key, value FROM _meta').all();
-        const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
-        meta = {
-          exists: true,
-          fingerprint: m.jsonl_fingerprint || null,
-          builtAt: m.built_at || null,
-          recordsImported: Number(m.records_imported) || 0,
-        };
-      } else {
-        meta = { exists: false, fingerprint: null, builtAt: null, recordsImported: 0 };
-      }
-    } catch {
-      meta = { exists: false, fingerprint: null, builtAt: null, recordsImported: 0 };
-    }
+    // Reuse the per-request projection snapshot the Server already took for
+    // the response envelope instead of re-reading `_meta` a third time. The
+    // fallback covers direct handler calls with a bare ctx (unit tests).
+    const f = ctx.freshness || { exists: false, fingerprint: null, builtAt: null, recordsImported: 0 };
 
     return {
-      status: meta.exists ? 'ok' : 'degraded',
+      status: f.exists ? 'ok' : 'degraded',
       startedAt: new Date(startedAt).toISOString(),
       uptime: ctx.clock() - startedAt,
-      projection: meta,
+      projection: {
+        exists: f.exists,
+        fingerprint: f.fingerprint,
+        builtAt: f.builtAt,
+        recordsImported: f.recordsImported,
+      },
     };
   }
 
@@ -346,6 +337,29 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     };
   }
 
+  // Suggestion index: distinct product names are tiny at archive scale (~9k
+  // names, a few hundred KB) and only change when the projection DB is
+  // rebuilt, so they are held in memory and invalidated with the same
+  // dbSignature probe the deals cache uses. Suggestions fire per keystroke,
+  // and the SQL path (full-table DISTINCT + ORDER BY scan) was the slowest
+  // endpoint p50 and serialized badly under concurrent typing (bench:
+  // ~1,280 rps at 8x concurrency); the in-memory pass removes that scan.
+  const suggestionIndex = { sig: undefined, names: null, folded: null };
+
+  function suggestionIndexFor() {
+    const sig = typeof dbSignature === 'function' ? dbSignature() : null;
+    if (suggestionIndex.names && suggestionIndex.sig === sig) return suggestionIndex;
+    // ORDER BY name (BINARY collation, UTF-8 byte order) fixes the row order
+    // coming out of SQLite, so the array is already suggestion-ordered and a
+    // match scan can stop at LIMIT 10 without sorting.
+    const rows = db().prepare('SELECT DISTINCT name FROM products ORDER BY name').all();
+    suggestionIndex.names = rows.map(r => r.name).filter(n => typeof n === 'string');
+    // Mirror LIKE ... COLLATE NOCASE, which case-folds ASCII A-Z only.
+    suggestionIndex.folded = suggestionIndex.names.map(n => n.replace(/[A-Z]/g, c => c.toLowerCase()));
+    suggestionIndex.sig = sig;
+    return suggestionIndex;
+  }
+
   async function searchSuggestions(ctx) {
     db();
     const q = (ctx.query.query || '').trim();
@@ -354,6 +368,25 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     }
     if (q.length > 100) {
       throw new StatusError(400, 'QUERY_TOO_LONG', 'Search query must be 100 characters or fewer');
+    }
+
+    // Plain text — the overwhelming case for search-as-you-type — matches
+    // against the in-memory index with the exact semantics of the SQL below:
+    // `LIKE '%q%' COLLATE NOCASE` on a wildcard-free q is an ASCII-folded
+    // substring test, and row order/limit carry over from the sorted index.
+    // Queries containing LIKE wildcards (% _ \) keep the SQL path so their
+    // wildcard semantics are preserved bit-for-bit.
+    if (!/[%_\\]/.test(q)) {
+      const idx = suggestionIndexFor();
+      const needle = q.replace(/[A-Z]/g, c => c.toLowerCase());
+      const out = [];
+      for (let i = 0; i < idx.names.length; i++) {
+        if (idx.folded[i].includes(needle)) {
+          out.push(idx.names[i]);
+          if (out.length === 10) break;
+        }
+      }
+      return { suggestions: out };
     }
 
     const rows = db().prepare(`

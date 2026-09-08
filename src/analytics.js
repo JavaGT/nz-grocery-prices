@@ -48,34 +48,6 @@ function selectEffectivePrice(observation, { pricePolicy = "public", atMs } = {}
   return lowest;
 }
 
-/**
- * Cents-only variant of selectEffectivePrice for callers that do not need
- * the kind (the calculateSales baseline window). Same candidate rules and
- * tie order — keep the two in sync. Exists because the baseline loop runs
- * once per historical observation and the kind wrapper was measurable
- * allocation pressure at archive scale.
- */
-function effectiveCents(observation, pricePolicy, atMs) {
-  const promoAllowed =
-    atMs === undefined ||
-    !observation.promotion ||
-    promotionIsActive(observation.promotion, atMs);
-
-  const price = observation.price;
-  let lowest = price.regularCents;
-  if (promoAllowed && price.promoCents !== undefined && price.promoCents < lowest) {
-    lowest = price.promoCents;
-  }
-  if (
-    pricePolicy === "member" &&
-    price.memberCents !== undefined &&
-    price.memberCents < lowest
-  ) {
-    lowest = price.memberCents;
-  }
-  return lowest;
-}
-
 /** Groups observations by offer (productId + storeId), preserving keys. */
 function groupObservations(observations) {
   const groups = new Map();
@@ -173,7 +145,7 @@ export function calculateSales(observations, query = {}) {
     let previousLowCents = Infinity;
     for (let index = 0; index < timed.length - 1; index += 1) {
       const [observedMs, observation] = timed[index];
-      const cents = effectiveCents(observation, pricePolicy, observedMs);
+      const cents = selectEffectivePrice(observation, { pricePolicy, atMs: observedMs }).cents;
       if (observedMs >= baselineStart) {
         baselineSum += cents;
         baselineCount += 1;

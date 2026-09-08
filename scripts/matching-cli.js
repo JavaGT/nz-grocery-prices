@@ -57,8 +57,10 @@ function main() {
     process.exit(1);
   }
 
+  // category is not used by any matcher — leaving it out avoids materializing
+  // one string per product row.
   const products = projDb.db.prepare(
-    'SELECT id, retailer_id, name, brand, category, size, source_id, gtin FROM products'
+    'SELECT id, retailer_id, name, brand, size, source_id, gtin FROM products'
   ).all();
 
   console.error(`Loaded ${products.length} products from projection DB`);

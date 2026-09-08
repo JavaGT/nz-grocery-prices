@@ -48,8 +48,9 @@ for (const f of [samplesFile, portFile, stopFile]) rmSync(f, { force: true });
 
 const childArgs = [join(ROOT, 'perf-notes', 'bench-endurance-server.js'), samplesFile, portFile, stopFile];
 if (hasFlag('--heap-prof')) {
-  // Keep the profile OUT of the worktree: profiles land in /tmp.
-  const profDir = join(workDir, 'heap-prof');
+  // Keep the profile OUT of the worktree AND out of the deleted run dir:
+  // profiles land in /tmp/perf-endurance-profiles for inspection.
+  const profDir = '/tmp/perf-endurance-profiles';
   mkdirSync(profDir, { recursive: true });
   childArgs.unshift(`--heap-prof-dir=${profDir}`, '--heap-prof');
 }

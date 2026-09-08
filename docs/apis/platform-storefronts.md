@@ -30,8 +30,8 @@ each family's error behavior is traceable.
 | shopify | `getJson` (`http.js:28`) | `shopify.js:13`, `104`, `129` |
 | magento-graphql | `fetchWithRetry` direct, POST | `magento-graphql.js:12`, `107` |
 | sfcc-updategrid | `getText` (`http.js:41`) or `curlGetText` (`curl-transport.js:47`) | `sfcc-updategrid.js:12-13`, `74-88` |
-| woocommerce | `getJson` (`http.js:28`) | `woocommerce.js:10`, `81` |
-| html-grid | `getText` (`http.js:41`) | `html-grid.js:13`, `190` |
+| woocommerce | `getJson` (`http.js:28`) | `woocommerce.js:10`, `92` |
+| html-grid | `getText` (`http.js:41`) | `html-grid.js:13`, `201` |
 
 All clients accept `{ fetch, headers, timeout, retry }` and default to
 `globalThis.fetch`; tests always inject a stub `fetch`. `fetchWithRetry`
@@ -139,7 +139,7 @@ are category url_keys from the retailer module (e.g. `briscoes` CATEGORIES).
 ### Response fields consumed
 Tree: `data.categories.items[].children[]` as
 `{ id:number, url_key:string, name:string, product_count:number }`
-(flattened one level, `magento-graphql.js:128-136`). Products:
+(flattened one level, `magento-graphql.js:128-139`). Products:
 `total_count:number` and `items[]` mapped to observations — current price =
 `final_price.value`, regular = `regular_price.value` (dollars → cents via
 `toCents`), promo only when regular > current (`47-64`), PDP url =
@@ -148,10 +148,10 @@ dropped (50).
 
 ### Pagination / rate limiting
 `collectProducts` resolves each configured url_key to its numeric id via
-the tree (157), then pages `currentPage=1..maxPages` (default 50) until
-`collected >= min(product_count, maxPages * pageSize)` (166) or a page
-yields neither fresh ids nor items (188). Cross-category dedupe by
-`item.id` (177-179). No client-side throttling (and POSTs are not
+the tree (160), then pages `currentPage=1..maxPages` (default 50) until
+`collected >= min(product_count, maxPages * pageSize)` (170) or a page
+yields neither fresh ids nor items (192). Cross-category dedupe by
+`item.id` (180-182). No client-side throttling (and POSTs are not
 retried — see Transport).
 
 ### Failure modes
@@ -162,7 +162,10 @@ retried — see Transport).
   status, and content-type via `parseJsonResponse` (hardened 2026-09-07,
   `magento-graphql.js:118-121`; `fetch-with-retry.js:55-86`).
 - A failing page aborts only that category (`console.error` + break,
-  172-175); an unknown url_key is skipped with `console.error` (162-165).
+  175-178); an unknown url_key is skipped with `console.error` (165-168).
+- A malformed category tree (null roots, null/junk `children` entries) is
+  filtered during tree flattening (hardened 2026-09-07) instead of crashing
+  the url_key map.
 - Hanging requests abort as `TimeoutError` after 25s
   (`magento-graphql.test.js:32-43`).
 
@@ -214,8 +217,8 @@ mapping, and the declared-total reader (`totalGridItems`, from the
 ### Pagination / rate limiting
 Per cgid: `start = 0, 48, 96, ...` until a page contributes no fresh
 product ids, or `page * pageSize >= declared total` (guards grids that
-loop their tail) (`sfcc-updategrid.js:118-121`). Cross-category dedupe by
-product id (97, 112-117). No client-side throttling.
+loop their tail) (`sfcc-updategrid.js:118-121`; `maxPages` default 100). Cross-category
+dedupe by product id (97, 112-117). No client-side throttling.
 
 ### Failure modes
 - Page-1 failure for a category: skip that category with `console.error`
@@ -237,15 +240,15 @@ WooCommerce sites with the public read-only Store API enabled
 
 | Purpose | Method | URL pattern | Query params |
 | --- | --- | --- | --- |
-| Products page | GET | `{origin}{apiPath}` (default `/wp-json/wc/store/v1/products`) | `per_page` (default 50), `page` (1-based), optional `category=<id>` (`woocommerce.js:56`, `76-87`) |
+| Products page | GET | `{origin}{apiPath}` (default `/wp-json/wc/store/v1/products`) | `per_page` (default 50), `page` (1-based), optional `category=<id>` (`woocommerce.js:65-66`, `87-91`) |
 
 ### Auth/headers
 None (public read-only API). `accept: application/json`
-(`woocommerce.js:59`).
+(`woocommerce.js:68`).
 
 ### Config → request
 `WooStoreClient({ slug, origin, scopeName, pageSize })`; `timeout` 25s,
-`apiPath` and `mapItem` overridable (`woocommerce.js:47-62`; example
+`apiPath` and `mapItem` overridable (`woocommerce.js:57-75`; example
 `retailers/winebox/index.js`).
 
 ### Response fields consumed
@@ -254,18 +257,18 @@ A JSON **array** of products (`parseWooProducts`, `woocommerce.js:13-25`):
 `prices { price, regular_price, sale_price, currency_minor_unit? }` —
 minor-unit strings (`"2499"` = $24.99, scaled by `currency_minor_unit`),
 `images[].src`, `short_description?:string`. Promo only when
-`sale_price < regular_price` (`mapWooProduct`, `woocommerce.js:22-45`);
-items without id/name/positive price are dropped (26).
+`sale_price < regular_price` (`mapWooProduct`, `woocommerce.js:31-54`);
+items without id/name/positive price are dropped (35).
 
 ### Pagination / rate limiting
-`collectProducts` pages 1..maxPages (default 20) until a page is short
-(`items.length < pageSize`, 118) or adds nothing new (119); dedupe by
-`retailerProductId` (109-111). No client-side throttling.
+`collectProducts` pages 1..maxPages (default 20, `woocommerce.js:102`) until
+a page is short (`items.length < pageSize`, 132) or adds nothing new (133);
+dedupe by `retailerProductId` (123-125). No client-side throttling.
 
 ### Failure modes
-- Page-1 failure degrades to partial results with `console.error` (99-103)
+- Page-1 failure degrades to partial results with `console.error` (112-116)
   — a whole-retailer outage yields an empty collect, not a crash; later
-  failures rethrow (104).
+  failures rethrow (117).
 - Non-JSON 200 bodies fail with a context error naming `woo <slug> p<n>`
   (`http.js:38`, `fetch-with-retry.js:55-86`).
 - A 200 JSON *object* — WP REST error bodies are objects, e.g.
@@ -285,54 +288,58 @@ GraphQL answers `storeConfig` with an empty products scope
 (`html-grid.js:1-11`, `retailers/hunting-fishing/index.js:3-6`). Theme
 markup differs per retailer, so tile extraction is driven by per-retailer
 regex **profiles** (configuration, not code; profile contract documented at
-`html-grid.js:70-80`).
+`html-grid.js:73-84`).
 
 ### Endpoints
 
 | Purpose | Method | URL pattern | Params |
 | --- | --- | --- | --- |
-| Category grid page ("page" mode, Magento default) | GET | `{origin}/<category-path>` | `?<pageParam>=<page>` (`pageParam` default `p`) appended, or `&` if the category already has a query (`html-grid.js:153`, `185-189`) |
-| Category grid page ("offset" mode, SFCC-style) | GET | `{origin}/<category-path>` | `start=<offset>&sz=<pageSize>` (`html-grid.js:155-156`, `180-184`) |
+| Category grid page ("page" mode, Magento default) | GET | `{origin}/<category-path>` | `?<pageParam>=<page>` (`pageParam` default `p`) appended, or `&` if the category already has a query (`html-grid.js:163`, `197-199`) |
+| Category grid page ("offset" mode, SFCC-style) | GET | `{origin}/<category-path>` | `start=<offset>&sz=<pageSize>` (`html-grid.js:164-166`, `191-195`) |
 
 Category paths are plain retailer config strings, e.g.
 `["hunting", "fishing", "camping"]` (`retailers/hunting-fishing/index.js:18`).
 
 ### Auth/headers
-`BROWSER_UA` default (`html-grid.js:150`); `getText` forces
+`BROWSER_UA` default (`html-grid.js:168`); `getText` forces
 `accept: text/html,...` because some themes switch to AJAX rendering when
 offered JSON (`http.js:46-48`).
 
 ### Config → request
 `HtmlGridClient({ slug, origin, categories: [path,...], profile,
 pagination?, pageParam?, pageSize? })`; `pageSize` 24 (offset mode),
-`timeout` 20s (`html-grid.js:140-161`).
+`timeout` 20s (`html-grid.js:143-175`).
 
 ### Markup parsed (profile contract)
 - `tileStart` (global RegExp) slices the HTML into tile strings
   (`extractTileSlices`, `html-grid.js:44-49`).
-- `id`: ordered regex fallbacks — required retailerProductId (84-85).
+- `id`: ordered regex fallbacks — required retailerProductId (86-87).
 - `name`: regex fallbacks or the tile anchor's `title` attribute,
-  HTML-entity-decoded (95-99); PB Tech's split h2+h3 name is joined via
-  the `joinName` flag (88-94). Named and numeric (`&#123;`, `&#x1F600;`)
+  HTML-entity-decoded (98-102); a profile with no `name` regexes relies on
+  the title alone. PB Tech's split h2+h3 name is joined via
+  the `joinName` flag (91-97). Named and numeric (`&#123;`, `&#x1F600;`)
   entities are decoded (24-41).
-- `linkClass`: the anchor class carrying `href` (61-63, 86-87).
+- `linkClass`: the anchor class carrying `href` (63-66, 88-89).
 - `finalPrice` / `wasPrice` / `memberPrice`: price captures
   (`"37.99"`/`"$37.99"`) from e.g. Magento `priceBox`
-  `data-price-type`/`data-price-amount` attributes (100-106).
+  `data-price-type`/`data-price-amount` attributes (103-108).
 - Optional `brand` capture and `image: true` (prefers lazy-load
-  `data-src`, never emits `data:` placeholder URIs, 116-124).
-- A tile without id, name, or parseable final price is dropped (107).
+  `data-src`, never emits `data:` placeholder URIs, 118-127).
+- A tile without id, name, or parseable final price is dropped (109).
 
 ### Pagination / rate limiting
 Per category, page 1..maxPages (default 50) until a page yields no new
-tile ids (230); dedupe by tile id across categories (221-226). Tile urls
-are absolutized, or built from a `urlFromId` template (239-245); the
-category label for `product.categories` derives from the path (204-207).
+tile ids (240); dedupe by tile id across categories (231-236). Tile urls
+are absolutized, or built from a `urlFromId` template (250-256); the
+category label for `product.categories` derives from the path (214-217).
 No client-side throttling.
 
 ### Failure modes
+- A malformed profile (missing `id` regex list, or a `tileStart` that is
+  not a global RegExp) fails at construction with a named `TypeError`
+  (hardened 2026-09-07) instead of a confusing mid-walk iteration error.
 - Dead/renamed category: page-1 failure skips the category with
-  `console.error`; later failures abort the walk (212-218).
+  `console.error`; later failures abort the walk (222-228).
 - Garbled numeric entities (code points above U+10FFFF) stay literal
   instead of `RangeError`-crashing the walk (hardened 2026-09-07;
   `html-grid.js:16-41`).

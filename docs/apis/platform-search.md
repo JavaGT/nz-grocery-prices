@@ -52,7 +52,7 @@ Retailers that expose their catalog through a public Algolia index
   (`toAlgoliaObservations`, `algolia.js:23-42`). super-liquor consumes
   nopCommerce-shaped hits: `Id:number`, `objectID:string`, `Name:string`,
   `SeName:string`, `Sku:string`, `ProductPrice.PriceValue/OldPriceValue:number`,
-  `PictureModels[].ImageUrl:string` (`retailers/super-liquor/index.js:26-44`).
+  `PictureModels[].ImageUrl:string` (`retailers/super-liquor/index.js:20-40`).
 
 ### Pagination
 
@@ -89,7 +89,7 @@ from sweeping query terms.
 ### Endpoint & auth
 
 - `GET https://ac.cnstrc.com/search/{term}?key={key}&num_results_per_page={n}&page={n}`
-  (`constructor-io.js:13`, `constructor-io.js:91-94`). Term and key are
+  (`constructor-io.js:14`, `92-94`). Term and key are
   URL-encoded; the key rides in the query string but is kept out of error
   labels (`operation` = `constructor {slug} "{term}" p{page}`).
 - Headers: `accept: application/json`, optional `user-agent`
@@ -119,8 +119,9 @@ from sweeping query terms.
 ### Pagination
 
 Per query term, pages 1..`maxPagesPerQuery` (default 5), stopping on a
-short page (`results.length < pageSize`) or a page with zero fresh
-products after dedup (`constructor-io.js:112-137`). A page-1 fetch failure
+short page (`results.length < pageSize`, `pageSize` default 100) or a page
+with zero fresh products after dedup (`constructor-io.js:112-146`; breaks
+at 142-143). A page-1 fetch failure
 logs and skips the term; later-page failures propagate.
 
 ### Failure modes
@@ -149,7 +150,8 @@ baby-factory, whitcoulls, glassons, postie, number-one-shoes
 - `GET {origin}/{categoryPath}` with server-side pagination appended as
   `?p={page}` (param configurable via `pageParam`) when `page > 1`
   (`estar-category.js:156-160`). No auth; requests send `BROWSER_UA`
-  (`http.js:11-12`) and `accept: text/html,...` (`estar-category.js:137`).
+  (`estar-category.js:137`, string at `http.js:11-12`), and the
+  `accept: text/html,...` header is forced by `getText` (`http.js:48`).
 - HTML is fetched as text via `getText`, never JSON.
 
 ### Page parsing
@@ -184,7 +186,7 @@ baby-factory, whitcoulls, glassons, postie, number-one-shoes
 
 Server-side only when `pageParam` is set (all six retailers use `p`);
 otherwise page 1 only. The walk stops early when a page yields zero fresh
-products after dedup by `productid` (`estar-category.js:171-208`,
+products after dedup by `productid` (`estar-category.js:171-210`,
 default `maxPages: 20`). Category label is derived from the path and
 prepended to `product.categories`. A page-1 failure logs and skips the
 category; later-page failures propagate.
@@ -192,7 +194,9 @@ category; later-page failures propagate.
 ### Failure modes
 
 Constructor `TypeError`s for missing `slug/origin`/`categories`
-(`estar-category.js:121-127`); transport via `getText`.
+(`estar-category.js:121-127`); transport via `getText`. A null/junk entry
+inside the embedded `items` array is skipped by the mapper, not a walk
+crash (hardened 2026-09-07).
 
 ---
 
@@ -238,7 +242,8 @@ price are dropped.
 ### Pagination
 
 `maxPages` (default 3) per category, also stopping when
-`collected >= maxPages * pageSize` or a page returns zero items
+`collected >= maxPages * pageSize` (`pageSize` default 36) or a page
+returns zero items
 (`next-data.js:115-156`). Category label = last path segment. Page-1
 failure logs and skips the category; later-page failures propagate.
 

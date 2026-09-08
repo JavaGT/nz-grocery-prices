@@ -119,3 +119,23 @@ test("EstarCategoryClient walks server-paginated categories and stops on duplica
   assert.deepEqual(observations.map((o) => o.product.id).sort(), ["llexample:125404", "llexample:125405"]);
   assert.deepEqual(observations[0].product.categories, ["wine"]);
 });
+
+test("a null entry among embedded items is skipped by the walk, not a crash", async () => {
+  const client = new EstarCategoryClient({
+    slug: "llexample",
+    origin: "https://llexample.co.nz",
+    categories: ["wine"],
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: { get: () => undefined },
+      body: {},
+      text: async () =>
+        `<script>window.category = { ...${JSON.stringify({ ...PAYLOAD, items: [null, ITEM] })} };</script>`,
+    }),
+  });
+  const observations = await client.collectProducts({ observedAt: "2026-09-06T00:00:00.000Z" });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].product.id, "llexample:125404");
+});

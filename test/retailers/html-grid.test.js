@@ -201,3 +201,25 @@ test("HtmlGridClient walks categories, stops on no-new-tiles, emits valid observ
   assert.equal(sale.price.promoCents, 14999);
   assert.equal(sale.promotion.savePercent, 34.78);
 });
+
+test("a profile without name regexes falls back to the anchor title; without finalPrice drops tiles", () => {
+  const titleOnly = { ...HF_PROFILE, name: undefined };
+  const tiles = parseHtmlTiles(`<div>${HF_TILE}</div>`, titleOnly);
+  assert.equal(tiles.length, 1);
+  assert.equal(tiles[0].name, "Hunters Element Apex Bino Defender");
+  const noPrice = { ...HF_PROFILE, finalPrice: undefined };
+  assert.equal(parseHtmlTiles(`<div>${HF_TILE}</div>`, noPrice).length, 0);
+});
+
+test("HtmlGridClient rejects a malformed profile at construction, not mid-walk", () => {
+  const base = { slug: "hfexample", origin: "https://hf.example", categories: ["hunting"] };
+  assert.throws(
+    () => new HtmlGridClient({ ...base, profile: { ...HF_PROFILE, tileStart: /li/ } }),
+    /global RegExp/,
+  );
+  assert.throws(
+    () => new HtmlGridClient({ ...base, profile: { ...HF_PROFILE, id: undefined } }),
+    /profile/,
+  );
+  assert.throws(() => new HtmlGridClient({ ...base, profile: undefined }), /profile/);
+});

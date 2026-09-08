@@ -68,9 +68,11 @@ export class WooStoreClient {
     this.headers = { "user-agent": options.userAgent ?? undefined, accept: "application/json", ...options.headers };
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeout = options.timeout ?? 25000;
+    this.#retry = options.retry;
   }
   #fetch;
   #timeout;
+  #retry;
 
   getStore() {
     return {
@@ -91,6 +93,7 @@ export class WooStoreClient {
       fetch: this.#fetch,
       headers: this.headers,
       timeout: this.#timeout,
+      retry: this.#retry,
       operation: `woo ${this.slug} p${page}`,
     });
   }

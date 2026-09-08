@@ -106,3 +106,31 @@ test("MagentoGraphqlClient resolves categories and paginates", async () => {
   assert.equal(observations[0].store.retailer, "rsexample");
   assert.equal(observations[0].price.promoCents, 5099);
 });
+
+test("a malformed tree (null/junk entries) resolves the good category instead of crashing", async () => {
+  const item = (id) => ({ ...ITEM, id, name: `Item ${id}` });
+  const client = stubClient({
+    tree: {
+      data: {
+        categories: {
+          items: [
+            null,
+            { id: 9, name: "Broken root", children: null },
+            { id: 2, name: "Root", url_key: "", children: [
+              null,
+              "junk",
+              { id: 77, name: "Clearance", url_key: "clearance", product_count: 2 },
+            ] },
+          ],
+        },
+      },
+    },
+    products: {
+      1: { total_count: 2, items: [item(1)] },
+      2: { total_count: 2, items: [] },
+    },
+  });
+  const observations = await client.collectProducts({ observedAt: "2026-09-06T00:00:00.000Z" });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].product.id, "rsexample:1");
+});

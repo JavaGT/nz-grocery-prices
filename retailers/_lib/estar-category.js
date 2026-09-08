@@ -188,7 +188,9 @@ export class EstarCategoryClient {
         }
         let fresh = 0;
         for (const item of items) {
-          const key = String(item.productid ?? item.id ?? "");
+          // Embedded payloads occasionally carry null/junk entries; they
+          // must be skipped by the mapper, not crash the dedupe key.
+          const key = String(item?.productid ?? item?.id ?? "");
           if (seen.has(key)) continue;
           seen.add(key);
           const spec = this.mapItem(item, store);

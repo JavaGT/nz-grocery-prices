@@ -15,10 +15,10 @@ every campaign client inherits the same failure semantics
 ### Exports
 
 - **`BROWSER_UA`** (`http.js:11-12`) — the campaign's Chrome-on-macOS
-  User-Agent string. Used as the default by `estar-category.js:137`;
-  other clients pass it via `options.userAgent` where the retailer needs
-  it. Never set it to a bot-sounding string — several storefronts gate on
-  it.
+  User-Agent string. Used as the default by `shopify.js:80`,
+  `html-grid.js:158`, and `estar-category.js:137`; other clients leave the
+  UA unset unless the retailer needs one. Never set it to a bot-sounding
+  string — several storefronts gate on it.
 - **`assertOk(response, operation)`** (`http.js:14-17`) — throws
   `"{operation} failed: {status} {statusText}"` on any non-OK response.
   Called before body parsing in both `getJson` and `getText`.
@@ -52,7 +52,7 @@ never credentials.
   (`fetch-with-retry.js:156`, `fetch-with-retry.js:122-146`); aborted
   attempts surface as `TimeoutError`.
 - **Retry:** GET-only, on by default — 3 attempts after the first try,
-  exponential backoff 1 s → 30 s with ±20 % jitter
+  exponential backoff 1 s → 30 s with +0–20 % additive jitter
   (`fetch-with-retry.js:161-171`, `fetch-with-retry.js:116-120`).
   Retryable: status 429/502/503/504 (`fetch-with-retry.js:88-90`) and
   network errors `TimeoutError`, `ECONNRESET`, `ETIMEDOUT`,
@@ -93,7 +93,7 @@ curl --silent --show-error --fail-with-body --location --compressed \
 
 - **Headers policy:** entries whose name lowercases (en-NZ) to
   `user-agent` are skipped from `--header` because user-agent is passed
-  separately as its own flag (`curl-transport.js:55-57`).
+  separately as its own flag (`curl-transport.js:53-55`).
 - **Timeouts:** curl's `--max-time` (seconds, ceiling of `timeoutMs`,
   default 30000 ms) is the primary deadline; the `execFile`-level
   `timeout: timeoutMs + 2000` wedge-guard kills the process even if curl
@@ -110,7 +110,7 @@ stdout with a non-zero exit code. Failures therefore throw an error that
 names the URL, curl's exit code (or ENOENT/ENOBUFS), bounded stderr, and
 a bounded (200-char) body prefix — a WAF challenge or error JSON is
 visible in the error instead of being discarded
-(`curlFailureError`, `curl-transport.js:29-45`). The original execFile
+(`curlFailureError`, `curl-transport.js:29-37`). The original execFile
 error rides as `cause`. Success path is unchanged: the body text is
 returned as-is.
 
@@ -125,8 +125,9 @@ Every adapter maps its retailer payload into `buildObservation(spec)`
 have exactly one source. Required spec fields — missing/invalid means the
 observation is silently dropped (`undefined`, callers `filter(Boolean)`):
 
-- `slug: string` (retailer), `storeId: string` (default `"online"`),
-  `storeName`, optional `region`/`origin`
+- `slug: string` (retailer), `storeId: string` (client layers default it
+  to `"online"`; `buildObservation` itself requires it non-empty),
+  `storeName` optional (defaults to `slug`), optional `region`/`origin`
 - `retailerProductId: string` — retailer's own id
 - `name: string`
 - `regularCents: integer >= 0`; optional `promoCents`/`memberCents`

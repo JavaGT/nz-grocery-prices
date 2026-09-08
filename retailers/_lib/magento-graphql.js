@@ -125,12 +125,16 @@ export class MagentoGraphqlClient {
     return json.data;
   }
 
-  /** Root category children as { id, url_key, name, product_count }. */
+  /** Root category children as { id, url_key, name, product_count }.
+   * Null/junk entries are dropped so a malformed tree cannot crash the
+   * url_key map in collectProducts. */
   async listCategoryTree() {
     const data = await this.graphql(CATEGORY_TREE_QUERY);
     const out = [];
     for (const root of data?.categories?.items ?? []) {
-      for (const child of root.children ?? []) out.push(child);
+      for (const child of root?.children ?? []) {
+        if (child?.url_key) out.push(child);
+      }
     }
     return out;
   }

@@ -49,9 +49,11 @@ export function extractTileSlices(html, tileStart) {
   );
 }
 
-/** First capture group across an ordered list of regex fallbacks. */
+/** First capture group across an ordered list of regex fallbacks.
+ * A missing list (e.g. a profile with no `name` regexes relying on the
+ * anchor title) matches nothing instead of throwing. */
 function firstCapture(slice, patterns) {
-  for (const pattern of patterns) {
+  for (const pattern of patterns ?? []) {
     const match = slice.match(pattern);
     if (match) return match[1];
   }
@@ -143,6 +145,14 @@ export class HtmlGridClient {
     if (!options.slug) throw new TypeError("HtmlGridClient requires slug");
     if (!Array.isArray(options.categories) || options.categories.length === 0) {
       throw new TypeError("HtmlGridClient requires categories: [\"path\", ...]");
+    }
+    // Fail fast on a malformed profile: extraction would otherwise throw
+    // confusing "not iterable"/matchAll errors mid-walk, once per category.
+    if (!options.profile || !Array.isArray(options.profile.id)) {
+      throw new TypeError("HtmlGridClient requires profile: { tileStart, id: [regex, ...], ... }");
+    }
+    if (!(options.profile.tileStart instanceof RegExp) || !options.profile.tileStart.global) {
+      throw new TypeError("HtmlGridClient requires profile.tileStart as a global RegExp");
     }
     this.origin = options.origin.replace(/\/$/, "");
     this.slug = options.slug;

@@ -87,6 +87,18 @@ test('recomputes after the TTL elapses', async () => {
   assert.equal(h.calls(), 2, 'TTL expiry must force a recompute');
 });
 
+test('listDeals sources time from the factory clock when ctx carries none (#48)', async () => {
+  const h = makeHandlers({ dealsCacheTtlMs: 60_000 });
+  // No clock on ctx: before #48 this threw on ctx.clock(). The TTL advance
+  // also proves the factory clock actually drives the cache window — if the
+  // handler read time from anywhere else, the second call would hit cache.
+  const first = bodyOf(await h.handlers.listDeals({ query: {} }));
+  assert.equal(first.total, 2);
+  h.advance(61_000);
+  await h.handlers.listDeals({ query: {} });
+  assert.equal(h.calls(), 2, 'TTL math must run on the factory clock');
+});
+
 test('dealsCacheTtlMs 0 disables caching', async () => {
   const h = makeHandlers({ dealsCacheTtlMs: 0 });
   await h.handlers.listDeals({ query: {}, clock: h.now });

@@ -1,6 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestServer, productRec, storeRec, offerRec, daysAgo } from './server-helpers.js';
+import { createPublicHandlers } from '../../src/server/handlers/public.js';
 
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
@@ -40,6 +41,21 @@ describe('public API server', () => {
       } finally {
         await srv.close();
       }
+    });
+
+    it('answers a bare ctx using the factory clock, not ctx.clock', async () => {
+      // Pins #48: health() must be callable with a bare ctx (no freshness,
+      // no clock on ctx) — time comes from the factory-injected clock.
+      const NOW = 1_700_000_000_000;
+      const handlers = createPublicHandlers({
+        getDb: () => { throw new Error('health must not touch the projection'); },
+        clock: () => NOW,
+        startedAt: NOW - 5_000,
+      });
+      const res = await handlers.health({});
+      assert.equal(res.status, 'degraded');
+      assert.equal(res.uptime, 5_000);
+      assert.deepEqual(res.projection, { exists: false, fingerprint: null, builtAt: null, recordsImported: 0 });
     });
   });
 
@@ -113,6 +129,26 @@ describe('public API server', () => {
         assert.equal(status, 200);
         assert.equal(body.total, 1);
         assert.equal(body.products[0].name, 'Bread_500g');
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it('query with a literal backslash matches only names containing it', async () => {
+      // Pins likeEscape()'s backslash branch: dropping \\ from the escape
+      // class would make ESCAPE treat the pattern's backslash as an escape
+      // character, and this query would silently match nothing.
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:bs', { data: { name: 'A\\B 500g' } }),
+          productRec('paknsave:bs-2', { data: { name: 'AB 500g' } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products?query=${encodeURIComponent('a\\b')}`);
+        assert.equal(status, 200);
+        assert.equal(body.total, 1);
+        assert.equal(body.products[0].name, 'A\\B 500g');
       } finally {
         await srv.close();
       }

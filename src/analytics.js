@@ -1,3 +1,5 @@
+import { cloneJson } from "./archive-records.js";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -6,39 +8,44 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  *
  * Candidates: regular always; promo when defined; member when
  * pricePolicy === "member" and defined. Lowest cents wins; ties resolve in
- * regular > promo > member priority order (reduce only replaces on a
+ * regular > promo > member priority order (each step replaces only on a
  * strictly lower price, so earlier candidates win ties).
  *
  * Promotion windows: when the observation carries a promotion object with
  * startsAt/endsAt, promo cents only count as active if the window includes
- * `at` (boundaries inclusive on both ends). Without a promotion object — or
+ * `atMs` (boundaries inclusive on both ends). Without a promotion object — or
  * without window fields — promo cents are treated as always active, which
  * preserves legacy behavior for data collected before windows existed.
  *
  * Callers anchor evaluation deliberately: baseline/history points evaluate
- * at their own observedAt, ongoing sales at query.at. When `at` is omitted
- * windows cannot exclude anything (legacy fallback).
+ * at their own observedAt epoch, ongoing sales at query.at. When `atMs` is
+ * omitted windows cannot exclude anything (legacy fallback). Taking the
+ * epoch (not an ISO string) lets series/sales callers reuse the timestamp
+ * they already parsed for sorting instead of re-parsing per observation.
  */
-function selectEffectivePrice(observation, { pricePolicy = "public", at } = {}) {
-  const atMs = at === undefined ? undefined : Date.parse(at);
+function selectEffectivePrice(observation, { pricePolicy = "public", atMs } = {}) {
   const promoAllowed =
     atMs === undefined ||
     !observation.promotion ||
     promotionIsActive(observation.promotion, atMs);
 
-  const candidates = [
-    { cents: observation.price.regularCents, kind: "regular" },
-    ...(observation.price.promoCents === undefined || !promoAllowed
-      ? []
-      : [{ cents: observation.price.promoCents, kind: "promo" }]),
-    ...(pricePolicy !== "member" || observation.price.memberCents === undefined
-      ? []
-      : [{ cents: observation.price.memberCents, kind: "member" }])
-  ];
-
-  return candidates.reduce((lowest, candidate) =>
-    candidate.cents < lowest.cents ? candidate : lowest
-  );
+  const price = observation.price;
+  let lowest = { cents: price.regularCents, kind: "regular" };
+  if (
+    promoAllowed &&
+    price.promoCents !== undefined &&
+    price.promoCents < lowest.cents
+  ) {
+    lowest = { cents: price.promoCents, kind: "promo" };
+  }
+  if (
+    pricePolicy === "member" &&
+    price.memberCents !== undefined &&
+    price.memberCents < lowest.cents
+  ) {
+    lowest = { cents: price.memberCents, kind: "member" };
+  }
+  return lowest;
 }
 
 /** Groups observations by offer (productId + storeId), preserving keys. */
@@ -47,21 +54,26 @@ function groupObservations(observations) {
 
   for (const observation of observations) {
     const key = `${observation.product.id}\u0000${observation.store.id}`;
-    const group = groups.get(key) ?? [];
-    group.push(observation);
-    groups.set(key, group);
+    const group = groups.get(key);
+    if (group === undefined) {
+      groups.set(key, [observation]);
+    } else {
+      group.push(observation);
+    }
   }
 
   return groups;
 }
 
 /**
- * Ascending observedAt sort applied inside analytics: input order is never
- * trusted. Array.prototype.sort is stable, so observations sharing a
- * timestamp keep their input order as the tie-break.
+ * Comparator for observations decorated as [observedMs, observation]. All
+ * analytics sorts run on pre-parsed epochs: sorting by repeated
+ * `Date.parse` inside a comparator was the single hottest self-time item in
+ * the 2026-09-09 analytics profile. Array.prototype.sort is stable, so
+ * entries sharing a timestamp keep their input order as the tie-break.
  */
-function byObservedAt(left, right) {
-  return Date.parse(left.observedAt) - Date.parse(right.observedAt);
+function byEpoch(left, right) {
+  return left[0] - right[0];
 }
 
 /**
@@ -73,16 +85,6 @@ function parseRequiredAt(functionName, at) {
     throw new TypeError(`${functionName} requires an explicit at (ISO string), got ${JSON.stringify(at) ?? "undefined"}`);
   }
   return Date.parse(at);
-}
-
-/**
- * Payload validation deliberately does not run at load [GROK-4], so rows with
- * unparseable timestamps reach analytics. A NaN comparator sorts arbitrarily
- * and could crown garbage as "latest", so skip such observations instead of
- * crashing.
- */
-function hasParseableObservedAt(observation) {
-  return !Number.isNaN(Date.parse(observation.observedAt));
 }
 
 function roundPercent(value) {
@@ -102,7 +104,6 @@ export function calculateSales(observations, query = {}) {
   // Deterministic contract: `at` is required. Wall-clock lives only in
   // PriceArchive's injected clock.
   const atMs = parseRequiredAt("calculateSales", query.at);
-  const at = query.at;
   const freshWithinDays = query.freshWithinDays ?? 7;
   const baselineDays = query.baselineDays ?? 90;
   const minSamples = query.minSamples ?? 2;
@@ -113,64 +114,74 @@ export function calculateSales(observations, query = {}) {
   const sales = [];
 
   for (const group of groupObservations(observations).values()) {
-    const relevant = group
-      .filter(hasParseableObservedAt)
-      .filter((observation) =>
-        !productIds || productIds.has(observation.product.id)
-      );
-    if (relevant.length < 2) continue;
-    relevant.sort(byObservedAt);
+    // One pass per group: parse each observedAt exactly once, drop
+    // unparseable timestamps (payload validation deliberately does not run
+    // at load [GROK-4], so garbage can reach analytics) and non-selected
+    // products. Entries stay decorated with their epoch so the sort below
+    // and the baseline window check never re-parse.
+    const timed = [];
+    for (const observation of group) {
+      if (productIds && !productIds.has(observation.product.id)) continue;
+      const observedMs = Date.parse(observation.observedAt);
+      if (Number.isNaN(observedMs)) continue;
+      timed.push([observedMs, observation]);
+    }
+    if (timed.length < 2) continue;
+    timed.sort(byEpoch);
 
-    const currentObservation = relevant.at(-1);
-    const currentAtMs = Date.parse(currentObservation.observedAt);
+    const currentEntry = timed[timed.length - 1];
+    const currentAtMs = currentEntry[0];
     if (currentAtMs < atMs - freshWithinDays * DAY_MS) continue;
 
-    const previous = relevant.slice(0, -1);
+    // Single pass over previous observations: each observation's effective
+    // price is evaluated at its own observedAt (GROK-8), the baseline window
+    // sum accumulates in ascending observedAt order — the same summation
+    // order as the previous baseline.map(...).reduce, so `average` is
+    // bit-identical — and the running min over ALL previous observations
+    // equals Math.min over allPreviousPrices.
     const baselineStart = currentAtMs - baselineDays * DAY_MS;
-    const baseline = previous.filter(
-      (observation) => Date.parse(observation.observedAt) >= baselineStart
-    );
-    if (baseline.length < minSamples) continue;
-
-    // Every observation — current and historical — evaluates promotion
-    // activity at its own observedAt, so stale promotional cents never
-    // pollute baselines (see test fixture: GROK-8 behavior fix).
-    const current = selectEffectivePrice(currentObservation, {
+    let baselineSum = 0;
+    let baselineCount = 0;
+    let previousLowCents = Infinity;
+    for (let index = 0; index < timed.length - 1; index += 1) {
+      const [observedMs, observation] = timed[index];
+      const cents = selectEffectivePrice(observation, { pricePolicy, atMs: observedMs }).cents;
+      if (observedMs >= baselineStart) {
+        baselineSum += cents;
+        baselineCount += 1;
+      }
+      if (cents < previousLowCents) {
+        previousLowCents = cents;
+      }
+    }
+    if (baselineCount < minSamples) continue;
+    const average = baselineSum / baselineCount;
+    const current = selectEffectivePrice(currentEntry[1], {
       pricePolicy,
-      at: currentObservation.observedAt
+      atMs: currentAtMs
     });
-    const baselinePrices = baseline.map(
-      (observation) =>
-        selectEffectivePrice(observation, { pricePolicy, at: observation.observedAt }).cents
-    );
-    const allPreviousPrices = previous.map(
-      (observation) =>
-        selectEffectivePrice(observation, { pricePolicy, at: observation.observedAt }).cents
-    );
-    const average = baselinePrices.reduce((sum, price) => sum + price, 0) / baselinePrices.length;
     const dropPercent = ((average - current.cents) / average) * 100;
-    const previousLowCents = Math.min(...allPreviousPrices);
     const isAllTimeLow = current.cents < previousLowCents;
 
     if (dropPercent < minDropPercent && !(includeAllTimeLows && isAllTimeLow)) continue;
 
     sales.push({
-      product: structuredClone(currentObservation.product),
-      store: structuredClone(currentObservation.store),
+      product: cloneJson(currentEntry[1].product),
+      store: cloneJson(currentEntry[1].store),
       current: {
         ...current,
-        observedAt: currentObservation.observedAt
+        observedAt: currentEntry[1].observedAt
       },
       baseline: {
         averageCents: Math.round(average),
-        sampleCount: baseline.length,
+        sampleCount: baselineCount,
         days: baselineDays
       },
       dropPercent: roundPercent(dropPercent),
       previousLowCents,
       isAllTimeLow,
-      promotion: currentObservation.promotion
-        ? structuredClone(currentObservation.promotion)
+      promotion: currentEntry[1].promotion
+        ? cloneJson(currentEntry[1].promotion)
         : undefined
     });
   }
@@ -182,83 +193,94 @@ export function calculateOngoingSales(observations, query = {}) {
   // Deterministic contract: `at` is required. Wall-clock lives only in
   // PriceArchive's injected clock.
   const atMs = parseRequiredAt("calculateOngoingSales", query.at);
-  const at = query.at;
   const freshWithinDays = query.freshWithinDays ?? 7;
   const pricePolicy = query.pricePolicy ?? "public";
   const productIds = query.productIds ? new Set(query.productIds) : undefined;
 
-  const candidates = [];
+  // One filter pass: the original parseable→fresh→retailer→store→product
+  // chain was pure predicates, so folding them together (in any order)
+  // preserves the candidate set and its input order. Candidates stay
+  // decorated with their epoch for the stable latest-wins sort.
+  const timed = [];
   for (const observation of observations) {
-    if (!hasParseableObservedAt(observation)) continue;
-    if (Date.parse(observation.observedAt) > atMs) continue;
     if (query.retailer && observation.store.retailer !== query.retailer) continue;
     if (query.storeId && observation.store.id !== query.storeId) continue;
     if (productIds && !productIds.has(observation.product.id)) continue;
-    candidates.push(observation);
+    const observedMs = Date.parse(observation.observedAt);
+    if (Number.isNaN(observedMs) || observedMs > atMs) continue;
+    timed.push([observedMs, observation]);
   }
 
   // Latest observation per offer wins regardless of input order; the stable
   // sort keeps input order among equal timestamps, preserving the previous
   // last-write-wins outcome for pre-sorted input.
+  timed.sort(byEpoch);
   const latest = new Map();
-  for (const observation of [...candidates].sort(byObservedAt)) {
+  for (let index = 0; index < timed.length; index += 1) {
+    const observation = timed[index][1];
     latest.set(`${observation.product.id}\u0000${observation.store.id}`, observation);
   }
 
-  return [...latest.values()]
-    .filter((observation) =>
-      Date.parse(observation.lastSeenAt ?? observation.observedAt) >= atMs - freshWithinDays * DAY_MS
-    )
-    .filter((observation) =>
-      observation.isOnSpecial !== false &&
-      observation.promotion &&
-      promotionIsActive(observation.promotion, atMs) &&
-      (observation.price.promoCents !== undefined ||
+  const freshFloorMs = atMs - freshWithinDays * DAY_MS;
+  const ongoing = [];
+  for (const observation of latest.values()) {
+    if (
+      Date.parse(observation.lastSeenAt ?? observation.observedAt) < freshFloorMs
+    ) continue;
+    if (
+      observation.isOnSpecial === false ||
+      !observation.promotion ||
+      !promotionIsActive(observation.promotion, atMs) ||
+      !(observation.price.promoCents !== undefined ||
         (pricePolicy === "member" && observation.price.memberCents !== undefined))
-    )
-    .map((observation) => {
-      // Ongoing sales evaluate promotion activity at query.at, not at the
-      // observation time: a promo live "now" is sellable now.
-      const current = selectEffectivePrice(observation, { pricePolicy, at });
-      const regularCents = observation.price.regularCents;
-      const savePercent = regularCents > current.cents
-        ? roundPercent(((regularCents - current.cents) / regularCents) * 100)
-        : observation.promotion?.savePercent;
-      return {
-        product: structuredClone(observation.product),
-        store: structuredClone(observation.store),
-        current: { ...current, observedAt: observation.lastSeenAt ?? observation.observedAt },
-        regularCents,
-        savePercent,
-        promotion: structuredClone(observation.promotion),
-      };
-    })
-    .sort((left, right) => (right.savePercent ?? 0) - (left.savePercent ?? 0));
+    ) continue;
+    // Ongoing sales evaluate promotion activity at query.at, not at the
+    // observation time: a promo live "now" is sellable now.
+    const current = selectEffectivePrice(observation, { pricePolicy, atMs });
+    const regularCents = observation.price.regularCents;
+    const savePercent = regularCents > current.cents
+      ? roundPercent(((regularCents - current.cents) / regularCents) * 100)
+      : observation.promotion?.savePercent;
+    ongoing.push({
+      product: cloneJson(observation.product),
+      store: cloneJson(observation.store),
+      current: { ...current, observedAt: observation.lastSeenAt ?? observation.observedAt },
+      regularCents,
+      savePercent,
+      promotion: cloneJson(observation.promotion),
+    });
+  }
+
+  return ongoing.sort((left, right) => (right.savePercent ?? 0) - (left.savePercent ?? 0));
 }
 
 /**
  * Builds per-offer price histories: one series per productId+storeId pair,
  * points sorted ascending by observedAt, each priced by evaluating promotion
  * activity at that point's own observedAt. Series are sorted by productId
- * then storeId; empty input yields []. Observations with unparseable
- * observedAt are skipped (load is lenient; see hasParseableObservedAt).
+ * then storeId; empty input yields []. Groups whose observations all have
+ * unparseable observedAt yield an empty points array (load is lenient; the
+ * series itself still exists, as before).
  */
 export function buildPriceSeries(observations, { pricePolicy = "public" } = {}) {
-  const series = [...groupObservations(observations).entries()]
-    .map(([key, group]) => {
-      const [productId, storeId] = key.split("\u0000");
-      const points = group
-        .filter(hasParseableObservedAt)
-        .sort(byObservedAt)
-        .map((observation) => {
-          const price = selectEffectivePrice(observation, {
-            pricePolicy,
-            at: observation.observedAt
-          });
-          return { observedAt: observation.observedAt, cents: price.cents, kind: price.kind };
-        });
-      return { productId, storeId, points };
+  const series = [];
+  for (const [key, group] of groupObservations(observations)) {
+    // Parse each observedAt once, skip unparseable rows, decorate with the
+    // epoch so the ascending sort never re-parses inside a comparator.
+    const timed = [];
+    for (const observation of group) {
+      const observedMs = Date.parse(observation.observedAt);
+      if (!Number.isNaN(observedMs)) timed.push([observedMs, observation]);
+    }
+    timed.sort(byEpoch);
+
+    const [productId, storeId] = key.split("\u0000");
+    const points = timed.map(([observedMs, observation]) => {
+      const price = selectEffectivePrice(observation, { pricePolicy, atMs: observedMs });
+      return { observedAt: observation.observedAt, cents: price.cents, kind: price.kind };
     });
+    series.push({ productId, storeId, points });
+  }
 
   return series.sort((left, right) => {
     if (left.productId !== right.productId) {

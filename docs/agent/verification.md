@@ -5,7 +5,7 @@ How to confirm a change works. Pair with `command-map.md`.
 ## Required checks before handoff
 
 1. **`npm run check`** — syntax-checks every source file. Fast. Always run.
-2. **`npm test`** — full suite (~1,020 tests, ~3.5s as of the 2026-09-09 perf trial). All self-contained:
+2. **`npm test`** — full suite (~1,040 tests, ~3.5s as of the 2026-09-09 perf trials). All self-contained:
    - temp dirs in `os.tmpdir()` for JSONL/DB fixtures
    - in-process HTTP server on port `0` for app/API tests
    - (The legacy dashboard child-process test was deleted with the dashboard

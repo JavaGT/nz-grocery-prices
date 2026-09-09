@@ -19,6 +19,11 @@ const inflight = new Map();
 // actions (watch/saved/prefs/auth) are never served from stale cache.
 const GET_CACHE_TTL_MS = 30_000;
 const getCache = new Map(); // url -> { at, data }
+// Hard bound on retained GET payloads (product details + 200-point histories
+// are tens of KB each). Without it a long browse session accumulates one
+// entry per visited URL until the next mutation. Eviction only REMOVES
+// entries — a miss refetches — so cache correctness is unchanged.
+const GET_CACHE_MAX_ENTRIES = 100;
 
 export { ApiError };
 
@@ -32,6 +37,16 @@ function cacheGet(url) {
 function cacheSet(url, data) {
   // Clone on write AND read so no caller can mutate cached state.
   getCache.set(url, { at: Date.now(), data: structuredClone(data) });
+  // Drop expired entries first (they are dead weight), then evict the
+  // oldest-inserted survivors while over the cap (Map iteration is insertion
+  // order; re-insertion on read refreshes nothing, so this is FIFO).
+  const now = Date.now();
+  for (const [u, hit] of getCache) {
+    if (now - hit.at >= GET_CACHE_TTL_MS) getCache.delete(u);
+  }
+  while (getCache.size > GET_CACHE_MAX_ENTRIES) {
+    getCache.delete(getCache.keys().next().value);
+  }
 }
 
 function cacheClear() {

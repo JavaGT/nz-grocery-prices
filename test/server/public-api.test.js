@@ -95,6 +95,28 @@ describe('public API server', () => {
       }
     });
 
+    it('offset past the end keeps the exact total on filtered search', async () => {
+      // The filtered path computes total from a COUNT(*) OVER () window on
+      // the page query; a page past the end returns no rows, so the handler
+      // must fall back to the standalone count and still report the real
+      // total (not 0).
+      const records = [];
+      for (let i = 0; i < 3; i++) {
+        records.push(productRec(`paknsave:m${i}`, { data: { name: `Milk ${i}L` } }));
+      }
+      records.push(productRec('paknsave:bread', { data: { name: 'White Bread' } }));
+      const srv = await createTestServer({ records });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products?query=milk&limit=2&offset=50`);
+        assert.equal(status, 200);
+        assert.equal(body.total, 3);
+        assert.deepEqual(body.products, []);
+        assert.equal(body.offset, 50);
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('rejects query longer than 200 chars', async () => {
       const srv = await createTestServer({ records: [] });
       try {

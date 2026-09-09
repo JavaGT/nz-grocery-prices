@@ -86,4 +86,23 @@ describe('api GET cache', () => {
     const b = await api.deals();
     assert.equal(b.items[0].id, 1);
   });
+
+  it('evicts the oldest entries once the cache exceeds its entry cap (bounded memory)', async () => {
+    let seq = 0;
+    const calls = stubFetch(() => jsonRes({ seq: ++seq }));
+    // > GET_CACHE_MAX_ENTRIES (100): every URL is distinct via the limit param.
+    const total = 120;
+    for (let i = 0; i < total; i++) await api.products({ limit: i + 1 });
+    assert.equal(calls.length, total);
+
+    // The oldest URL (limit=1) was evicted: it must refetch and observe a
+    // FRESH value, proving no stale entry survived.
+    const refetched = await api.products({ limit: 1 });
+    assert.equal(calls.length, total + 1);
+    assert.equal(refetched.seq, total + 1);
+
+    // A recently inserted URL is still served from cache.
+    await api.products({ limit: total });
+    assert.equal(calls.length, total + 1);
+  });
 });

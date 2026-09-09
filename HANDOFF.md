@@ -4,6 +4,17 @@
 
 Run retailer price collection on this Mac and serve the completed archive to a hosted app. GitHub Actions collection has been intentionally removed.
 
+## Perf trial 2026-09-09T100601 (latest change)
+
+Second perf trial of the day, merged from four lanes (`spa`, `ingest`,
+`analytics`, `endurance`): single-scan filtered search, session statement
+reuse, two SPA dialog leaks fixed + bounded SPA GET cache, canonical
+fingerprint memo + streamed compaction + `cloneJson` on the append path, and
+analytics epoch/allocation work (~30–65 ms per nightly rebuild). Server
+steady state proven at 1.16 M requests (no server memory changes needed).
+Full report with owner-decision tickets: `perf-reports/perf-trial-2026-09-09T100601.html`
+(untracked); lane evidence in `perf-notes/REPORT-{spa,ingest,analytics,endurance}.md`.
+
 ## Implemented local collection path
 
 - `scripts/archive-daily-local.sh` runs the five existing retailer archive commands.

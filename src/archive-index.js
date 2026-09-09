@@ -1,4 +1,4 @@
-import { fingerprint, validateRecordEnvelope } from "./archive-records.js";
+import { cloneJson, fingerprint, validateRecordEnvelope } from "./archive-records.js";
 
 /**
  * Dedup identity of an observation within a batch/repository (memory-only
@@ -216,7 +216,7 @@ export class ArchiveIndex {
   /** Indexes one record into live state. */
   apply(record) {
     this.#validateRecord(record);
-    this.#applyRecord(this.#index, structuredClone(record));
+    this.#applyRecord(this.#index, cloneJson(record));
   }
 
   /**
@@ -234,7 +234,7 @@ export class ArchiveIndex {
   /** Bulk-apply decoded records (e.g. the additions of one append batch). */
   applyAdditions(records) {
     for (const record of records) this.#validateRecord(record);
-    for (const record of records) this.#applyRecord(this.#index, structuredClone(record));
+    for (const record of records) this.#applyRecord(this.#index, cloneJson(record));
   }
 
   /** Shallow structural copy of the index; record objects are shared. */
@@ -272,7 +272,7 @@ export class ArchiveIndex {
       productId: observation.product.id,
       hash,
       observedAt: observation.observedAt,
-      data: structuredClone(observation.product),
+      data: cloneJson(observation.product),
     };
   }
 
@@ -289,16 +289,16 @@ export class ArchiveIndex {
       storeId: observation.store.id,
       hash,
       observedAt: observation.observedAt,
-      data: structuredClone(observation.store),
+      data: cloneJson(observation.store),
     };
   }
 
   #planOfferRecord(index, observation) {
     const id = offerId(observation);
     const data = {
-      price: structuredClone(observation.price),
-      ...(observation.promotion ? { promotion: structuredClone(observation.promotion) } : {}),
-      source: structuredClone(observation.source),
+      price: cloneJson(observation.price),
+      ...(observation.promotion ? { promotion: cloneJson(observation.promotion) } : {}),
+      source: cloneJson(observation.source),
     };
     const hash = fingerprint(data);
     const observedAt = Date.parse(observation.observedAt);

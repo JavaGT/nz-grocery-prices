@@ -5,8 +5,9 @@ import { calculateSales, calculateOngoingSales } from '../analytics.js';
 // the SAME parameter set, and stores one row per surviving offer signal.
 // Row semantics: calculated_at is the CURRENT OBSERVATION's epoch (exposed as
 // calculatedAt by the response), reference/current/drop mirror the signal
-// fields the response derives. Keep DEAL_SIGNAL_PARAMS in sync with
-// src/server/handlers/public.js until the handler switch lands.
+// fields the response derives. /api/deals serves these rows directly
+// (landed e58303b); DEAL_SIGNAL_PARAMS are pinned by the parity test
+// test/sqlite/deal-materialization.test.js — change them only with the test.
 export const DEAL_SIGNALS_CALC_VERSION = '1';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

@@ -44,13 +44,14 @@ dependencies, `node:test`. **Node 26.3.1+** for the app server / SQLite; Node
   change.
 - **No FTS5.** Search uses `LIKE` + `COLLATE NOCASE` on `products.name`. Don't
   assume FTS5 exists.
-- **Deal signals pre-materialization is APPROVED and LANDED at the rebuild
-  layer** (owner override, 2026-09-06 — see DECISIONLOG). The rebuild
-  populates `deal_signals` via `src/sqlite/deal-materialization.js`, which
-  MUST keep reusing `src/analytics.js` with the runtime parameter set
-  (parity test: `test/sqlite/deal-materialization.test.js`). The
-  `/api/deals` handler still computes at runtime; flipping it to read
-  signals is the pending follow-up. `product_matches` stays deleted —
+- **Deal signals pre-materialization is APPROVED and FULLY LANDED** (owner
+  override, 2026-09-06 — see DECISIONLOG). The rebuild populates
+  `deal_signals` via `src/sqlite/deal-materialization.js`, which MUST keep
+  reusing `src/analytics.js` with the pinned parameter set (parity test:
+  `test/sqlite/deal-materialization.test.js`). The `/api/deals` handler
+  reads the materialized rows (`defaultQueryDealSignals` in
+  `src/server/handlers/public.js`; landed `e58303b`) — no runtime analytics
+  on the request path. `product_matches` stays deleted —
   match truth = `app.db.product_match_pairs`.
 - **Warehouse adapter uses `curl` via `execFile`** (anti-bot TLS fingerprint),
   never shell strings. Don't switch to shell-string execution.

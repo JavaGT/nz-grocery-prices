@@ -35,7 +35,7 @@ suffices for collectors.
 
 | Task | Command | Notes |
 |---|---|---|
-| Full test suite | `npm test` | ~1,020 tests, ~3.5s (perf campaign 2026-09-06: retry/scrypt test seams removed real sleeps; 2026-09-09 trial recount). All self-contained (temp dirs, port 0). |
+| Full test suite | `npm test` | ~1,040 tests, ~3.5s (perf campaign 2026-09-06: retry/scrypt test seams removed real sleeps; 2026-09-09 trial recounts). All self-contained (temp dirs, port 0). |
 | Lint / typecheck | **none** | no ESLint, no TypeScript compiler. `npm run check` is the syntax gate. |
 
 ## Run / dev

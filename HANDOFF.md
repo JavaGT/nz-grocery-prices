@@ -4,6 +4,35 @@
 
 Run retailer price collection on this Mac and serve the completed archive to a hosted app. GitHub Actions collection has been intentionally removed.
 
+## Scheduled round 2026-09-10 (collection health + improvement pass)
+
+Sep 10 03:30 nightly: **all five lanes healthy** (paknsave 11,079;
+newworld 13,843 full discovery walk as predicted; woolworths 17,179;
+freshchoice 3,149 long walk; warehouse 1,022). Gate streak 1/3 — Sep 9
+newworld transient-500 loss (closed as #31, watch #33) reset it; needs two
+more healthy nights.
+
+Improvement pass ran two playbook lanes + a 5-seat review round; reports in
+`reports/quick-scan-20260910.md` and `docs/agent/reports/config-review-20260910.md`.
+
+- **#47 fixed** (`4b4c7b5`): LIKE wildcard escaping was a no-op (no `ESCAPE`
+  clause) — searches with `%`/`_` returned wrong results. Shared
+  `likeEscape()` + `ESCAPE '\'` on all 3 LIKE sites in
+  `src/server/handlers/public.js`.
+- **#48 fixed** (`2476ba2`): public handlers source time from the
+  factory-injected clock, not `ctx.clock()`.
+- **Pin tests** (`69a3790`): backslash-in-query, bare-ctx health, factory-
+  clock deals TTL — closes the gaps the test-honesty review named.
+- **#49 fixed** (`2abe03f`, config lane): verification.md/project-map.md now
+  describe `deal_signals` as materialized; `.gitignore` `reports/` anchored
+  (`265345f` — it was silently ignoring `docs/agent/reports/`).
+- **Open tickets:** #50 (evaluate deals tiering in SQL), #51 (pnpm lanes
+  tooling documented in ~/.zcode/AGENTS.md doesn't exist — build vs
+  un-document), #52 (implement: private.js `rateLimitCheck` still reads
+  `ctx.clock()`), #53 (config friction follow-up 2026-09-17).
+- Full suite 1044/0; reviews: Luna + Muse + DeepSeek + native all
+  APPROVED/MINOR-then-closed (test-honesty gaps closed same round).
+
 ## Perf trial 2026-09-09T100601 (latest change)
 
 Second perf trial of the day, merged from four lanes (`spa`, `ingest`,

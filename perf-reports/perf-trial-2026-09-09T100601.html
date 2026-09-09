@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="300">
+<title>Perf Trial 2026-09-09T100601 — nz-grocery-prices</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "Helvetica Neue", sans-serif; background:#11151c; color:#dbe2ea; margin:0; padding:2rem; line-height:1.5; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 .2rem; } h2 { font-size:1.15rem; margin-top:2.2rem; border-bottom:1px solid #2c3644; padding-bottom:.3rem;} h3 { font-size:1rem; margin-top:1.4rem;}
+  .sub { color:#8a97a8; margin-bottom:1.5rem; }
+  .banner { background:#2a2416; border:1px solid #6e5a2a; padding:.6rem 1rem; border-radius:8px; margin:1rem 0; }
+  .banner.done { background:#1d2a1f; border-color:#2f5e38; }
+  table { border-collapse: collapse; width:100%; margin:.8rem 0; font-size:.92rem; }
+  th, td { text-align:left; padding:.45rem .7rem; border-bottom:1px solid #232c38; vertical-align:top; }
+  th { color:#9fb0c3; font-weight:600; background:#161c26; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size:.85em; background:#1a212c; padding:.1rem .35rem; border-radius:4px; color:#a8c7fa; }
+  .card { background:#151b25; border:1px solid #232c38; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  .delta-up { color:#5fd07a; font-weight:600; } .delta-down { color:#e5735f; font-weight:600; } .neutral { color:#8a97a8; }
+  .tag { display:inline-block; background:#223047; color:#9cc3f5; border-radius:5px; padding:.05rem .5rem; font-size:.78rem; margin-right:.4rem; }
+  .tag.green { background:#1d3a26; color:#7fd6a0; }
+  .pending { color:#c9a55f; font-style:italic; }
+  footer { margin-top:3rem; color:#66717f; font-size:.85rem; }
+  .ticket { border-left:3px solid #c9a55f; }
+  .ticket label { margin-right:1rem; cursor:pointer; }
+  .ticket textarea { width:100%; background:#10151d; color:#dbe2ea; border:1px solid #2c3644; border-radius:6px; min-height:2.2rem; margin-top:.4rem; font:inherit; font-size:.88rem; }
+  button.copy { background:#223047; color:#cfe2ff; border:1px solid #35507a; border-radius:8px; padding:.5rem 1rem; font:inherit; cursor:pointer; }
+  button.copy:hover { background:#2b3d5c; }
+</style>
+</head>
+<body>
+<main>
+<h1>Performance Trial — perf-trial-2026-09-09T100601</h1>
+<div class="sub">nz-grocery-prices · baseline commit <code>deb5e9f</code> · Node v26.7.0 · trial started 2026-09-09 10:06 NZ time · this page auto-refreshes every 5 minutes · your ticket answers survive refresh</div>
+
+<div class="banner done"><strong>Status: complete — all four lanes landed, verified, and merged; the trial branch is merged into <code>main</code> (merge commit <code>9fcc724</code>, 1,038/1,038 tests green on main).</strong> Remaining items are the owner-decision tickets below — nothing further was implemented past convergence. The report tab in Safari auto-refreshes; a scratch server with the merged build is running at <code>127.0.0.1:3117</code> (loopback, copied data only) if you want to click through.</div>
+
+<h2>Results so far (baseline <code>deb5e9f</code> → merged trial branch, same machine &amp; real archive copies)</h2>
+<table>
+<tr><th>Metric</th><th>Before</th><th>After</th><th>Delta</th><th>Lane</th></tr>
+<tr><td>Nightly no-op append (dup detection dominates)</td><td>baseline</td><td>−26% / −33%</td><td class="delta-up">−26% / −33%</td><td>ingest</td></tr>
+<tr><td>Archive load (fingerprint path)</td><td>baseline</td><td>−4% (12.6 MB) / −13% (18.3 MB)</td><td class="delta-up">−4% / −13%</td><td>ingest</td></tr>
+<tr><td>Compaction time</td><td>baseline</td><td>−20% / −21%</td><td class="delta-up">−20% / −21%</td><td>ingest</td></tr>
+<tr><td>Compaction peak RSS</td><td>290 MB</td><td>256 MB</td><td class="delta-up">−12%</td><td>ingest</td></tr>
+<tr><td>Append (<code>appendNew</code>)</td><td>baseline</td><td>−17% / −29%</td><td class="delta-up">−17% / −29%</td><td>ingest</td></tr>
+<tr><td>Filtered search SQL (page + total)</td><td>1.21–1.29 ms (two scans)</td><td>0.77–0.83 ms (single scan)</td><td class="delta-up">−36%</td><td>spa</td></tr>
+<tr><td><code>/api/products?query=</code> HTTP p50</td><td>2.16 / 1.83 ms</td><td>1.70 / 1.70 ms</td><td class="delta-up">−21%</td><td>spa</td></tr>
+<tr><td>Session lookup (auth'd requests)</td><td>9.7 µs</td><td>2.7 µs</td><td class="delta-up">−72%</td><td>spa</td></tr>
+<tr><td>Detail-dialog keydown listener + DOM</td><td>leaked per open</td><td>torn down on all close paths</td><td class="delta-up">leak fixed</td><td>spa</td></tr>
+<tr><td>SPA script bytes (raw / brotli)</td><td>67,889 / 17,598 B</td><td>67,577 / 17,566 B</td><td class="neutral">dead imports only</td><td>spa</td></tr>
+<tr><td>Docs drift found: <code>/api/deals</code> → <code>deal_signals</code> flip</td><td>docs said "pending"</td><td>flip landed earlier (<code>e58303b</code>); docs synced</td><td class="neutral">0 runtime analytics on request path (confirmed)</td><td>coordinator</td></tr>
+<tr><td><code>calculateOngoingSales</code></td><td>60 ms full sweep (12.6 MB)</td><td>−65% / −43% / −38% at 12.6 / 37.6 / 87.6 MB</td><td class="delta-up">−38…−65%</td><td>analytics</td></tr>
+<tr><td><code>calculateSales</code> · <code>buildPriceSeries</code></td><td>baseline</td><td>−14…−24% across scales</td><td class="delta-up">−14…−24%</td><td>analytics</td></tr>
+<tr><td>Full analytics sweep</td><td>60 → 28 ms (12.6 MB)</td><td>241 → 177 ms (87.6 MB)</td><td class="delta-up">−26% / −53%</td><td>analytics</td></tr>
+<tr><td>SPA GET cache retained per long browse session</td><td>unbounded (~29.5 MB at 500 viewed products)</td><td>bounded: ≤100 entries, ~1.3 MB realistic / ≤5.7 MB worst</td><td class="delta-up">bounded</td><td>endurance</td></tr>
+<tr><td>History dialog DOM (sparkline + 200-row table) per "View price history"</td><td>retained forever per view</td><td>removed on close</td><td class="delta-up">leak fixed</td><td>endurance</td></tr>
+<tr><td>Server post-GC RSS over 1,163,522 mixed requests (10 min)</td><td colspan="2">flat — 143.5 / 139.2 / 140.7 MB by third, <strong>−2.9 MB growth</strong>; boot peak 45.9 MB</td><td class="neutral">already steady — no change landed (evidence)</td><td>endurance</td></tr>
+</table>
+<p>Every change is behavior-preserving: spa swept 23/23 query shapes byte-identical; ingest proved 47,500 fingerprint digests plus compact/append/query/stats/history outputs byte-identical (evidence hashes committed in <code>perf-notes/evidence/</code>). Full suite on the merged tree: <strong>1,033 pass / 0 fail</strong> (~3.5 s).</p>
+
+<h2>Lanes</h2>
+<table>
+<tr><th>Lane</th><th>Branch</th><th>Status</th><th>Commits</th></tr>
+<tr><td>Coordinator</td><td><code>perf-trial-2026-09-09T100601</code></td><td>complete — merged to <code>main</code></td><td><code>1b163b0</code> docs sync · <code>8ee3add</code> docs recount + merges</td></tr>
+<tr><td>spa</td><td><code>…100601-spa</code></td><td><span class="tag green">merged</span></td><td><code>2796323</code>→<code>22c4da0</code> (5)</td></tr>
+<tr><td>ingest</td><td><code>…100601-ingest</code></td><td><span class="tag green">merged</span></td><td><code>a5a814d</code>→<code>57e1d39</code> (4)</td></tr>
+<tr><td>endurance</td><td><code>…100601-endurance</code></td><td><span class="tag green">merged</span></td><td><code>fe0c14d</code>→<code>a25daf6</code> (3) — lane hit its provider usage cap after landing; coordinator completed gate + report commit from its artifacts</td></tr>
+<tr><td>analytics</td><td><code>…100601-analytics</code></td><td><span class="tag green">merged</span></td><td><code>36a03b8</code>→<code>b0fe360</code> (4)</td></tr>
+</table>
+
+<h2>Improvements — what changed and why</h2>
+
+<div class="card">
+<span class="tag">spa</span><strong>1. Single-scan filtered search; session/`_meta` statement reuse; client dialog leak fixed</strong> (<code>769637c</code>, <code>3b60124</code>)
+<p>The products list ran the <code>LIKE</code> filter twice — once for the page, once for the total count. The page query now carries <code>COUNT(*) OVER ()</code> (one scan serves both), with offset-past-end falling back to a standalone count (test-pinned). SQL 1.21–1.29 → 0.77–0.83 ms; HTTP p50 2.16/1.83 → 1.70/1.70 ms; response bytes identical across a 23-shape parity sweep. Per-request <code>prepare()</code> calls in the session lookup and the <code>_meta</code> freshness probe now reuse cached statements (9.7 → 2.7 µs per session lookup; −2.5 µs per JSON response). In the browser, the product detail dialog leaked one document keydown listener plus the dialog DOM on every button/overlay close — all close paths (Esc, button, overlay, backdrop) now funnel into <code>dialog.close()</code>, whose <code>close</code> event tears both down. Verified at code level + endpoint probes in Safari (visual pass pending, see below).</p>
+<p><strong>Trade-offs:</strong> windowed-COUNT semantics on offset-past-end pages preserved via the explicit fallback path (pinned by tests); statement memos assume one connection per server (true here) — none otherwise.</p>
+</div>
+
+<div class="card">
+<span class="tag">ingest</span><strong>2. Canonical fingerprint memo + direct serializer; streamed compaction; cheaper append-path clones</strong> (<code>a5a814d</code>, <code>9dff75a</code>, <code>1f8c8ba</code>)
+<p>Profiling showed <code>fingerprint()</code> re-deriving canonical key order for every record on every load/append. The locale-pinned key order is now memoized per object shape and canonical JSON is emitted by a direct serializer: archive load −4% (12.6 MB) / −13% (18.3 MB breadth); the nightly no-op append (where dedup hashing dominates) −26% / −33%. Compaction now streams records in ~1 MB chunks instead of building one giant string: −20% / −21% time, peak RSS 290 → 256 MB — same bytes, same single fsync, same atomic rename. The append path's <code>structuredClone</code> calls became a purpose-built <code>cloneJson</code> (append −17% / −29%), including a 6-line swap in <code>archive-index.js</code> the brief pre-approved.</p>
+<p><strong>Trade-offs:</strong> the serializer memo is bounded module state (key-order cache); the serializer reproduces the old comparator's integer-like-key quirk, now pinned by tests instead of by accident; <code>cloneJson</code> turns cyclic input into a stack-overflow instead of <code>DataCloneError</code> — both throw before anything persists, and non-plain-JSON values still take <code>structuredClone</code>. Durability untouched — no fsync weakened.</p>
+</div>
+
+<div class="card">
+<span class="tag">coordinator</span><strong>3. Docs drift corrected: the <code>/api/deals</code> → materialized-signals flip already landed</strong> (<code>1b163b0</code>)
+<p>This trial's planned "flip <code>/api/deals</code> to read materialized <code>deal_signals</code>" (the long-standing pending follow-up) turned out to be already implemented — <code>defaultQueryDealSignals</code> reads the table and the handler has no analytics imports (landed earlier in <code>e58303b</code>). AGENTS.md, the project map, the materializer comment, and DECISIONLOG all still described it as pending; they now describe reality, and the signal-parameter set is documented as pinned by the parity test. No behavior change — docs only.</p>
+</div>
+
+<div class="card">
+<span class="tag">analytics</span><strong>4. Analytics library: parse-once epoch sorts, fused filters, allocation-free price selection</strong> (<code>7598410</code>)
+<p>Profile showed the analytics passes spending their time in repeated ISO-date parsing, unfocused filter passes, and intermediate allocations. Fix: decorate-sort with epochs parsed once, fused filter passes, allocation-free <code>selectEffectivePrice</code>, and the ingest lane's <code>cloneJson</code> for output clones. <code>calculateOngoingSales</code> −65% / −43% / −38% at 12.6 / 37.6 / 87.6 MB; <code>calculateSales</code> and <code>buildPriceSeries</code> −14…−24%; full sweep 60 → 28 ms (12.6 MB) and 241 → 177 ms (87.6 MB). Outputs byte-identical across a 2,131-comparison parity harness (3 real archives + 300-case seeded fuzz + error-path parity); the rebuild's <code>deal_signals</code> parity test stays green.</p>
+<p><strong>Trade-offs:</strong> analytics now imports <code>cloneJson</code>, so cyclic input throws a different (still throwing) error. <strong>Honest framing:</strong> since deals are pre-materialized and the history endpoint reads SQLite, analytics now runs at rebuild time only — these wins are worth ~30–65 ms per nightly rebuild, not request latency. <code>toAgentFeed</code> (0.1–0.8 ms) and per-product series (0.03–0.08 ms) were profiled and left alone as already-optimal.</p>
+</div>
+
+<div class="card">
+<span class="tag">endurance</span><strong>5. Server proven steady at 1.16 M requests; two SPA memory leaks fixed; GET cache bounded</strong> (<code>fe0c14d</code>)
+<p>The memory lens found the <strong>server already at steady state</strong>: a 10-minute mixed workload (1,163,522 requests incl. authenticated paths, a scrypt register/login cycle, static files, deal rotation) shows flat post-GC RSS (−2.9 MB growth), boot peak 45.9 MB, and every long-lived structure audited as bounded (body cache ≤32 with TTL, deals cache single-slot with signature invalidation, suggestion index one slot). The heap profile's top allocators are one-time or irreducible per-request work — so <strong>no server change was landed</strong>; a keep-alive "fix" was even reverted when its test passed without it (the real hang was a bench-driver bug). The real wins were client-side: the price-history dialog never removed itself from the DOM (tens to hundreds of KB retained per "View price history" round-trip — now self-removing on <code>close</code>, with a guard for superseded dialogs); opening a detail dialog over an existing one bypassed the keydown teardown (now retires via <code>close()</code> so teardown runs); and the SPA GET cache kept one entry per URL forever (~29.5 MB retained at 500 viewed products — now TTL-pruned and evicted beyond 100 entries, eviction only removes so cache correctness is unchanged).</p>
+<p><strong>Trade-offs:</strong> cache eviction can refetch an old entry (a miss, never a wrong value); superseded-dialog guard adds one state check; multi-entry deals cache rejected — the SPA never sends <code>retailer</code> on /api/deals, so the rotation-thrash pattern it would fix doesn't occur (and it would raise worst-case memory).</p>
+</div>
+
+<h2>Verification</h2>
+<p>Per-lane gates before merge: spa clean + 1,024/1,024; ingest clean + 1,032/1,032 (8 new tests); analytics clean + 1,033/1,033 plus the <code>deal_signals</code> parity test and a 2,131-comparison output-parity harness; endurance clean + 1,029/1,029 on its base (5 new DOM-behavior tests). Merged trial branch (<code>8ee3add</code>): clean + <strong>1,038/1,038</strong> (~3.5 s). Live endpoint probes against the merged tree on real copied data (fresh projection built via <code>scripts/build-db.js</code>, 18,726 records): <code>/</code>, <code>/api/products</code>, <code>/api/products?query=</code>, <code>/api/deals</code>, <code>/api/stores</code>, <code>/api/search/suggestions?query=</code> all 200 — suggestions first hit 13.7 ms (one-time in-memory index build, a known documented cost), then 0.5 ms. The served client assets were grep-verified as the merged versions (dialog teardown guard + cache eviction present in what the server ships).</p>
+<p><strong>Browser visual pass:</strong> the GUI automation stack became unavailable partway through the trial (display capture lost, then the computer-use tool path degraded; Safari's "JavaScript from Apple Events" and System Events are security-gated), so the interactive close-path checks were replaced by stronger automated equivalents: the endurance lane's synthetic-DOM harness pins history-dialog self-removal, detail-over-detail retirement, and zero leaked document listeners after Esc, in the real test suite. What automation can't confirm — pure human-eyes rendering — is left to you: the app is live at <code>127.0.0.1:3117</code> (loopback, copied data) and the report tab beside it refreshes itself.</p>
+
+<h2>Open tickets — owner decisions requested</h2>
+<p>Mark Adopt / Adapt / Reject and comment; the copy button pastes only what you answered, plus your instruction for the unmarked rest. Nothing is pre-selected. Answers persist across the 5-minute refresh. Every ticket is also filed on GitHub as <code>PERF2-T3…T11</code> (<a href="https://github.com/JavaGT/nz-grocery-prices/issues/34">#34</a>–<a href="https://github.com/JavaGT/nz-grocery-prices/issues/42">#42</a>, linked per card below) — answer in either place; evaluation tickets are deliberately framed so implementation is <em>not</em> the todo until you say so.</p>
+
+<div class="card ticket">
+<strong>T3 · Bug (pre-existing, out of perf scope): Settings page renders empty. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/34" style="color:#9cc3f5;white-space:nowrap">GitHub #34</a></strong>
+<p><code>public/views/settings.js</code> <code>renderSettings</code> never calls its <code>render()</code>, so Settings — the only sign-in surface (a 401 redirects there) — renders an empty container. Found by the spa lane and independently re-confirmed by the endurance lane; preserved unchanged by the trial because fixing it is a behavior change.</p>
+<p><strong>Decision question:</strong> Adopt = fix it in this trial's merge (one line, test-pinned) · Adapt = fix separately outside the perf trial · Reject = leave as is.</p>
+<p><label><input type="radio" name="t3" value="Adopt"> Adopt</label><label><input type="radio" name="t3" value="Adapt"> Adapt</label><label><input type="radio" name="t3" value="Reject"> Reject</label></p>
+<textarea data-ticket="t3" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T4 · Worth exploring: query-path clones → <code>cloneJson</code>. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/35" style="color:#9cc3f5;white-space:nowrap">GitHub #35</a></strong>
+<p>The ingest lane's faster clone landed on the append path only. <code>src/archive-index.js</code> lines 39, 125, 420, 486–496 still use <code>structuredClone</code> on query/materialization paths; the analytics lane's profile now measures <strong>302 ms self time</strong> there — the biggest remaining analytics-adjacent win, restating the ingest lane's earlier "few percent" estimate with hard numbers.</p>
+<p><strong>Decision question (evaluation, not implementation):</strong> worth doing now, or close as marginal?</p>
+<p><label><input type="radio" name="t4" value="Adopt"> Adopt</label><label><input type="radio" name="t4" value="Adapt"> Adapt</label><label><input type="radio" name="t4" value="Reject"> Reject</label></p>
+<textarea data-ticket="t4" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T5 · Speculative, high-risk: custom <code>decodeArchiveLine</code> parser. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/36" style="color:#9cc3f5;white-space:nowrap">GitHub #36</a></strong>
+<p><code>JSON.parse</code> of archive lines is ~4.5% of the load profile. A hand-rolled line parser could claw back part of that but re-implements JSON parsing on the authoritative-data path — the lane judged it high-risk/low-win and did not attempt it.</p>
+<p><strong>Decision question (evaluation):</strong> is trusted-archive fast-path parsing worth the risk, or close?</p>
+<p><label><input type="radio" name="t5" value="Adopt"> Adopt</label><label><input type="radio" name="t5" value="Adapt"> Adapt</label><label><input type="radio" name="t5" value="Reject"> Reject</label></p>
+<textarea data-ticket="t5" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T6 · Worth exploring: in-memory products mirror for <code>/api/products</code>. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/37" style="color:#9cc3f5;white-space:nowrap">GitHub #37</a></strong>
+<p>Would save ~0.6 ms per filtered list but introduces tie-order risk against the SQL-ordered results the API currently guarantees.</p>
+<p><strong>Decision question (evaluation):</strong> is 0.6 ms worth re-proving result ordering, or close?</p>
+<p><label><input type="radio" name="t6" value="Adopt"> Adopt</label><label><input type="radio" name="t6" value="Adapt"> Adapt</label><label><input type="radio" name="t6" value="Reject"> Reject</label></p>
+<textarea data-ticket="t6" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T7 · Worth exploring (semantic tradeoff): session memoization. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/38" style="color:#9cc3f5;white-space:nowrap">GitHub #38</a></strong>
+<p>Caching verified sessions would cut the (already memoized-statement) 2.7 µs lookup further, but introduces logout-staleness semantics — a logged-out session could serve from cache until invalidation. Security/perf tradeoff the lane declined to make unilaterally.</p>
+<p><strong>Decision question (evaluation):</strong> is the remaining µs worth logout-staleness reasoning, or close?</p>
+<p><label><input type="radio" name="t7" value="Adopt"> Adopt</label><label><input type="radio" name="t7" value="Adapt"> Adapt</label><label><input type="radio" name="t7" value="Reject"> Reject</label></p>
+<textarea data-ticket="t7" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T8 · Worth exploring: rate-limit record DELETE-per-login. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/39" style="color:#9cc3f5;white-space:nowrap">GitHub #39</a></strong>
+<p>Login currently deletes rate-limit rows per attempt; batching that write would reduce app.db write churn. Small; touches security-adjacent code.</p>
+<p><strong>Decision question (evaluation):</strong> worth the churn, or close?</p>
+<p><label><input type="radio" name="t8" value="Adopt"> Adopt</label><label><input type="radio" name="t8" value="Adapt"> Adapt</label><label><input type="radio" name="t8" value="Reject"> Reject</label></p>
+<textarea data-ticket="t8" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T9 · Micro bundle: watch/prefs statement memos, single-pass router, search covering index. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/40" style="color:#9cc3f5;white-space:nowrap">GitHub #40</a></strong>
+<p>Three measured-but-tiny items from the spa lane: watch-list/preferred-store statement memoization (~10 µs, deals-path only), single-pass route matching (0.3 µs), and a schema-side covering index for the search page scan. Each is real but at noise level today; bundled because they share a "do them in one quiet pass or close all three" character.</p>
+<p><strong>Decision question (evaluation):</strong> bundle-adopt for a quiet pass, or close all?</p>
+<p><label><input type="radio" name="t9" value="Adopt"> Adopt</label><label><input type="radio" name="t9" value="Adapt"> Adapt</label><label><input type="radio" name="t9" value="Reject"> Reject</label></p>
+<textarea data-ticket="t9" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T10 · Owner decision: cross-call epoch WeakMap in analytics. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/41" style="color:#9cc3f5;white-space:nowrap">GitHub #41</a></strong>
+<p>Caching parsed epochs across analytics calls (module-level WeakMap keyed on observation objects) would save another ~15–25% on the materialization double pass. It requires extending analytics' purity contract — observations are currently treated as immutable-and-stateless inputs, and a cross-call cache couples call sites in a way the codebase has so far avoided (cf. the <code>eventTime</code> WeakMap the 08:51 trial added behind an explicit immutability invariant).</p>
+<p><strong>Decision question (evaluate before implementing):</strong> extend the purity contract for a one-off rebuild-time win, or close?</p>
+<p><label><input type="radio" name="t10" value="Adopt"> Adopt</label><label><input type="radio" name="t10" value="Adapt"> Adapt</label><label><input type="radio" name="t10" value="Reject"> Reject</label></p>
+<textarea data-ticket="t10" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T11 · Build-it-or-delete-it: client dead code + a latent abort-signal risk. <a href="https://github.com/JavaGT/nz-grocery-prices/issues/42" style="color:#9cc3f5;white-space:nowrap">GitHub #42</a></strong>
+<p>Found by the endurance lane, left untouched: <code>app.js</code> <code>currentCleanup</code> is invoked by <code>route()</code> but no view ever sets it (dead mechanism, 4 lines); <code>api.suggestions</code> and <code>api.health</code> are exported client wrappers with zero callers; <code>api.js</code> <code>anySignal</code> attaches an abort listener to caller-supplied signals — no caller passes one today, so the accumulation risk is latent until a view passes a long-lived AbortSignal.</p>
+<p><strong>Decision question:</strong> delete the dead trio and note the <code>anySignal</code> contract (Adopt), keep them for planned views (Adapt — say which), or leave as is (Reject)?</p>
+<p><label><input type="radio" name="t11" value="Adopt"> Adopt</label><label><input type="radio" name="t11" value="Adapt"> Adapt</label><label><input type="radio" name="t11" value="Reject"> Reject</label></p>
+<textarea data-ticket="t11" placeholder="comment (optional)"></textarea>
+</div>
+
+<h3>Closed with evidence — no decision needed</h3>
+<div class="card">
+<p>Findings the lanes measured and rejected themselves: adapter parse micro-optimizations (0.4–3.6 µs/item ≈ 4 s CPU per campaign night vs a 60–70 min network-bound walk — collection is I/O-bound; note raw retailer payloads are not archived, so that bench used synthetic fixtures, caveated); JSON-round-trip cloning (drops <code>undefined</code> keys — not behavior-preserving); fingerprint WeakMap (no repeat-hash pattern at real scales); fsync batching (durability, declined on principle); projection schema surgery, string interning, zstd, SPA dynamic-import split (all closed by the 08:51 trial with page-size/byte evidence).</p>
+</div>
+
+<button class="copy" onclick="copyAnswers()">Copy my answers (answered tickets only)</button>
+<span id="copied" class="neutral" style="margin-left:.8rem"></span>
+
+<h2>Method</h2>
+<p>Profile first (<code>node --cpu-prof</code>), repeatable bench scripts committed under <code>perf-notes/</code>, before/after medians on the same machine and real (copied, read-only) archive data at two scales (12.6 MB live archive + 18.3–27 MB breadth archives). Behavior-preserving: parity byte-dumps vs baseline wherever output shape matters; per-lane <code>npm run check</code> + full <code>npm test</code> green before any merge; the merge itself re-gated. Live retailer commands are never run; shared-checkout <code>data/</code> is never written. Hard rules held: two-DB separation, no FTS5, fuzzy matches stay <code>candidate</code>-only, async scrypt only, <code>collector.env</code> secrets untouched.</p>
+
+<footer id="foot">Last updated: 2026-09-09 11:45 · complete · main @ 9fcc724 (merge of trial branch 8ee3add) · all four lane reports in perf-notes/ · trial worktrees removed, branches kept · report file: perf-reports/perf-trial-2026-09-09T100601.html (untracked) · scratch app server on 127.0.0.1:3117 for your click-through</footer>
+<script>
+function restoreAnswers() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('perf-trial-100601-answers') || '{}');
+    for (const [name, v] of Object.entries(saved)) {
+      if (v.choice) { const el = document.querySelector('input[name="' + name + '"][value="' + v.choice + '"]'); if (el) el.checked = true; }
+      if (v.comment) { const ta = document.querySelector('textarea[data-ticket="' + name + '"]'); if (ta) ta.value = v.comment; }
+    }
+  } catch {}
+}
+function persist() {
+  const saved = {};
+  document.querySelectorAll('.ticket').forEach(card => {
+    const name = card.querySelector('input[type=radio]').name;
+    const chosen = document.querySelector('input[name="' + name + '"]:checked');
+    const comment = card.querySelector('textarea[data-ticket="' + name + '"]').value.trim();
+    if (chosen || comment) saved[name] = { choice: chosen ? chosen.value : null, comment };
+  });
+  try { localStorage.setItem('perf-trial-100601-answers', JSON.stringify(saved)); } catch {}
+}
+function copyAnswers() {
+  persist();
+  const saved = JSON.parse(localStorage.getItem('perf-trial-100601-answers') || '{}');
+  const parts = [];
+  document.querySelectorAll('.ticket').forEach(card => {
+    const name = card.querySelector('input[type=radio]').name;
+    if (!saved[name]) return;
+    const title = card.querySelector('strong').textContent.replace(/^T\d+\s*·\s*/, '').split('.')[0].trim();
+    const v = saved[name];
+    let line = name.toUpperCase() + ' "' + title + '": ' + (v.choice || '(no verdict)');
+    if (v.comment) line += ' — ' + v.comment;
+    parts.push(line);
+  });
+  const total = document.querySelectorAll('.ticket').length;
+  const text = parts.length
+    ? 'Perf trial 2026-09-09T100601 answers:\n' + parts.join('\n') +
+      (parts.length < total ? '\n\nThe other ' + (total - parts.length) + ' ticket(s) I left unmarked — treat as undecided and ask again later.' : '')
+    : 'No tickets answered yet.';
+  const done = document.getElementById('copied');
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done.textContent = 'Copied ✓'; } catch { done.textContent = 'Copy failed — select manually'; }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => { done.textContent = 'Copied ✓'; }, fallback);
+  } else fallback();
+  setTimeout(() => { done.textContent = ''; }, 4000);
+}
+document.addEventListener('change', e => { if (e.target.matches('.ticket input, .ticket textarea')) persist(); });
+restoreAnswers();
+document.title = '⟳ ' + document.title;
+</script>
+</main>
+</body>
+</html>

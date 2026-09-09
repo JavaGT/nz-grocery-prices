@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="300">
+<title>Perf Trial 2026-09-09T085133 — nz-grocery-prices</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "Helvetica Neue", sans-serif; background:#11151c; color:#dbe2ea; margin:0; padding:2rem; line-height:1.5; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 .2rem; } h2 { font-size:1.15rem; margin-top:2.2rem; border-bottom:1px solid #2c3644; padding-bottom:.3rem;} h3 { font-size:1rem; margin-top:1.4rem;}
+  .sub { color:#8a97a8; margin-bottom:1.5rem; }
+  .banner { background:#1d2a1f; border:1px solid #2f5e38; padding:.6rem 1rem; border-radius:8px; margin:1rem 0; }
+  table { border-collapse: collapse; width:100%; margin:.8rem 0; font-size:.92rem; }
+  th, td { text-align:left; padding:.45rem .7rem; border-bottom:1px solid #232c38; vertical-align:top; }
+  th { color:#9fb0c3; font-weight:600; background:#161c26; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size:.85em; background:#1a212c; padding:.1rem .35rem; border-radius:4px; color:#a8c7fa; }
+  .card { background:#151b25; border:1px solid #232c38; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  .delta-up { color:#5fd07a; font-weight:600; } .delta-down { color:#e5735f; font-weight:600; } .neutral { color:#8a97a8; }
+  .tag { display:inline-block; background:#223047; color:#9cc3f5; border-radius:5px; padding:.05rem .5rem; font-size:.78rem; margin-right:.4rem; }
+  .pending { color:#c9a55f; font-style:italic; }
+  footer { margin-top:3rem; color:#66717f; font-size:.85rem; }
+  .ticket { border-left:3px solid #c9a55f; }
+  .ticket label { margin-right:1rem; cursor:pointer; }
+  .ticket textarea { width:100%; background:#10151d; color:#dbe2ea; border:1px solid #2c3644; border-radius:6px; min-height:2.2rem; margin-top:.4rem; font:inherit; font-size:.88rem; }
+  button.copy { background:#223047; color:#cfe2ff; border:1px solid #35507a; border-radius:8px; padding:.5rem 1rem; font:inherit; cursor:pointer; }
+  button.copy:hover { background:#2b3d5c; }
+</style>
+</head>
+<body>
+<main>
+<h1>Performance Trial — perf-trial-2026-09-09T085133</h1>
+<div class="sub">nz-grocery-prices · baseline commit <code>fcfed0e</code> · Node v26.7.0 · trial started 2026-09-09 08:51 NZ time · this page auto-refreshes every 5 minutes</div>
+
+<div class="banner"><strong>Status: complete — all three lanes landed, verified, and merged to <code>main</code> (HEAD <code>deb5e9f</code>, fast-forward from <code>fcfed0e</code>).</strong> 1,023/1,023 tests green on main after merge; trial worktrees removed; lane reports preserved in <code>perf-notes/</code>. Two owner decisions are ticketed as <a href="https://github.com/JavaGT/nz-grocery-prices/issues/43">PERF3-T1 (#43)</a> and <a href="https://github.com/JavaGT/nz-grocery-prices/issues/44">PERF3-T2 (#44)</a> — answer here or on the issues.</div>
+
+<h2>Combined results (baseline <code>fcfed0e</code> → trial tree, same commands &amp; real archive)</h2>
+<table>
+<tr><th>Metric</th><th>Before</th><th>After</th><th>Delta</th><th>Lane</th></tr>
+<tr><td>Archive load (12 MB)</td><td>284–304 ms</td><td>180 ms</td><td class="delta-up">−36%</td><td>lib</td></tr>
+<tr><td>RSS after archive load</td><td>219–223 MB</td><td>167 MB</td><td class="delta-up">−24%</td><td>lib</td></tr>
+<tr><td>query({}) full materialization</td><td>104 ms</td><td>58 ms</td><td class="delta-up">−44%</td><td>lib</td></tr>
+<tr><td>Suggestions p50</td><td>1.01 ms</td><td>0.25 ms</td><td class="delta-up">−75%</td><td>ui</td></tr>
+<tr><td>Suggestions 8×5 burst</td><td>3.73 ms · 1,283 rps</td><td>0.51 ms · 9,556 rps</td><td class="delta-up">7.4×</td><td>ui</td></tr>
+<tr><td>Products wire payload</td><td>6,674 B identity</td><td>1,112 B brotli</td><td class="delta-up">−83%</td><td>ui (measured; compression pre-existed)</td></tr>
+<tr><td>style.css first hit (dist)</td><td>12.5 ms</td><td>0.64 ms</td><td class="delta-up">−95%</td><td>ui</td></tr>
+<tr><td>Matching <code>--fuzzy</code> (12 MB / merged 87.6 MB)</td><td>0.16 s / 0.30 s</td><td>0.07 s / 0.14 s</td><td class="delta-up">−56% / −53%</td><td>matching</td></tr>
+<tr><td>Projection rebuild</td><td>0.31 s, 16,760,832 B</td><td>0.28 s, byte-identical</td><td class="neutral">already optimal (evidence in lib card)</td><td>lib</td></tr>
+<tr><td>Server cold boot</td><td>71.3 ms</td><td>72.4 ms</td><td class="neutral">unchanged</td><td>—</td></tr>
+<tr><td><code>npm test</code></td><td>3.6 s · 1,014 tests</td><td>3.5 s · 1,023 tests</td><td class="neutral">9 new tests, same wall time</td><td>all</td></tr>
+</table>
+<p>Every change is behavior-preserving: byte-identical parity dumps vs baseline for query/stats/history/analytics (lib) and match pairs incl. evidence hashes (matching); response shapes test-pinned (ui). Fuzzy matches remain <code>candidate</code>-only everywhere. Hard rules held: two-DB separation, no FTS5, deal-materialization analytics parity, no live network commands, no writes near real <code>data/</code>.</p>
+
+<h2>Worktrees &amp; commits</h2>
+<table>
+<tr><th>Lane</th><th>Worktree / branch</th><th>Commits</th></tr>
+<tr><td>Coordinator</td><td><code>perf-trial-2026-09-09T085133</code></td><td>merges + <code>ef83f42</code> docs (bench/sidecars) + <code>98157b0</code> docs (test count)</td></tr>
+<tr><td>lib</td><td><code>…085133-lib</code></td><td><code>08fc98a</code> clones/streaming, <code>ad636e0</code> report</td></tr>
+<tr><td>ui</td><td><code>…085133-ui</code></td><td><code>06f0692</code> suggestions/_meta/bench-bytes, <code>bfab763</code> static sidecars</td></tr>
+<tr><td>matching</td><td><code>…085133-matching</code></td><td><code>bff4180</code> transaction + statement cache + lazy prep, <code>0cb1710</code> report</td></tr>
+</table>
+<p>Detailed lane evidence: <code>perf-notes/REPORT.md</code> (lib) and <code>perf-notes/REPORT-matching.md</code> (matching + ui notes) — committed on the trial branches for review.</p>
+
+<h2>Improvements — what changed and why</h2>
+
+<div class="card">
+<span class="tag">lib</span><strong>1. Archive load &amp; query: cut clone churn + stream the loader</strong> (<code>08fc98a</code>)
+<p>CPU profiling showed ~105 ms of a 319 ms load inside <code>structuredClone</code> plus 32 ms of GC feeding it. Fixes: filter raw records <em>before</em> any cloning in <code>ArchiveIndex.query()</code> and materialize each surviving row exactly once; a loader fast path (<code>applyParsed</code>) skipping per-record deep clones for records fresh from <code>JSON.parse</code>; the repository streams decode+apply per line instead of buffering every line; <code>eventTime</code> memoized via <code>WeakMap</code> (records are immutable — existing invariant).</p>
+<p><strong>Trade-offs:</strong> <code>applyParsed</code> is only safe for exclusively-owned records (loudly documented; public <code>apply()</code>/<code>applyAdditions()</code> keep copy-on-apply, mutation-isolation test green). Streaming reader duplicates ~15 lines of chunk-split logic because repair/migrate CLIs still call the accumulating statics.</p>
+<p><strong>Deliberately rejected, with evidence:</strong> projection schema surgery — page-size sweep shows 8192 already optimal (16.76 vs 16.96–17.47 MB), every index costs 0.5–0.93 MB and is EXPLAIN-justified; string interning (~1–2 MB) and a validation-skip (~2–4 ms) rejected as complexity-dominant.</p>
+</div>
+
+<div class="card">
+<span class="tag">ui</span><strong>2. HTTP interface: in-memory suggestion index, one <code>_meta</code> read per request, precompressed static sidecars, browser-true benchmarks</strong> (<code>06f0692</code>, <code>bfab763</code>)
+<p>Suggestions was a full-table <code>LIKE</code> scan + DISTINCT + sort per keystroke; distinct product names (~8.8k strings, a few hundred KB) now cache in memory, invalidated by the same mtime probe the deals cache uses — wildcard queries keep the SQL path bit-for-bit (no FTS5). <code>build:assets</code> emits <code>.br</code>/<code>.gz</code> sidecars the dist server ships directly (dev <code>public/</code> unchanged, lazy fallback kept). The bench now sends browser-like Accept-Encoding and reports wire/raw bytes + first-sample — it previously measured uncompressed wire only. Health p95 outlier investigated: client/undici first-sample artifact; server logs 0–1 ms, nothing to fix.</p>
+<p><strong>Trade-offs:</strong> brotli costs ~+0.27 ms p50 per JSON response for −83% bytes (right call off-loopback; &lt;1 KB bodies deliberately stay identity). First suggestions request after boot/rebuild pays a one-time ~12 ms index build; startup pre-warm rejected to keep boot side-effect-free. SPA dynamic-import split rejected: ≤5 KB gain, breaks the modulepreload contract. zstd rejected: ~1–3% more for a third variant.</p>
+</div>
+
+<div class="card">
+<span class="tag">matching</span><strong>3. Cross-retailer matching: batched writes, cached statements, lazy fuzzy prep</strong> (<code>bff4180</code>)
+<p>Profile: 33% of runtime was per-pair <code>prepare()</code> recompiles + per-pair autocommit WAL commits (~1,500 writes), plus eager tokenize of all 42.7k products though the 1,000-candidate fuzzy cap stops far earlier. Fixes: one transaction around the persist batch (per-pair error accounting preserved — SQLite statement-level abort; feature-detect fallback for injectable doubles), the three hot pair statements cached, lazy per-group preparation so only brand groups the cap will actually reach get prepped, single-pass <code>tokenizeName</code> (identical output), unused column dropped from the CLI SELECT. Pair-table dumps byte-identical vs baseline at both scales (pair set, order, confidences, every evidence hash). Fuzzy stays <code>candidate</code>, never confirmed.</p>
+<p><strong>Trade-offs:</strong> batch commit means a mid-run crash loses the whole batch rather than partial pairs — acceptable for a re-runnable CLI (rerun/skip semantics unchanged and proven). Micro-opts in <code>fuzz.js</code> (~1.5 ms) rejected on profile evidence. Matching was already sub-second; this is an honest profile-justified half, not a hotspot hunt gone deep.</p>
+</div>
+
+<h2>Open tickets — owner decisions requested</h2>
+<p>Mark Adopt / Adapt / Reject and comment; the copy button pastes only what you answered, plus your instruction for the unmarked rest. Nothing is pre-selected.</p>
+
+<div class="card ticket">
+<strong>T1 · <a href="https://github.com/JavaGT/nz-grocery-prices/issues/43">PERF3-T1 (issue #43)</a> · Correctness question (pre-existing, unchanged by this trial): fuzzy pass updates previously auto-confirmed pairs.</strong>
+<p>During matching-lane profiling, 6 <code>auto_gtin</code>/<code>auto_source_id</code>-confirmed pairs were re-persisted by the fuzzy pass as updated rows. The hard rule says fuzzy candidates are <em>never</em> confirmed; whether a fuzzy candidate may <em>overwrite</em> a confirmed pair's row is undefined behavior today. The trial preserved existing behavior byte-for-byte rather than change semantics.</p>
+<p><strong>Decision question:</strong> should <code>updateMatchPair</code> refuse to move a confirmed pair back to <code>candidate</code> (Adopt), or is fuzzy-supersede intended and should just be documented (Reject / Adapt-as-doc)?</p>
+<p><label><input type="radio" name="t1" value="Adopt"> Adopt</label><label><input type="radio" name="t1" value="Adapt"> Adapt</label><label><input type="radio" name="t1" value="Reject"> Reject</label></p>
+<textarea data-ticket="t1" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card ticket">
+<strong>T2 · <a href="https://github.com/JavaGT/nz-grocery-prices/issues/44">PERF3-T2 (issue #44)</a> · Worth exploring: candidate + same-evidence-hash rerun skip.</strong>
+<p>Reruns could skip re-persisting candidate pairs whose evidence hash is unchanged. At the new 0.07 s runtime this buys almost nothing today; it would matter only if matching grows or is run in a hot loop.</p>
+<p><strong>Decision question (evaluation, not implementation):</strong> is rerun-skip worth the added state comparison, or close as premature?</p>
+<p><label><input type="radio" name="t2" value="Adopt"> Adopt</label><label><input type="radio" name="t2" value="Adapt"> Adapt</label><label><input type="radio" name="t2" value="Reject"> Reject</label></p>
+<textarea data-ticket="t2" placeholder="comment (optional)"></textarea>
+</div>
+
+<div class="card"><strong>Resolved during the trial:</strong> stale agent-doc test counts ("~600"/"~880") corrected to ~1,020 (~3.5 s) in <code>docs/agent/verification.md</code> + <code>command-map.md</code> (<code>98157b0</code>); bench flags/byte columns and build:assets sidecar behavior documented (<code>ef83f42</code>).</div>
+
+<button class="copy" onclick="copyAnswers()">Copy my answers (answered tickets only)</button>
+<span id="copied" class="neutral" style="margin-left:.8rem"></span>
+
+<h2>Baseline context</h2>
+<p>Original baseline (kept for reference): request path already fast after the 2026-09-06 campaign — every endpoint p50 ≤ 1 ms, deals burst ~6,260 rps via <code>deal_signals</code> materialization + TTL cache. The 2026-09-09 trial's levers were memory amplification (223 MB RSS for a 12 MB archive; 1.16 GB extrapolated at the merged 83.5 MB archive scale the nightly breadth collectors are heading toward), suggestion latency under concurrency, and unmeasured wire bytes. Deals figures in all benches reflect this archive's sparse deal set (<code>dealsFound: 0</code> at 12 MB; 62 at merged scale).</p>
+
+<footer id="foot">Last updated: 2026-09-09 09:55 · merged to main @ deb5e9f · trial branches kept: perf-trial-2026-09-09T085133{,-lib,-ui,-matching} · report file: perf-reports/perf-trial-2026-09-09T085133.html (untracked)</footer>
+<script>
+function copyAnswers() {
+  const parts = [];
+  document.querySelectorAll('.ticket').forEach(card => {
+    const title = card.querySelector('strong').textContent.replace(/^\w+\s*·\s*[^:]+:\s*/, '').split('.')[0].trim();
+    const name = card.querySelector('input[type=radio]').name;
+    const chosen = document.querySelector('input[name="' + name + '"]:checked');
+    const comment = card.querySelector('textarea').value.trim();
+    if (!chosen && !comment) return;
+    let line = name.toUpperCase() + ' "' + title + '": ' + (chosen ? chosen.value : '(no verdict)');
+    if (comment) line += ' — ' + comment;
+    parts.push(line);
+  });
+  const unanswered = 2 - parts.length;
+  const text = parts.length
+    ? 'Perf trial 2026-09-09 answers:\n' + parts.join('\n') +
+      (unanswered > 0 ? '\n\nThe other ' + unanswered + ' ticket(s) I left unmarked — treat as undecided and ask again later.' : '')
+    : 'No tickets answered yet.';
+  const done = document.getElementById('copied');
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done.textContent = 'Copied ✓'; } catch { done.textContent = 'Copy failed — select manually'; }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => { done.textContent = 'Copied ✓'; }, fallback);
+  } else fallback();
+  setTimeout(() => { done.textContent = ''; }, 4000);
+}
+document.title = '⟳ ' + document.title;
+</script>
+</main>
+</body>
+</html>

@@ -154,6 +154,21 @@ describe('public API server', () => {
       }
     });
 
+    it('lowercase query with a wildcard stays case-insensitive under ESCAPE', async () => {
+      // Pins NOCASE + ESCAPE composing: a lowercase query containing a
+      // literal % must still fold case on the SQL path.
+      const srv = await createTestServer({
+        records: [productRec('paknsave:coke', { data: { name: 'Coke 100% Recycled 1.5L' } })],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products?query=${encodeURIComponent('coke 100%')}`);
+        assert.equal(status, 200);
+        assert.equal(body.total, 1);
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('no matches returns empty array', async () => {
       const srv = await createTestServer({
         records: [productRec('paknsave:milk', { data: { name: 'Milk' } })],
@@ -570,6 +585,22 @@ describe('public API server', () => {
         const { status, body } = await fetchJson(`${srv.baseUrl}/api/search/suggestions?query=${encodeURIComponent('100%')}`);
         assert.equal(status, 200);
         assert.deepEqual(body.suggestions, ['Milk 100% Fresh 1L']);
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it('suggestions match _ literally via the SQL path', async () => {
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:bread', { data: { name: 'Bread_500g' } }),
+          productRec('paknsave:bread-2', { data: { name: 'Bready 500g' } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/search/suggestions?query=${encodeURIComponent('bread_')}`);
+        assert.equal(status, 200);
+        assert.deepEqual(body.suggestions, ['Bread_500g']);
       } finally {
         await srv.close();
       }

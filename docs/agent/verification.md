@@ -74,7 +74,11 @@ No ESLint or TypeScript compiler exists. `npm run check` is the type gate.
   refusal is the expected behavior to assert, not a bug.
 - **Node version.** SQLite/app/server tests fail on Node 20 with an
   `ERR_MODULE_NOT_FOUND` for `node:sqlite`. Use Node 26.3.1+.
-- **Dead tables.** The projection schema has `deal_signals` and `product_matches`
-  tables that are **not populated**. Deals are computed at runtime by
-  `src/analytics.js`; match truth is `app.db.product_match_pairs`. Don't write
-  tests that assert against the dead tables.
+- **Dead tables vs materialized tables.** `deal_signals` is NOT dead: the
+  rebuild populates it via `src/sqlite/deal-materialization.js` (owner-approved
+  2026-09-06, see DECISIONLOG), `/api/deals` serves those rows, and its parity
+  with `src/analytics.js` is pinned by `test/sqlite/deal-materialization.test.js`
+  — assert against it freely on rebuild/deals tests. `product_matches`, by
+  contrast, is removed from the projection schema entirely (dead artifact);
+  match truth is `app.db.product_match_pairs`. Don't write tests that assert
+  against `product_matches`.

@@ -20,7 +20,7 @@ are refused by all hot paths and handled only by
 | **adapters** | retailer API → `PriceObservation` | `src/adapters/` | pure transforms + injectable `fetch`. Warehouse uses `curl` via `execFile` (anti-bot), never shell strings. |
 | **archive / repository** | JSONL persistence (authoritative) | `src/archive.js`, `src/repository.js` | the source of truth. Collectors append; everything else reads. v2 records only — a v1 line throws with the migrator command. |
 | **v1 migration** | one-shot legacy conversion | `scripts/migrate-v1-archive.js` | the ONLY v1 handler. Idempotent, backup-first, refuses `.db` paths and the live archive without `--force`. |
-| **analytics** | runtime deal computation | `src/analytics.js` | `/api/deals` calls this per-request. Not pre-materialized. |
+| **analytics** | deal computation rules | `src/analytics.js` | single source of deal logic. The rebuild materializes its output into the projection's `deal_signals` table (`src/sqlite/deal-materialization.js`); `/api/deals` serves those rows — no runtime analytics on the request path. |
 | **SQLite projection** | rebuildable read-only price DB | `src/sqlite/projection-repository.js`, `schema.js`, `migrations/projection/` | **must never open `app.db`** (rebuild refuses app.db outputs). No user data. Destroy + rebuild freely. Fail-fast `<db>.lock`; refuses v1 archives. |
 | **SQLite app DB** | persistent user data | `src/sqlite/app-db.js`, `migrations/app/` | users, sessions, watch list, preferred stores, saved searches, `product_match_pairs`. **Never rebuilt.** Back up. |
 | **matching** | cross-retailer product matching | `src/matching/` | reads projection products → writes `product_match_pairs` into **app.db**. Fuzzy = candidates only, never confirmed. |

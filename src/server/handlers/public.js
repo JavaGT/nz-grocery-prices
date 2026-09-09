@@ -142,7 +142,7 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     return {
       status: f.exists ? 'ok' : 'degraded',
       startedAt: new Date(startedAt).toISOString(),
-      uptime: ctx.clock() - startedAt,
+      uptime: clock() - startedAt,
       projection: {
         exists: f.exists,
         fingerprint: f.fingerprint,
@@ -552,7 +552,10 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
       throw new StatusError(400, 'INVALID_FILTER', 'Filter must be history-backed, advertised, or all');
     }
 
-    const now = ctx.clock();
+    // Time comes from the factory-injected clock (same one all wiring passes
+    // to the Server), not ctx: keeps the bare-ctx fallback below real and
+    // gives the handlers one time source (#48).
+    const now = clock();
     const universe = await dealUniverse(retailer, now);
     let historyBacked = universe.historyBacked;
     let advertised = universe.advertised;

@@ -19,6 +19,17 @@ function clamp(v, min, max, def) {
   return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : def;
 }
 
+// User queries match % and _ literally: likeEscape() backslash-escapes the
+// LIKE wildcards and the escape character itself, and every LIKE that uses an
+// escaped pattern carries ESCAPE '\' so SQLite honors it. Without the ESCAPE
+// clause the backslash is just a literal character and the escaping is a
+// no-op (searches like "50% off" would match nothing).
+function likeEscape(s) {
+  return s.replace(/[%_\\]/g, '\\$&');
+}
+
+const LIKE_ESC = "ESCAPE '\\'";
+
 const TIER_WATCH_PREFERRED = 'watch-preferred';
 const TIER_WATCH_OTHER = 'watch-other';
 const TIER_ALL = 'all';
@@ -156,8 +167,8 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     const where = [];
 
     if (q) {
-      where.push('name LIKE ? COLLATE NOCASE');
-      params.push(`%${q.replace(/[%_]/g, '\\$&')}%`);
+      where.push(`name LIKE ? ${LIKE_ESC} COLLATE NOCASE`);
+      params.push(`%${likeEscape(q)}%`);
     }
 
     if (retailer) {
@@ -167,10 +178,10 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
 
     const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
     const orderClause = q
-      ? `ORDER BY CASE WHEN name = ? THEN 0 WHEN name LIKE ? THEN 1 ELSE 2 END, updated_at DESC`
+      ? `ORDER BY CASE WHEN name = ? THEN 0 WHEN name LIKE ? ${LIKE_ESC} THEN 1 ELSE 2 END, updated_at DESC`
       : 'ORDER BY updated_at DESC';
 
-    const orderParams = q ? [q, `%${q}%`] : [];
+    const orderParams = q ? [q, `%${likeEscape(q)}%`] : [];
     // Explicit columns, not SELECT *: formatProduct never reads latest_hash,
     // and at archive scale dragging it across every listing row is pure waste.
     const columns = `
@@ -399,8 +410,9 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
     // against the in-memory index with the exact semantics of the SQL below:
     // `LIKE '%q%' COLLATE NOCASE` on a wildcard-free q is an ASCII-folded
     // substring test, and row order/limit carry over from the sorted index.
-    // Queries containing LIKE wildcards (% _ \) keep the SQL path so their
-    // wildcard semantics are preserved bit-for-bit.
+    // Queries containing LIKE wildcards (% _ \) keep the SQL path so they are
+    // matched literally via ESCAPE — the same semantics the products filter
+    // applies through likeEscape().
     if (!/[%_\\]/.test(q)) {
       const idx = suggestionIndexFor();
       const needle = q.replace(/[A-Z]/g, c => c.toLowerCase());
@@ -416,10 +428,10 @@ export function createPublicHandlers({ getDb, appDb, auth, clock, startedAt, que
 
     const rows = db().prepare(`
       SELECT DISTINCT name FROM products
-      WHERE name LIKE ? COLLATE NOCASE
+      WHERE name LIKE ? ${LIKE_ESC} COLLATE NOCASE
       ORDER BY name
       LIMIT 10
-    `).all(`%${q.replace(/[%_]/g, '\\$&')}%`);
+    `).all(`%${likeEscape(q)}%`);
 
     return { suggestions: rows.map(r => r.name) };
   }

@@ -81,6 +81,43 @@ describe('public API server', () => {
       }
     });
 
+    it('query with % matches it literally, not as a LIKE wildcard', async () => {
+      // % and _ in user queries are escaped and the LIKE carries ESCAPE '\':
+      // "100%" must match only names containing the literal characters
+      // "100%", not every name containing "100" + anything.
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:coke', { data: { name: 'Coke 100% Recycled 1.5L' } }),
+          productRec('paknsave:coke-2', { data: { name: 'Coke 100A Recycled 1.5L' } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products?query=${encodeURIComponent('100%')}`);
+        assert.equal(status, 200);
+        assert.equal(body.total, 1);
+        assert.equal(body.products[0].name, 'Coke 100% Recycled 1.5L');
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it('query with _ matches it literally, not as a single-char wildcard', async () => {
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:bread', { data: { name: 'Bread_500g' } }),
+          productRec('paknsave:bread-2', { data: { name: 'Bready 500g' } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/products?query=${encodeURIComponent('bread_')}`);
+        assert.equal(status, 200);
+        assert.equal(body.total, 1);
+        assert.equal(body.products[0].name, 'Bread_500g');
+      } finally {
+        await srv.close();
+      }
+    });
+
     it('no matches returns empty array', async () => {
       const srv = await createTestServer({
         records: [productRec('paknsave:milk', { data: { name: 'Milk' } })],
@@ -479,6 +516,24 @@ describe('public API server', () => {
         assert.equal(status, 200);
         assert.ok(body.suggestions.length >= 2);
         assert.ok(body.suggestions.every(s => s.toLowerCase().includes('mi')));
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it('suggestions match % literally via the SQL path', async () => {
+      // A query containing % routes to the SQL path, where the wildcard is
+      // escaped and the LIKE carries ESCAPE '\'.
+      const srv = await createTestServer({
+        records: [
+          productRec('paknsave:milk', { data: { name: 'Milk 100% Fresh 1L' } }),
+          productRec('paknsave:milk-2l', { data: { name: 'Milk 100A Fresh 1L' } }),
+        ],
+      });
+      try {
+        const { status, body } = await fetchJson(`${srv.baseUrl}/api/search/suggestions?query=${encodeURIComponent('100%')}`);
+        assert.equal(status, 200);
+        assert.deepEqual(body.suggestions, ['Milk 100% Fresh 1L']);
       } finally {
         await srv.close();
       }
